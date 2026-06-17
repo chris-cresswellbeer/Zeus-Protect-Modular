@@ -48,9 +48,28 @@ Nothing else was altered. In particular:
   component references like `ReportsTab` rendering `<AdminDSETab>` and
   `DocCard` rendering `<DocAssignPanel>`). These were found by parsing every
   file's AST and cross-referencing every free identifier against every
-  export in the project — a more thorough check than manually reading each
-  component's body, which is how the earlier two passes missed them. All 49
-  are now fixed and the same AST-based scan comes back completely clean.
+  export in the project.
+- **A third round found 4 more missing hook imports** (`ReportsTab`,
+  `IncidentTracker`, and `StaffActionsTab` each had a mix of `React.useState`
+  calls — which only need `import React` — and *also* bare `useState(...)`
+  calls, which need the hook explicitly destructured. The second-round
+  scanner only checked whether a file used the destructured form at all,
+  not whether *every* bare-hook reference in a file with a mixed style was
+  actually covered, so it wrongly treated "has React import" as sufficient
+  even in files that also had bare calls. The scanner itself has been fixed
+  to check both calling conventions independently, and a fresh full pass
+  confirms zero remaining import-related undefined-reference bugs anywhere
+  in the project.
+- **One pre-existing bug was found and intentionally left unfixed**: in
+  `ReportsTab.jsx`, three "jump to" quick-navigation buttons call a function
+  named `setAtab(...)` that is never declared, imported, or passed as a
+  prop — confirmed present in the original 17,890-line source file too, so
+  this isn't an extraction artifact. Clicking those specific buttons would
+  have thrown the same error in the original monolithic file; it just never
+  got triggered. Fixing it requires knowing what `setAtab` was supposed to
+  do (it looks like it should switch the admin's active tab, but `App.jsx`
+  never passes a matching prop to `<ReportsTab>`), so rather than guess,
+  this is flagged here for you to decide on.
 - **Vite is pinned to an exact version (`5.4.11`, not a `^5.4.0` range)**,
   and `package-lock.json` is included. This was needed because StackBlitz's
   environment was resolving an experimental `rolldown`-based Vite variant

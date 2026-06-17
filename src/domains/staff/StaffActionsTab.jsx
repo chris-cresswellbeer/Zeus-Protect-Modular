@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useRef } from "react";
 import { getExpiryStatus } from "../../lib/dates";
 import { ACCEPT_IMG_DOCS } from "../../lib/constants";
 

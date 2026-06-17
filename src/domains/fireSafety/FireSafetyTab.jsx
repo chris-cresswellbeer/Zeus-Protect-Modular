@@ -1,3 +1,5 @@
+import { useState, useRef } from "react";
+
 function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDeleteFraDoc, Z, font }) {
   const {
     wardens=[], drills=[], alarmTests=[], extinguishers=[], emergLighting=[], fraReviews=[]

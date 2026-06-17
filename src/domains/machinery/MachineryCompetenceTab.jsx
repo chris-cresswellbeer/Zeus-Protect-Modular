@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { machineExpiryStatus, MACHINERY_TYPES, MACHINE_CATEGORIES, COMP_STATUS, isWarehouseWorker } from "../../data/seedMachinery";
 
 function MachineryCompetenceTab({ user, machineComps, setMachineComps, Z, font }) {

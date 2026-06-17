@@ -1,3 +1,4 @@
+import React from "react";
 import { useWindowWidth } from "../../shared/hooks";
 import { PERMIT_TYPES } from "../../data/seedPermits";
 import { PermitForm } from "./PermitForm";

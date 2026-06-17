@@ -1,3 +1,5 @@
+import React from "react";
+
 function CompanyForm({ existing, onSave, onCancel, T, font }) {
   const [form, setForm] = React.useState(existing||{id:"con_"+Date.now(),name:"",type:"Contractor",status:"active",email:"",phone:"",notes:"",workers:[]});
   const inp = {width:"100%",background:T.overlay,border:`1px solid ${T.borderMd}`,borderRadius:9,padding:"9px 13px",color:T.white,fontSize:13,outline:"none",fontFamily:font,boxSizing:"border-box"};

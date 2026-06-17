@@ -1,3 +1,4 @@
+import React from "react";
 import { useWindowWidth } from "../../shared/hooks";
 import { PERMIT_TYPES, PPE_OPTIONS } from "../../data/seedPermits";
 

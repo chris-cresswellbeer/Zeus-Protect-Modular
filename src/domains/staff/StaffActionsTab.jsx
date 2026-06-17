@@ -1,3 +1,4 @@
+import React from "react";
 import { getExpiryStatus } from "../../lib/dates";
 
 function StaffActionsTab({ user, incidents, investigations, setInvestigations, assigns, comps, allModules, docs, docAssignments, docAcknowledgements, dseReports, adminResponses, setStab, setMod, Z, font }) {

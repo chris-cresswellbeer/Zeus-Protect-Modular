@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { FA_SHIFTS, FA_ZONES, FA_CERT_TYPES, FA_KIT_TYPES } from "../../data/seedFirstAid";
 
 function FirstAidRegisterTab({ staff, extCerts, firstAidData, setFirstAidData, Z, font }) {

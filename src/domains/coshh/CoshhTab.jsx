@@ -1,3 +1,4 @@
+import { useState, useEffect, useRef } from "react";
 import { useWindowWidth } from "../../shared/hooks";
 import { HelpTip } from "../../shared/HelpTip";
 import { coshhHazardLevel } from "./coshhHazardLevel";

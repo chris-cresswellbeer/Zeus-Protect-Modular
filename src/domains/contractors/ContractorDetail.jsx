@@ -1,3 +1,4 @@
+import React from "react";
 import { Avatar } from "../../shared/primitives";
 import { INDUCTION_ITEMS } from "../../data/seedContractors";
 import { WorkerDetailModal } from "./WorkerDetailModal";

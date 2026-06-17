@@ -1,3 +1,4 @@
+import React from "react";
 import { useWindowWidth } from "../../shared/hooks";
 import { FA_ZONES } from "../../data/seedFirstAid";
 

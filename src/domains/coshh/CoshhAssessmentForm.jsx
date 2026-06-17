@@ -1,3 +1,5 @@
+import React from "react";
+
 function CoshhAssessmentForm({ c, existing, onSave, onCancel, Z, font, isMobile }) {
   const BLANK = {
     preparedBy:"", reviewDate:"", location:"", frequency:"",

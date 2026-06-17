@@ -24,11 +24,35 @@ while we were already touching this code):
 
 Nothing else was altered. In particular:
 
-- **`E()` emoji helper** (`lib/emoji.js`) still calls `React.useContext` on
-  every render, exactly as it did in the source file. The fix mentioned in
-  earlier sessions (replacing it with a module-level `_emojiMode` variable)
-  was **not** present in this specific source file, so it was not
-  retroactively applied here. If you want that fix, it's a quick follow-up.
+- **`E()` emoji helper** (`lib/emoji.js`) originally called `React.useContext`
+  on every render — a genuine Rules-of-Hooks violation that surfaced as a
+  real runtime crash ("change in the order of Hooks") once tested in
+  StackBlitz, specifically after logging in as admin (the admin view changes
+  which conditional branches render, which changed how many times `E()` got
+  called across renders). **This has been fixed**: `E()` now reads a plain
+  module-level variable (`_emojiMode`) instead of calling a hook, and
+  `App.jsx` syncs that variable via a small `useEffect` whenever the real
+  `emojiMode` state changes. Functionally identical behaviour, just without
+  the hook violation.
+- **Nine extracted files were missing their React import** (`React.useState`
+  calls with no `import React`, or destructured `useState`/`useEffect`/`useRef`
+  calls with no corresponding import) — this surfaced as `ReferenceError:
+  React is not defined` on certain nav tabs (ExternalCertsSection and others).
+  **This has been fixed** across all affected files: `ExternalCertsSection`,
+  `CoshhAssessmentForm`, `CompanyForm`, `ContractorDetail`, `ContractorsTab`,
+  `WorkerDetailModal`, `StaffActionsTab`, `PermitsTab`, `PermitForm`,
+  `MachineryCompetenceTab`, `AdminMachineryTab`, `ManagerRow`, `FireSafetyTab`,
+  `IncidentChart`, `CoshhTab`, `FirstAidRegisterTab`, `SiteInspectionsTab`,
+  `EquipmentTrackerTab`. Every file in the project was scanned for this same
+  pattern (bare `React.*` calls or bare hook calls without an import) and
+  confirmed clean.
+- **Vite is pinned to an exact version (`5.4.11`, not a `^5.4.0` range)**,
+  and `package-lock.json` is included. This was needed because StackBlitz's
+  environment was resolving an experimental `rolldown`-based Vite variant
+  under an open version range, which crashed with low-level WASM/threading
+  errors (`RangeError: Invalid atomic access index`) unrelated to any of the
+  app's actual code. Pinning the exact version forces the stable,
+  Rollup-based bundler instead.
 - **Supabase credentials**: the uploaded source file had placeholder values
   (`YOUR_PROJECT_ID`, `YOUR_ANON_PUBLIC_KEY`). The project URL has been
   restored to `aoahugfyswgcisfiosyn.supabase.co` from prior context, but the
@@ -109,5 +133,3 @@ Before running against your real Supabase project, paste your anon key into
 2. Push this structure to GitHub as a new branch, not directly to `main`.
 3. Do a manual pass through each H&S module in the running app to confirm
    behaviour matches the original single-file version before merging.
-4. Consider whether to apply the `E()` emoji helper fix now that everything's
-   modular and the change is isolated to one small file.

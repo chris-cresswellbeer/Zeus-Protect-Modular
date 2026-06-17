@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useWindowWidth } from "../../shared/hooks";
 import { HelpTip } from "../../shared/HelpTip";
 import { INSP_TYPES, INSP_SECTIONS } from "../../data/seedInspections";

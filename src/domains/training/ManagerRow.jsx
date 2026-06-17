@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { TRAINING_MODULES } from "../../data/seedTraining";
 
 function ManagerRow({ mgr, assigns, comps, Z, font, modules }) {

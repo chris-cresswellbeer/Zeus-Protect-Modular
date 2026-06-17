@@ -1,5 +1,5 @@
 const SUPABASE_URL  = "https://aoahugfyswgcisfiosyn.supabase.co";
-const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFvYWh1Z2Z5c3dnY2lzZmlvc3luIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk5NjY1NzMsImV4cCI6MjA5NTU0MjU3M30.9mlm3pVxqwTgCdrdVF2ek1mBHro28P-MTaVjdAUvCIs"; // TODO: paste your Supabase anon/public key here
+const SUPABASE_ANON = "YOUR_ANON_PUBLIC_KEY"; // TODO: paste your Supabase anon/public key here
 
 const sb = (() => {
   const h = { "Content-Type": "application/json", "apikey": SUPABASE_ANON, "Authorization": `Bearer ${SUPABASE_ANON}` };

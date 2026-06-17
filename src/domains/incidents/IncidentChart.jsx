@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 function IncidentChart({ incidents, Z, font }) {
   const currentYear = new Date().getFullYear();
   const availableYears = [currentYear, currentYear - 1, currentYear - 2];

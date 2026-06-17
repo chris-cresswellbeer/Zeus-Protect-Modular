@@ -1,3 +1,4 @@
+import React from "react";
 import { useWindowWidth } from "../../shared/hooks";
 import { Avatar } from "../../shared/primitives";
 import { ContractorDetail } from "./ContractorDetail";

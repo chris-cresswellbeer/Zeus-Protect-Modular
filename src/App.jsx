@@ -40,7 +40,7 @@ import { ModulePreviewModal } from "./domains/training/ModulePreviewModal";
 import { ReportsTab } from "./domains/training/ReportsTab";
 import { generateStaffPDF } from "./domains/training/generateStaffPDF";
 import { getExpiryStatus } from "./lib/dates";
-import { EmojiCtx, E } from "./lib/emoji";
+import { EmojiCtx, E, syncEmojiMode } from "./lib/emoji";
 import { sb, hashPassword, DEFAULT_HASH } from "./lib/supabase";
 import { HelpTip } from "./shared/HelpTip";
 import { ZeusLogo, ZeusProtectLogo, ZEUS_LOGO_LIGHT_SRC } from "./shared/Logo";
@@ -105,6 +105,13 @@ export default function App() {
   const [msdsFiles, setMsdsFiles] = useState({}); // { [chemCode]: { fileName, fileData, fileUrl, uploadedAt } }
   const [customChemicals, setCustomChemicals] = useState([]);
   const [emojiMode, setEmojiMode] = useState(true); // true = show emojis, false = professional mode // admin-added COSHH chemicals
+  // Keep the module-level emoji flag (read by E()) in sync with state.
+  // This replaces the old useContext-inside-E() approach, which violated
+  // the Rules of Hooks whenever E() was called a different number of
+  // times across renders (e.g. switching between staff/admin views).
+  useEffect(() => {
+    syncEmojiMode(emojiMode);
+  }, [emojiMode]);
   const [fireSafety, setFireSafety] = useState({ wardens:INIT_FIRE_WARDENS, drills:INIT_FIRE_DRILLS, alarmTests:INIT_ALARM_TESTS, extinguishers:INIT_EXTINGUISHERS, emergLighting:INIT_EMERG_LIGHTING, fraReviews:INIT_FRA_REVIEWS });
   const [firstAidData, setFirstAidData] = useState({ aiders:[], kits:[], assessment:{} });
   // allModules: custom overrides replace built-in modules with same id

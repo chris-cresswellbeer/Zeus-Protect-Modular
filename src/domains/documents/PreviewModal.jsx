@@ -1,3 +1,5 @@
+import { TextPreview } from "./TextPreview";
+
 function PreviewModal({ doc, onClose, Z, font }) {
   if (!doc) return null;
   const ext = (doc.ext || "").toUpperCase();

@@ -1,5 +1,8 @@
 import React from "react";
+import { useState, useEffect } from "react";
 import { useWindowWidth } from "../../shared/hooks";
+import { E } from "../../lib/emoji";
+import { ACCEPT_IMAGES } from "../../lib/constants";
 import { InvestigationDashboard } from "./InvestigationDashboard";
 
 function InvestigationTab({ incidents, setIncidents, staff, investigations, setInvestigations, focusedId, setFocusedId, onBack, Z, font }) {

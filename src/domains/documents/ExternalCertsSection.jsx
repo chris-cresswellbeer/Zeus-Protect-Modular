@@ -1,6 +1,9 @@
 import React from "react";
 import { useWindowWidth } from "../../shared/hooks";
-import { FA_ZONES } from "../../data/seedFirstAid";
+import { sb } from "../../lib/supabase";
+import { ACCEPT_IMG_DOCS } from "../../lib/constants";
+import { EXT_CERT_TYPES } from "../../data/seedExtCerts";
+import { FA_SHIFTS, FA_ZONES } from "../../data/seedFirstAid";
 
 function ExternalCertsSection({ staff, extCerts, setExtCerts, dbSaveExtCert, dbDeleteExtCert, customZones=[], T, font }) {
   const allZones = [...FA_ZONES, ...customZones];

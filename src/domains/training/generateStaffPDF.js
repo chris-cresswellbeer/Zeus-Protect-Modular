@@ -1,3 +1,7 @@
+import { getExpiryStatus } from "../../lib/dates";
+import { EXT_CERT_TYPES } from "../../data/seedExtCerts";
+import { MACHINERY_TYPES } from "../../data/seedMachinery";
+
 function generateStaffPDF(u, allModules, assigns, comps, docs, docAssignments, docAcknowledgements, extCerts, machineComps, lastLoginMap, Z) {
   const today = new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"long",year:"numeric"});
   const assignedIds = assigns[u.id]||[];

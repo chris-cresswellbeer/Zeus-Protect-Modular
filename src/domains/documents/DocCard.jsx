@@ -1,4 +1,8 @@
 import React from "react";
+import { Pill } from "../../shared/primitives";
+import { sb } from "../../lib/supabase";
+import { ACCEPT_IMG_DOCS } from "../../lib/constants";
+import { DocAssignPanel } from "./DocAssignPanel";
 
 function DocCard({ d, staff, assignedIds, assignedStaff, readCount, unreadCount, icon, docAcknowledgements, setDocAcknowledgements, setDocAssignments, dbSaveDocAssignments, setDocs, dbDeleteDoc, dbSaveDoc, setPreviewDoc, T, font }) {
   const [expanded, setExpanded] = React.useState(false);

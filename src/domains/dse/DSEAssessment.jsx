@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ZeusLogo } from "../../shared/Logo";
 import { DSE_SECTIONS } from "../../data/seedDse";
 
 function DSEAssessment({ user, dseAnswers, setDseAnswers, dseComments, setDseComments, dseSection, setDseSection, dseSubmitted, setDseSubmitted, dseReports, setDseReports, adminResponses, darkMode, onClose, Z, font }) {

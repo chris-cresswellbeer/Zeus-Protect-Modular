@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useWindowWidth } from "../../shared/hooks";
 import { HelpTip } from "../../shared/HelpTip";
+import { sb } from "../../lib/supabase";
 import { coshhHazardLevel } from "./coshhHazardLevel";
 import { COSHH_DATA } from "../../data/seedCoshh";
 import { CoshhAssessmentForm } from "./CoshhAssessmentForm";

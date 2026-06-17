@@ -1,6 +1,8 @@
 import React from "react";
 import { useWindowWidth } from "../../shared/hooks";
 import { SectionHeader } from "../../shared/SectionHeader";
+import { E } from "../../lib/emoji";
+import { ACCEPT_IMG_DOCS } from "../../lib/constants";
 import { INCIDENT_TYPES, ACCIDENT_CODES, NUMBER_CODES, INJURY_TYPES } from "../../data/seedIncidents";
 
 function IncidentForm({ form, setF, err, saved, onSubmit, onCancel, isEdit, Z, font }) {

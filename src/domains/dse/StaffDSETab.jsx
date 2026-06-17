@@ -1,4 +1,5 @@
 import { useWindowWidth } from "../../shared/hooks";
+import { HelpTip } from "../../shared/HelpTip";
 
 function StaffDSETab({ user, dseReports, adminResponses, setDseAnswers, setDseComments, setDseSection, setDseSubmitted, setDseActive, Z, font }) {
   const myReports   = dseReports[user.id] || [];

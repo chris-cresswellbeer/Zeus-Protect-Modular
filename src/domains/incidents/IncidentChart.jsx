@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { INCIDENT_TYPES } from "../../data/seedIncidents";
 
 function IncidentChart({ incidents, Z, font }) {
   const currentYear = new Date().getFullYear();

@@ -1,6 +1,7 @@
-import React from "react";
+import React, { useState } from "react";
 import { useWindowWidth } from "../../shared/hooks";
 import { Avatar } from "../../shared/primitives";
+import { hashPassword, DEFAULT_HASH } from "../../lib/supabase";
 
 function AccountTab({ user, passwords, setPasswords, darkMode, setDarkMode, theme, setTheme, onSaveTheme, emojiMode, onSaveEmojiMode, Z, font }) {
   const isMobile = useWindowWidth() <= 1024;

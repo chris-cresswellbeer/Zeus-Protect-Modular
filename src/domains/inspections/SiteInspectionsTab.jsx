@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useWindowWidth } from "../../shared/hooks";
 import { HelpTip } from "../../shared/HelpTip";
+import { E } from "../../lib/emoji";
+import { ACCEPT_IMAGES } from "../../lib/constants";
 import { INSP_TYPES, INSP_SECTIONS } from "../../data/seedInspections";
 
 function SiteInspectionsTab({ inspections, setInspections, staff, Z, font }) {

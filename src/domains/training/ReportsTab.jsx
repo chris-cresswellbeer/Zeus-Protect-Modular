@@ -1,11 +1,15 @@
 import React from "react";
 import { useWindowWidth } from "../../shared/hooks";
-import { Pill, Avatar, StatCard } from "../../shared/primitives";
+import { Pill, Avatar, StatCard, Bar } from "../../shared/primitives";
 import { HelpTip } from "../../shared/HelpTip";
+import { E } from "../../lib/emoji";
+import { sb } from "../../lib/supabase";
 import { TRAINING_MODULES } from "../../data/seedTraining";
 import { getExpiryStatus } from "../../lib/dates";
-import { isWarehouseWorker } from "../../data/seedMachinery";
+import { isWarehouseWorker, MACHINERY_TYPES } from "../../data/seedMachinery";
+import { EXT_CERT_TYPES } from "../../data/seedExtCerts";
 import { ManagerRow } from "./ManagerRow";
+import { AdminDSETab } from "../dse/AdminDSETab";
 
 function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledgements, reportView, setReportView, dseReports, adminResponses, setAdminResponses, darkMode, Z, font, modules, machineComps, lastLoginMap, extCerts, quizFailures, setQuizFailures, incidents, inspections, ras, investigations, onExportPDF }) {
   const isMobile = useWindowWidth() <= 1024;

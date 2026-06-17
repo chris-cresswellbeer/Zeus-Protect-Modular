@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Avatar, Bar } from "../../shared/primitives";
 import { TRAINING_MODULES } from "../../data/seedTraining";
 
 function ManagerRow({ mgr, assigns, comps, Z, font, modules }) {

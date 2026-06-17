@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import { E } from "../../lib/emoji";
 
 function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDeleteFraDoc, Z, font }) {
   const {

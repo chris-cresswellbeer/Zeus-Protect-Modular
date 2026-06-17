@@ -1,6 +1,8 @@
-import React from "react";
+import React, { useState, useRef } from "react";
 import { useWindowWidth } from "../../shared/hooks";
 import { HelpTip } from "../../shared/HelpTip";
+import { sb, SUPABASE_URL } from "../../lib/supabase";
+import { ACCEPT_IMAGES, ACCEPT_VIDEO } from "../../lib/constants";
 
 function CreateModuleTab({ onSave, editingModule, Z, font }) {
   const isMobile = useWindowWidth() <= 1024;

@@ -1,6 +1,7 @@
-import React from "react";
+import React, { useState } from "react";
 import { useWindowWidth } from "../../shared/hooks";
 import { Avatar } from "../../shared/primitives";
+import { hashPassword } from "../../lib/supabase";
 
 function EditStaffModal({ staffUser, allUsers, setAllUsers, passwords, setPasswords, onClose, onSaveProfile, Z, font }) {
   const isMobile = useWindowWidth() <= 1024;

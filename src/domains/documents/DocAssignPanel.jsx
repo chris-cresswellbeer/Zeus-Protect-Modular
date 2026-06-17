@@ -1,4 +1,5 @@
 import React from "react";
+import { Avatar } from "../../shared/primitives";
 
 function DocAssignPanel({ d, staff, assignedIds, docAcknowledgements, setDocAssignments, dbSaveDocAssignments, T, font }) {
   const [docSearch, setDocSearch] = React.useState("");

@@ -1,5 +1,6 @@
 import React from "react";
 import { Pill } from "../../shared/primitives";
+import { E } from "../../lib/emoji";
 
 function ModulePreviewModal({ m, staff, assigns, comps, isMobile, setAtab, onClose, T, font }) {
   const [previewSlide, setPreviewSlide] = React.useState(0);

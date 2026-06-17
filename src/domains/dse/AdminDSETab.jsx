@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Pill, Avatar, StatCard } from "../../shared/primitives";
 
 function AdminDSETab({ staff, dseReports, adminResponses, setAdminResponses, darkMode, Z, font }) {
   const [expandedUser, setExpandedUser] = useState(null);

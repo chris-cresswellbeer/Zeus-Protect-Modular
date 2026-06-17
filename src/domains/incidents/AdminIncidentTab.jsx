@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { useWindowWidth } from "../../shared/hooks";
 import { Pill, Avatar } from "../../shared/primitives";
 import { HelpTip } from "../../shared/HelpTip";
@@ -6,6 +6,7 @@ import { IncidentForm } from "./IncidentForm";
 import { incToForm } from "./incToForm";
 import { formToInc } from "./formToInc";
 import { IncidentChart } from "./IncidentChart";
+import { IncidentTracker } from "./IncidentTracker";
 import { INCIDENT_TYPES, ACCIDENT_CODES, NUMBER_CODES } from "../../data/seedIncidents";
 
 function AdminIncidentTab({ incidents, setIncidents, staff, investigations, setInvestigations, onOpenInvestigation, equipment, setEquipment, focusIncidentId, setFocusIncidentId, showAdminReportForm, setShowAdminReportForm, Z, font }) {

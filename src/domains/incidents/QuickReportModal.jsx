@@ -1,4 +1,5 @@
 import React from "react";
+import { E } from "../../lib/emoji";
 import { QUICK_LOCATIONS } from "../../data/seedQuickReport";
 
 function QuickReportModal({ user, onSubmit, onClose, Z, font }) {

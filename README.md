@@ -38,14 +38,19 @@ Nothing else was altered. In particular:
   calls with no `import React`, or destructured `useState`/`useEffect`/`useRef`
   calls with no corresponding import) — this surfaced as `ReferenceError:
   React is not defined` on certain nav tabs (ExternalCertsSection and others).
-  **This has been fixed** across all affected files: `ExternalCertsSection`,
-  `CoshhAssessmentForm`, `CompanyForm`, `ContractorDetail`, `ContractorsTab`,
-  `WorkerDetailModal`, `StaffActionsTab`, `PermitsTab`, `PermitForm`,
-  `MachineryCompetenceTab`, `AdminMachineryTab`, `ManagerRow`, `FireSafetyTab`,
-  `IncidentChart`, `CoshhTab`, `FirstAidRegisterTab`, `SiteInspectionsTab`,
-  `EquipmentTrackerTab`. Every file in the project was scanned for this same
-  pattern (bare `React.*` calls or bare hook calls without an import) and
-  confirmed clean.
+  **This has been fixed** across all affected files.
+- **A second, broader round of missing imports was found and fixed** after
+  the React-specific fix above didn't fully resolve a blank-screen report:
+  49 additional cross-module references across 24 files were missing their
+  import statements entirely (not just React/hooks — things like the `E()`
+  emoji helper, the `sb` Supabase client, `ACCEPT_IMAGES`/`ACCEPT_IMG_DOCS`
+  constants, `hashPassword`/`DEFAULT_HASH`, and a few direct component-to-
+  component references like `ReportsTab` rendering `<AdminDSETab>` and
+  `DocCard` rendering `<DocAssignPanel>`). These were found by parsing every
+  file's AST and cross-referencing every free identifier against every
+  export in the project — a more thorough check than manually reading each
+  component's body, which is how the earlier two passes missed them. All 49
+  are now fixed and the same AST-based scan comes back completely clean.
 - **Vite is pinned to an exact version (`5.4.11`, not a `^5.4.0` range)**,
   and `package-lock.json` is included. This was needed because StackBlitz's
   environment was resolving an experimental `rolldown`-based Vite variant

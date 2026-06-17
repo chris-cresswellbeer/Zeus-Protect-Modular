@@ -1,5 +1,6 @@
 import React from "react";
 import { getExpiryStatus } from "../../lib/dates";
+import { ACCEPT_IMG_DOCS } from "../../lib/constants";
 
 function StaffActionsTab({ user, incidents, investigations, setInvestigations, assigns, comps, allModules, docs, docAssignments, docAcknowledgements, dseReports, adminResponses, setStab, setMod, Z, font }) {
   const today = new Date().toISOString().slice(0,10);

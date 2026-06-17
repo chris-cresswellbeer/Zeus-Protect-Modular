@@ -1,3 +1,5 @@
+import { E } from "../../lib/emoji";
+
 function InvestigationDashboard({ incidents, investigations, onOpen, Z, font }) {
   const today = new Date().toISOString().slice(0,10);
 

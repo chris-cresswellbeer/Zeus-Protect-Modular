@@ -919,6 +919,18 @@ export default function App() {
       return;
     }
 
+    // Leavers are fully blocked from logging in, even with a correct
+    // password — the account record is kept (for historical training/
+    // incident data) but access is revoked. "inactive" status, by
+    // contrast, is informational only and does not affect login.
+    // (u.status||"active") matches the fallback used everywhere else in
+    // the app, since most existing accounts have no status field set at
+    // all and should be treated as active.
+    if ((u.status||"active") === "leaver") {
+      setErr("This account is no longer active. Please contact your administrator.");
+      return;
+    }
+
     // Success — clear attempts
     setLoginAttempts(p => { const n={...p}; delete n[emailKey]; return n; });
     const ts = new Date().toISOString().slice(0,16).replace("T"," ");

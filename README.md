@@ -139,6 +139,52 @@ This doesn't guarantee the app is bug-for-bug identical at runtime (a build
 passing isn't the same as a full manual QA pass), but it gives high confidence
 that the split didn't break anything structural.
 
+## Performance: lazy-loaded domain tabs
+
+`App.jsx` originally imported all 18 of the gated tab components (one per
+admin/staff nav tab — `CoshhTab`, `FireSafetyTab`, `ReportsTab`, etc.)
+statically at the top of the file, so Vite bundled every one of them into
+the single initial JS payload regardless of which tabs a given user actually
+opens. Since each one is rendered behind a `{atab==="x" && (...)}` or
+`{stab==="x" && (...)}` guard — meaning only one is ever mounted at a time —
+this was pure dead weight on every page load.
+
+All 18 are now loaded via `React.lazy()` with a `<React.Suspense>` boundary
+wrapped around each render site, showing a simple "Loading…" placeholder
+while that tab's code downloads. Effects measured locally:
+
+- Initial bundle: **1,283 KB → 733 KB** (-43%), gzipped **311 KB → 200 KB**.
+- Each tab now ships as its own chunk, from ~7 KB (`StaffDSETab`) up to
+  ~73 KB (`ReportsTab`, the largest single component in the app) — fetched
+  only when that tab is opened, and cached by the browser after that.
+
+The 18 converted components: `ContractorsTab`, `CoshhTab`, `StaffDSETab`,
+`EquipmentTrackerTab`, `FireSafetyTab`, `FirstAidRegisterTab`,
+`AdminIncidentTab`, `IncidentTracker`, `InvestigationTab`,
+`SiteInspectionsTab`, `AdminMachineryTab`, `MachineryCompetenceTab`,
+`PermitsTab`, `RiskAssessmentTab`, `AccountTab`, `StaffActionsTab`,
+`CreateModuleTab`, `ReportsTab`.
+
+Deliberately **not** converted: `DocCard`, `ExternalCertsSection`,
+`PreviewModal`, `DSEAssessment`, `QuickReportModal`, `EditStaffModal`,
+`ModulePreviewModal` — these are modals or cards rendered inline within an
+already-loaded tab (not top-level gated tabs), so lazy-loading them would
+only add a loading-spinner flicker to things that should pop open instantly,
+with no bundle-size benefit since they're small and already only loaded
+alongside their parent tab.
+
+### Further options not done in this pass
+
+- **Vendor chunk splitting** (`build.rollupOptions.output.manualChunks` to
+  put React/ReactDOM in their own cacheable chunk) — would help returning
+  visitors but wasn't implemented here.
+- **`useMemo` on expensive derived calculations** in heavier components like
+  `ReportsTab` (manager performance stats, filtering) — worth profiling in
+  the running app first rather than guessing at what's actually slow.
+- **Auditing the ~19 `useEffect` hooks in `App.jsx`** for unnecessary
+  Supabase round-trips — best done with the browser's network tab open
+  while using the app, not from a static read of the code.
+
 ## Getting started
 
 ```bash

@@ -12,32 +12,32 @@ import { isWarehouseWorker, INIT_MACHINE_COMPS } from "./data/seedMachinery";
 import { INIT_RAS } from "./data/seedRiskAssessments";
 import { TRAINING_MODULES } from "./data/seedTraining";
 import { USERS } from "./data/seedUsers";
-import { ContractorsTab } from "./domains/contractors/ContractorsTab";
-import { CoshhTab } from "./domains/coshh/CoshhTab";
+const LazyContractorsTab = React.lazy(() => import("./domains/contractors/ContractorsTab").then(m => ({ default: m.ContractorsTab })));
+const LazyCoshhTab = React.lazy(() => import("./domains/coshh/CoshhTab").then(m => ({ default: m.CoshhTab })));
 import { DocCard } from "./domains/documents/DocCard";
 import { ExternalCertsSection } from "./domains/documents/ExternalCertsSection";
 import { PreviewModal } from "./domains/documents/PreviewModal";
 import { DSEAssessment } from "./domains/dse/DSEAssessment";
-import { StaffDSETab } from "./domains/dse/StaffDSETab";
-import { EquipmentTrackerTab } from "./domains/equipment/EquipmentTrackerTab";
-import { FireSafetyTab } from "./domains/fireSafety/FireSafetyTab";
-import { FirstAidRegisterTab } from "./domains/firstAid/FirstAidRegisterTab";
-import { AdminIncidentTab } from "./domains/incidents/AdminIncidentTab";
-import { IncidentTracker } from "./domains/incidents/IncidentTracker";
-import { InvestigationTab } from "./domains/incidents/InvestigationTab";
+const LazyStaffDSETab = React.lazy(() => import("./domains/dse/StaffDSETab").then(m => ({ default: m.StaffDSETab })));
+const LazyEquipmentTrackerTab = React.lazy(() => import("./domains/equipment/EquipmentTrackerTab").then(m => ({ default: m.EquipmentTrackerTab })));
+const LazyFireSafetyTab = React.lazy(() => import("./domains/fireSafety/FireSafetyTab").then(m => ({ default: m.FireSafetyTab })));
+const LazyFirstAidRegisterTab = React.lazy(() => import("./domains/firstAid/FirstAidRegisterTab").then(m => ({ default: m.FirstAidRegisterTab })));
+const LazyAdminIncidentTab = React.lazy(() => import("./domains/incidents/AdminIncidentTab").then(m => ({ default: m.AdminIncidentTab })));
+const LazyIncidentTracker = React.lazy(() => import("./domains/incidents/IncidentTracker").then(m => ({ default: m.IncidentTracker })));
+const LazyInvestigationTab = React.lazy(() => import("./domains/incidents/InvestigationTab").then(m => ({ default: m.InvestigationTab })));
 import { QuickReportModal } from "./domains/incidents/QuickReportModal";
-import { SiteInspectionsTab } from "./domains/inspections/SiteInspectionsTab";
-import { AdminMachineryTab } from "./domains/machinery/AdminMachineryTab";
-import { MachineryCompetenceTab } from "./domains/machinery/MachineryCompetenceTab";
-import { PermitsTab } from "./domains/permits/PermitsTab";
-import { RiskAssessmentTab } from "./domains/riskAssessments/RiskAssessmentTab";
+const LazySiteInspectionsTab = React.lazy(() => import("./domains/inspections/SiteInspectionsTab").then(m => ({ default: m.SiteInspectionsTab })));
+const LazyAdminMachineryTab = React.lazy(() => import("./domains/machinery/AdminMachineryTab").then(m => ({ default: m.AdminMachineryTab })));
+const LazyMachineryCompetenceTab = React.lazy(() => import("./domains/machinery/MachineryCompetenceTab").then(m => ({ default: m.MachineryCompetenceTab })));
+const LazyPermitsTab = React.lazy(() => import("./domains/permits/PermitsTab").then(m => ({ default: m.PermitsTab })));
+const LazyRiskAssessmentTab = React.lazy(() => import("./domains/riskAssessments/RiskAssessmentTab").then(m => ({ default: m.RiskAssessmentTab })));
 import { generateRAHtml } from "./domains/riskAssessments/generateRAHtml";
-import { AccountTab } from "./domains/staff/AccountTab";
+const LazyAccountTab = React.lazy(() => import("./domains/staff/AccountTab").then(m => ({ default: m.AccountTab })));
 import { EditStaffModal } from "./domains/staff/EditStaffModal";
-import { StaffActionsTab } from "./domains/staff/StaffActionsTab";
-import { CreateModuleTab } from "./domains/training/CreateModuleTab";
+const LazyStaffActionsTab = React.lazy(() => import("./domains/staff/StaffActionsTab").then(m => ({ default: m.StaffActionsTab })));
+const LazyCreateModuleTab = React.lazy(() => import("./domains/training/CreateModuleTab").then(m => ({ default: m.CreateModuleTab })));
 import { ModulePreviewModal } from "./domains/training/ModulePreviewModal";
-import { ReportsTab } from "./domains/training/ReportsTab";
+const LazyReportsTab = React.lazy(() => import("./domains/training/ReportsTab").then(m => ({ default: m.ReportsTab })));
 import { generateStaffPDF } from "./domains/training/generateStaffPDF";
 import { getExpiryStatus } from "./lib/dates";
 import { EmojiCtx, E, syncEmojiMode } from "./lib/emoji";
@@ -2059,7 +2059,7 @@ export default function App() {
             </div>
           )}
 
-          {stab==="account" && <AccountTab user={user} passwords={passwords} setPasswords={setPasswords} darkMode={darkMode} setDarkMode={setDarkMode} theme={theme} setTheme={setTheme} onSaveTheme={k=>dbSaveTheme(user.id,k)} emojiMode={emojiMode} onSaveEmojiMode={v=>{setEmojiMode(v);dbSaveEmojiMode(user.id,v);}} Z={T} font={font}/>}
+          {stab==="account" && <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}><LazyAccountTab user={user} passwords={passwords} setPasswords={setPasswords} darkMode={darkMode} setDarkMode={setDarkMode} theme={theme} setTheme={setTheme} onSaveTheme={k=>dbSaveTheme(user.id,k)} emojiMode={emojiMode} onSaveEmojiMode={v=>{setEmojiMode(v);dbSaveEmojiMode(user.id,v);}} Z={T} font={font}/></React.Suspense>}
 
           {/* Floating hazard report button — mobile only */}
           {isMobile && stab!=="dashboard" && (
@@ -2070,15 +2070,20 @@ export default function App() {
           )}
 
           {stab==="machinery" && isWarehouseWorker(user) && (
-            <MachineryCompetenceTab user={user} machineComps={machineComps} setMachineComps={setMachineComps} Z={T} font={font}/>
+            <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
+            <LazyMachineryCompetenceTab user={user} machineComps={machineComps} setMachineComps={setMachineComps} Z={T} font={font}/>
+            </React.Suspense>
           )}
 
           {stab==="incidents" && (
-            <IncidentTracker user={user} incidents={incidents} setIncidents={setIncidents} equipment={equipment} setEquipment={setEquipment} Z={T} font={font}/>
+            <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
+            <LazyIncidentTracker user={user} incidents={incidents} setIncidents={setIncidents} equipment={equipment} setEquipment={setEquipment} Z={T} font={font}/>
+            </React.Suspense>
           )}
 
           {stab==="dse" && (
-            <StaffDSETab
+            <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
+            <LazyStaffDSETab
               user={user}
               dseReports={dseReports}
               adminResponses={adminResponses}
@@ -2089,9 +2094,11 @@ export default function App() {
               setDseActive={setDseActive}
               Z={T} font={font}
             />
+            </React.Suspense>
           )}
           {stab==="actions" && (
-            <StaffActionsTab
+            <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
+            <LazyStaffActionsTab
               user={user}
               incidents={incidents}
               investigations={investigations}
@@ -2107,6 +2114,7 @@ export default function App() {
               setStab={setStab} setMod={setMod}
               Z={T} font={font}
             />
+            </React.Suspense>
           )}
         </div>
         <style>{`
@@ -3374,16 +3382,19 @@ export default function App() {
 
 
           {atab==="firstaid" && (
-            <FirstAidRegisterTab
+            <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
+            <LazyFirstAidRegisterTab
               staff={staff}
               extCerts={extCerts}
               firstAidData={firstAidData}
               setFirstAidData={setFirstAidData}
               Z={T} font={font}/>
+            </React.Suspense>
           )}
 
           {atab==="create" && (
-            <CreateModuleTab
+            <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
+            <LazyCreateModuleTab
               editingModule={editingModule}
               onSave={m=>{
                 if (editingModule) {
@@ -3407,6 +3418,7 @@ export default function App() {
                 setAtab("modules");
               }}
               Z={T} font={font}/>
+            </React.Suspense>
           )}
 
           {atab==="modules" && (
@@ -3640,43 +3652,58 @@ export default function App() {
           )}
 
           {atab==="coshh" && (
-            <CoshhTab Z={T} font={font} msdsFiles={msdsFiles} setMsdsFiles={setMsdsFiles} customChemicals={customChemicals} setCustomChemicals={setCustomChemicals}/>
+            <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
+            <LazyCoshhTab Z={T} font={font} msdsFiles={msdsFiles} setMsdsFiles={setMsdsFiles} customChemicals={customChemicals} setCustomChemicals={setCustomChemicals}/>
+            </React.Suspense>
           )}
 
           {atab==="reports" && (
-            <ReportsTab staff={staff} assigns={assigns} comps={comps} docs={docs} docAssignments={docAssignments} docAcknowledgements={docAcknowledgements} reportView={adminReportView} setReportView={setAdminReportView} dseReports={dseReports} adminResponses={adminResponses} setAdminResponses={setAdminResponses} darkMode={darkMode} Z={T} font={font} modules={allModules} machineComps={machineComps} lastLoginMap={lastLoginMap} extCerts={extCerts} quizFailures={quizFailures} setQuizFailures={setQuizFailures} incidents={incidents} inspections={siteInspections} ras={ras} investigations={investigations} onExportPDF={u=>generateStaffPDF(u,allModules,assigns,comps,docs,docAssignments,docAcknowledgements,extCerts,machineComps,lastLoginMap,T)}/>
+            <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
+            <LazyReportsTab staff={staff} assigns={assigns} comps={comps} docs={docs} docAssignments={docAssignments} docAcknowledgements={docAcknowledgements} reportView={adminReportView} setReportView={setAdminReportView} dseReports={dseReports} adminResponses={adminResponses} setAdminResponses={setAdminResponses} darkMode={darkMode} Z={T} font={font} modules={allModules} machineComps={machineComps} lastLoginMap={lastLoginMap} extCerts={extCerts} quizFailures={quizFailures} setQuizFailures={setQuizFailures} incidents={incidents} inspections={siteInspections} ras={ras} investigations={investigations} onExportPDF={u=>generateStaffPDF(u,allModules,assigns,comps,docs,docAssignments,docAcknowledgements,extCerts,machineComps,lastLoginMap,T)}/>
+            </React.Suspense>
           )}
 
           {atab==="incidents" && (
-            <AdminIncidentTab incidents={incidents} setIncidents={setIncidents} staff={staff} focusIncidentId={focusIncidentId} setFocusIncidentId={setFocusIncidentId} showAdminReportForm={showAdminReportForm} setShowAdminReportForm={setShowAdminReportForm}
+            <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
+            <LazyAdminIncidentTab incidents={incidents} setIncidents={setIncidents} staff={staff} focusIncidentId={focusIncidentId} setFocusIncidentId={setFocusIncidentId} showAdminReportForm={showAdminReportForm} setShowAdminReportForm={setShowAdminReportForm}
               investigations={investigations} setInvestigations={setInvestigations}
               onOpenInvestigation={id=>{ setInvestigationView(id); setAtab("investigation"); }}
               equipment={equipment} setEquipment={setEquipment}
               Z={T} font={font}/>
+            </React.Suspense>
           )}
 
           {atab==="investigation" && (
-            <InvestigationTab incidents={incidents} setIncidents={setIncidents} staff={staff}
+            <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
+            <LazyInvestigationTab incidents={incidents} setIncidents={setIncidents} staff={staff}
               investigations={investigations} setInvestigations={setInvestigations}
               focusedId={investigationView} setFocusedId={setInvestigationView}
               onBack={()=>setAtab("incidents")}
               Z={T} font={font}/>
+            </React.Suspense>
           )}
 
           {atab==="ra" && (
-            <RiskAssessmentTab docs={docs} setDocs={setDocs} setAtab={setAtab} ras={ras} setRas={setRas} dbSaveRA={dbSaveRA} Z={T} font={font}/>
+            <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
+            <LazyRiskAssessmentTab docs={docs} setDocs={setDocs} setAtab={setAtab} ras={ras} setRas={setRas} dbSaveRA={dbSaveRA} Z={T} font={font}/>
+            </React.Suspense>
           )}
 
           {atab==="machinery" && (
-            <AdminMachineryTab allStaff={staff} machineComps={machineComps} setMachineComps={setMachineComps} Z={T} font={font}/>
+            <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
+            <LazyAdminMachineryTab allStaff={staff} machineComps={machineComps} setMachineComps={setMachineComps} Z={T} font={font}/>
+            </React.Suspense>
           )}
 
           {atab==="equipment" && (
-            <EquipmentTrackerTab equipment={equipment} setEquipment={setEquipment} staff={staff} Z={T} font={font}/>
+            <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
+            <LazyEquipmentTrackerTab equipment={equipment} setEquipment={setEquipment} staff={staff} Z={T} font={font}/>
+            </React.Suspense>
           )}
 
           {atab==="contractors" && (
-            <ContractorsTab
+            <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
+            <LazyContractorsTab
               contractors={contractors} setContractors={setContractors}
               contractorInductions={contractorInductions} setContractorInductions={setContractorInductions}
               contractorCerts={contractorCerts} setContractorCerts={setContractorCerts}
@@ -3686,21 +3713,30 @@ export default function App() {
               dbSaveContractorCerts={dbSaveContractorCerts}
               dbSaveContractorVisits={dbSaveContractorVisits}
               staff={staff} T={T} font={font}/>
+            </React.Suspense>
           )}
 
           {atab==="permits" && (
-            <PermitsTab permits={permits} setPermits={setPermits} dbSavePermit={dbSavePermit} dbDeletePermit={dbDeletePermit} staff={staff} contractors={contractors} T={T} font={font}/>
+            <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
+            <LazyPermitsTab permits={permits} setPermits={setPermits} dbSavePermit={dbSavePermit} dbDeletePermit={dbDeletePermit} staff={staff} contractors={contractors} T={T} font={font}/>
+            </React.Suspense>
           )}
 
           {atab==="inspections" && (
-            <SiteInspectionsTab inspections={siteInspections} setInspections={setSiteInspections} staff={staff} Z={T} font={font}/>
+            <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
+            <LazySiteInspectionsTab inspections={siteInspections} setInspections={setSiteInspections} staff={staff} Z={T} font={font}/>
+            </React.Suspense>
           )}
 
           {atab==="firesafety" && (
-            <FireSafetyTab fireSafety={fireSafety} setFireSafety={setFireSafety} staff={staff} onUploadFraDoc={dbUploadFraDocument} onDeleteFraDoc={dbDeleteFraDocument} Z={T} font={font}/>
+            <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
+            <LazyFireSafetyTab fireSafety={fireSafety} setFireSafety={setFireSafety} staff={staff} onUploadFraDoc={dbUploadFraDocument} onDeleteFraDoc={dbDeleteFraDocument} Z={T} font={font}/>
+            </React.Suspense>
           )}
           {atab==="account" && (
-            <AccountTab user={user} passwords={passwords} setPasswords={setPasswords} darkMode={darkMode} setDarkMode={setDarkMode} theme={theme} setTheme={setTheme} onSaveTheme={k=>dbSaveTheme(user.id,k)} emojiMode={emojiMode} onSaveEmojiMode={v=>{setEmojiMode(v);dbSaveEmojiMode(user.id,v);}} Z={T} font={font}/>
+            <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
+            <LazyAccountTab user={user} passwords={passwords} setPasswords={setPasswords} darkMode={darkMode} setDarkMode={setDarkMode} theme={theme} setTheme={setTheme} onSaveTheme={k=>dbSaveTheme(user.id,k)} emojiMode={emojiMode} onSaveEmojiMode={v=>{setEmojiMode(v);dbSaveEmojiMode(user.id,v);}} Z={T} font={font}/>
+            </React.Suspense>
           )}
         </div>
         <style>{`

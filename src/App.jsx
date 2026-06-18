@@ -221,8 +221,68 @@ export default function App() {
   useEffect(() => {
     async function loadAll() {
       try {
+        // Fire all 35 independent reads concurrently instead of one at a
+        // time. None of these queries depends on another's result, so
+        // there's no correctness reason to wait for each to finish before
+        // starting the next — doing so was adding the sum of every
+        // round-trip's latency to every single login. allSettled (not
+        // Promise.all) is used deliberately: if one table fails to load
+        // (network blip, permissions issue, etc.) the other 34 should
+        // still populate rather than the whole load silently aborting.
+        const [
+          aRes, cRes, iRes, invRes, ackRes, daRes, docRes, dseRes, resRes,
+          llRes, pwRes, usersRes, upRes, ecRes, qfRes, conRes, conIndRes,
+          conCertRes, conVisitRes, permitRes, raRes, cmRes, mcRes, eqRes,
+          siRes, msdsRes, ccRes, fwRes, fdRes, fatRes, fexRes, felRes,
+          ffrRes, faRes,
+        ] = await Promise.allSettled([
+          sb.from("training_assigns").select("*"),
+          sb.from("training_completions").select("*"),
+          sb.from("incidents").select("*"),
+          sb.from("investigations").select("*"),
+          sb.from("doc_acknowledgements").select("*"),
+          sb.from("doc_assignments").select("*"),
+          sb.from("documents").select("*"),
+          sb.from("dse_reports").select("*"),
+          sb.from("dse_admin_responses").select("*"),
+          sb.from("last_logins").select("*"),
+          sb.from("user_passwords").select("*"),
+          sb.from("users").select("*"),
+          sb.from("user_profiles").select("*"),
+          sb.from("ext_certs").select("*"),
+          sb.from("quiz_failures").select("*"),
+          sb.from("contractors").select("*"),
+          sb.from("contractor_inductions").select("*"),
+          sb.from("contractor_certs").select("*"),
+          sb.from("contractor_visits").select("*"),
+          sb.from("permits").select("*"),
+          sb.from("risk_assessments").select("*"),
+          sb.from("custom_modules").select("*"),
+          sb.from("machine_completions").select("*"),
+          sb.from("equipment").select("*"),
+          sb.from("site_inspections").select("*"),
+          sb.from("msds_files").select("*"),
+          sb.from("custom_chemicals").select("*"),
+          sb.from("fire_wardens").select("*"),
+          sb.from("fire_drills").select("*"),
+          sb.from("fire_alarm_tests").select("*"),
+          sb.from("fire_extinguishers").select("*"),
+          sb.from("fire_emerg_lighting").select("*"),
+          sb.from("fire_fra_reviews").select("*"),
+          sb.from("first_aid_register").select("*").eq("id","singleton"),
+        ]);
+
+        // Small helper: allSettled wraps each result in {status, value} or
+        // {status, reason}. Treat a rejected/failed query the same as "no
+        // rows" (data: null) rather than letting it throw and abort
+        // everything else's processing below.
+        const rows = (res) => (res.status === "fulfilled" ? (res.value?.data ?? null) : null);
+        if (usersRes.status === "rejected") console.error("Supabase load error (users):", usersRes.reason);
+        [aRes,cRes,iRes,invRes,ackRes,daRes,docRes,dseRes,resRes,llRes,pwRes,upRes,ecRes,qfRes,conRes,conIndRes,conCertRes,conVisitRes,permitRes,raRes,cmRes,mcRes,eqRes,siRes,msdsRes,ccRes,fwRes,fdRes,fatRes,fexRes,felRes,ffrRes,faRes]
+          .forEach(r => { if (r.status === "rejected") console.error("Supabase load error:", r.reason); });
+
         // Training assigns
-        const { data: aRows } = await sb.from("training_assigns").select("*");
+        const aRows = rows(aRes);
         if (aRows && aRows.length) {
           const map = {};
           aRows.forEach(r => {
@@ -239,7 +299,7 @@ export default function App() {
         }
 
         // Training completions
-        const { data: cRows } = await sb.from("training_completions").select("*");
+        const cRows = rows(cRes);
         if (cRows && cRows.length) {
           const map = {};
           cRows.forEach(r => {
@@ -250,7 +310,7 @@ export default function App() {
         }
 
         // Incidents
-        const { data: iRows } = await sb.from("incidents").select("*");
+        const iRows = rows(iRes);
         if (iRows && iRows.length) {
           setIncidents(iRows.map(r => ({
             id: r.id, date: r.date, type: r.type, accidentCode: r.accident_code,
@@ -264,7 +324,7 @@ export default function App() {
         }
 
         // Investigations
-        const { data: invRows } = await sb.from("investigations").select("*");
+        const invRows = rows(invRes);
         if (invRows && invRows.length) {
           const map = {};
           invRows.forEach(r => { map[r.incident_id] = r.data; });
@@ -272,7 +332,7 @@ export default function App() {
         }
 
         // Doc acknowledgements
-        const { data: ackRows } = await sb.from("doc_acknowledgements").select("*");
+        const ackRows = rows(ackRes);
         if (ackRows && ackRows.length) {
           const map = {};
           ackRows.forEach(r => { const auid=String(r.user_id); const adid=String(r.doc_id); map[auid] = map[auid] || {}; map[auid][adid] = { date: r.date }; });
@@ -280,7 +340,7 @@ export default function App() {
         }
 
         // Doc assignments
-        const { data: daRows } = await sb.from("doc_assignments").select("*");
+        const daRows = rows(daRes);
         if (daRows && daRows.length) {
           const map = {};
           daRows.forEach(r => { const did=String(r.doc_id); map[did] = map[did] || []; map[did].push(String(r.user_id)); });
@@ -288,7 +348,7 @@ export default function App() {
         }
 
         // Documents (uploaded by admin)
-        const { data: docRows } = await sb.from("documents").select("*");
+        const docRows = rows(docRes);
         if (docRows && docRows.length) {
           setDocs(prev => {
             const existingIds = new Set(docRows.map(r => r.id));
@@ -301,7 +361,7 @@ export default function App() {
         }
 
         // DSE reports
-        const { data: dseRows } = await sb.from("dse_reports").select("*");
+        const dseRows = rows(dseRes);
         if (dseRows && dseRows.length) {
           const map = {};
           dseRows.forEach(r => { const duid=String(r.user_id); map[duid] = map[duid] || []; map[duid][r.report_idx] = r.data; });
@@ -309,7 +369,7 @@ export default function App() {
         }
 
         // Admin DSE responses
-        const { data: resRows } = await sb.from("dse_admin_responses").select("*");
+        const resRows = rows(resRes);
         if (resRows && resRows.length) {
           const map = {};
           resRows.forEach(r => {
@@ -320,7 +380,7 @@ export default function App() {
         }
 
         // Last logins
-        const { data: llRows } = await sb.from("last_logins").select("*");
+        const llRows = rows(llRes);
         if (llRows && llRows.length) {
           const map = {};
           llRows.forEach(r => { map[String(r.user_id)] = r.last_login; });
@@ -328,7 +388,7 @@ export default function App() {
         }
 
         // Passwords
-        const { data: pwRows } = await sb.from("user_passwords").select("*");
+        const pwRows = rows(pwRes);
         if (pwRows && pwRows.length) {
           const map = {};
           pwRows.forEach(r => { map[String(r.user_id)] = r.password; });
@@ -336,7 +396,7 @@ export default function App() {
         }
 
         // Users — DB is source of truth; seed with USERS constant on first run
-        const { data: usersRows } = await sb.from("users").select("*");
+        const usersRows = rows(usersRes);
         if (usersRows && usersRows.length) {
           setAllUsers(usersRows.map(r => r.data));
         } else {
@@ -350,12 +410,12 @@ export default function App() {
         }
 
         // User profiles (theme, emojiMode preferences — separate from user records)
-        const { data: upRows } = await sb.from("user_profiles").select("*");
+        const upRows = rows(upRes);
         // Store profile rows for theme restoration at login
         window.__userProfiles = Array.isArray(upRows) ? upRows : [];
 
         // External certificates
-        const { data: ecRows } = await sb.from("ext_certs").select("*");
+        const ecRows = rows(ecRes);
         if (ecRows && ecRows.length) {
           const map = {};
           ecRows.forEach(r => {
@@ -366,27 +426,27 @@ export default function App() {
         }
 
         // Quiz failures
-        const { data: qfRows } = await sb.from("quiz_failures").select("*");
+        const qfRows = rows(qfRes);
         if (qfRows && qfRows.length) {
           setQuizFailures(qfRows.map(r => r.data));
         }
 
         // Contractors
-        const { data: conRows } = await sb.from("contractors").select("*");
+        const conRows = rows(conRes);
         if (conRows?.length) setContractors(conRows.map(r=>r.data));
-        const { data: conIndRows } = await sb.from("contractor_inductions").select("*");
+        const conIndRows = rows(conIndRes);
         if (conIndRows?.length) { const m={}; conIndRows.forEach(r=>{m[r.contractor_id]=r.data;}); setContractorInductions(m); }
-        const { data: conCertRows } = await sb.from("contractor_certs").select("*");
+        const conCertRows = rows(conCertRes);
         if (conCertRows?.length) { const m={}; conCertRows.forEach(r=>{m[r.contractor_id]=r.data;}); setContractorCerts(m); }
-        const { data: conVisitRows } = await sb.from("contractor_visits").select("*");
+        const conVisitRows = rows(conVisitRes);
         if (conVisitRows?.length) { const m={}; conVisitRows.forEach(r=>{m[r.contractor_id]=r.data;}); setContractorVisits(m); }
 
         // Permits
-        const { data: permitRows } = await sb.from("permits").select("*");
+        const permitRows = rows(permitRes);
         if (permitRows?.length) setPermits(permitRows.map(r=>r.data));
 
         // Risk assessments (custom/edited ones override INIT_RAS)
-        const { data: raRows } = await sb.from("risk_assessments").select("*");
+        const raRows = rows(raRes);
         if (raRows && raRows.length) {
           setRas(prev => {
             // Merge saved data into existing seed RAs
@@ -404,13 +464,13 @@ export default function App() {
         }
 
         // Custom modules
-        const { data: cmRows } = await sb.from("custom_modules").select("*");
+        const cmRows = rows(cmRes);
         if (cmRows && cmRows.length) {
           setCustomModules(cmRows.map(r => r.data));
         }
 
         // Machine completions
-        const { data: mcRows } = await sb.from("machine_completions").select("*");
+        const mcRows = rows(mcRes);
         if (mcRows && mcRows.length) {
           const map = {};
           mcRows.forEach(r => { const mcuid=String(r.user_id); map[mcuid] = map[mcuid] || {}; map[mcuid][r.machine_id] = r.data; });
@@ -418,19 +478,19 @@ export default function App() {
         }
 
         // Equipment
-        const { data: eqRows } = await sb.from("equipment").select("*");
+        const eqRows = rows(eqRes);
         if (eqRows && eqRows.length) {
           setEquipment(eqRows.map(r => r.data));
         }
 
         // Site inspections
-        const { data: siRows } = await sb.from("site_inspections").select("*");
+        const siRows = rows(siRes);
         if (siRows && siRows.length) {
           setSiteInspections(siRows.map(r => r.data));
         }
 
         // MSDS files
-        const { data: msdsRows } = await sb.from("msds_files").select("*");
+        const msdsRows = rows(msdsRes);
         if (msdsRows && msdsRows.length) {
           const map = {};
           msdsRows.forEach(r => { map[r.code] = { fileName: r.file_name, fileData: r.file_url, fileUrl: r.file_url, uploadedAt: r.uploaded_at }; });
@@ -438,18 +498,18 @@ export default function App() {
         }
 
         // Custom chemicals
-        const { data: ccRows } = await sb.from("custom_chemicals").select("*");
+        const ccRows = rows(ccRes);
         if (ccRows && ccRows.length) {
           setCustomChemicals(ccRows.map(r => r.data));
         }
 
         // Fire Safety
-        const { data: fwRows }  = await sb.from("fire_wardens").select("*");
-        const { data: fdRows }  = await sb.from("fire_drills").select("*");
-        const { data: fatRows } = await sb.from("fire_alarm_tests").select("*");
-        const { data: fexRows } = await sb.from("fire_extinguishers").select("*");
-        const { data: felRows } = await sb.from("fire_emerg_lighting").select("*");
-        const { data: ffrRows } = await sb.from("fire_fra_reviews").select("*");
+        const fwRows  = rows(fwRes);
+        const fdRows  = rows(fdRes);
+        const fatRows = rows(fatRes);
+        const fexRows = rows(fexRes);
+        const felRows = rows(felRes);
+        const ffrRows = rows(ffrRes);
         // Only override each sub-array if the DB returned rows for it.
         // If none of the tables have any rows yet (fresh install), keep seed data.
         const anyFireData = [fwRows,fdRows,fatRows,fexRows,felRows,ffrRows].some(r=>r&&r.length>0);
@@ -463,7 +523,7 @@ export default function App() {
         });
 
         // First Aid Register
-        const { data: faRow } = await sb.from("first_aid_register").select("*").eq("id","singleton");
+        const faRow = rows(faRes);
         if (faRow && faRow.length) setFirstAidData(faRow[0].data);
       } catch (e) {
         console.error("Supabase load error:", e);

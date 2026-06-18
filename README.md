@@ -185,6 +185,40 @@ alongside their parent tab.
   Supabase round-trips — best done with the browser's network tab open
   while using the app, not from a static read of the code.
 
+## Performance: parallelized mount-time Supabase fetches
+
+`App.jsx`'s `loadAll()` function (the effect that runs once when the app
+mounts, fetching every persisted data slice from Supabase) originally
+issued 35 separate `await sb.from(...)` calls one after another — each
+waiting for the previous to fully complete before the next one started.
+None of these 35 queries actually depends on another's result (verified by
+reading every line: each one only reads its own query's response and calls
+its own `setState`), so the sequential ordering was adding the sum of every
+round-trip's latency to every single page load, for no correctness reason.
+
+34 of the 35 are now fired concurrently via `Promise.allSettled`, with the
+exact same per-query processing logic (mapping rows into state shapes,
+merging with seed data, etc.) running afterward, completely unchanged. The
+35th — a conditional `users` table insert that only runs if the `users`
+select came back empty — correctly stays sequential, since it's seeding
+data based on that specific query's result and isn't independent like the
+other 34.
+
+`Promise.allSettled` was used deliberately over `Promise.all`: if one table
+fails to load (a network blip, a permissions issue, whatever), the other 33
+should still populate the app rather than one failure aborting everything.
+This is actually slightly more resilient than the original sequential code,
+which would have aborted every *subsequent* query in the chain if any one
+of them threw partway through.
+
+One pre-existing gap, preserved rather than expanded in scope here: neither
+the original code nor this version inspects the `error` field Supabase
+returns alongside `data` on a per-query basis — a query that fails with an
+HTTP-level error (bad permissions, etc.) is currently treated the same as
+"the table is empty" in both versions. Worth a follow-up if you want
+per-table error visibility, but that's a different, additive change from
+parallelizing the fetches themselves.
+
 ## Getting started
 
 ```bash

@@ -99,6 +99,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
 
   function exportManagerReport() {
     const today = new Date().toISOString().slice(0,10);
+    const certCols = EXT_CERT_TYPES.map(ct => ct.label);
     const rows = [
       ["Zeus Protect — Manager Performance Report"],
       [`Generated: ${today}`],
@@ -113,7 +114,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
     rows.push([]);
     managerData.forEach(mgr => {
       rows.push([`Manager: ${mgr.name}`]);
-      rows.push(["  Staff Member","  Job Title","  Modules Assigned","  Completed","  Compliance %","  Outstanding Modules"]);
+      rows.push(["  Staff Member","  Job Title","  Modules Assigned","  Completed","  Compliance %","  Outstanding Modules", ...certCols.map(c=>"  "+c), "  Machinery Competent", "  Machinery Provisional", "  Machinery Renewal Required"]);
       mgr.members.forEach(u => {
         const assignedIds = assigns[u.id]||[];
         const userComps   = comps[u.id]||{};
@@ -121,7 +122,19 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
         const d = (assigns[u.id]||[]).filter(mid => userComps[mid]).length;
         const pct = a ? Math.min(100, Math.round(d/a*100)) : 0;
         const pending = allModules.filter(m=>assignedIds.includes(m.id)&&!userComps[m.id]).map(m=>m.title).join("; ");
-        rows.push(["  "+u.name, "  "+(u.jobTitle||""), a, d, pct+"%", pending]);
+        const userExtCerts = (extCerts||{})[u.id] || {};
+        const certValues = EXT_CERT_TYPES.map(ct => {
+          const cert = userExtCerts[ct.id];
+          if (!cert) return "Not uploaded";
+          const isExpired = cert.expiryDate && new Date(cert.expiryDate) < new Date();
+          return isExpired ? `Expired (${cert.expiryDate})` : `Valid (exp ${cert.expiryDate||"—"})`;
+        });
+        const userMachComps = Object.values((machineComps||{})[u.id]||{});
+        const machineTypes = allMachineTypes || [];
+        const machCompetent   = userMachComps.filter(c=>{const ex=machineExpiryStatus(c,machineTypes);return c.status==="competent"&&!(ex?.status==="expired");}).length;
+        const machProvisional = userMachComps.filter(c=>c.status==="provisional").length;
+        const machExpired     = userMachComps.filter(c=>{const ex=machineExpiryStatus(c,machineTypes);return c.status==="expired"||ex?.status==="expired";}).length;
+        rows.push(["  "+u.name, "  "+(u.jobTitle||""), a, d, pct+"%", pending, ...certValues, machCompetent, machProvisional, machExpired]);
       });
       rows.push([]);
     });
@@ -212,6 +225,30 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
                         const ack=(docAcknowledgements[u.id]||{})[doc.id];
                         return `<tr style="background:${ack?"#f0fff4":"#fff2f2"}"><td>${doc.title}</td><td>${doc.type||"—"}</td><td style="color:${ack?"#15803d":"#dc2626"};font-weight:600">${ack?`✓ ${ack.date}`:"⏳ Pending"}</td></tr>`;
                       }).join("");
+                      const userExtCerts = (extCerts||{})[u.id] || {};
+                      const extCertRows = EXT_CERT_TYPES.map(ct=>{
+                        const cert=userExtCerts[ct.id];
+                        if (!cert) return `<tr style="background:#fff2f2"><td>${ct.icon} ${ct.label}</td><td style="color:#dc2626;font-weight:600">Not uploaded</td><td>—</td><td>—</td></tr>`;
+                        const expired = cert.expiryDate && cert.expiryDate < new Date().toISOString().slice(0,10);
+                        return `<tr style="background:${expired?"#fff8f0":"#f0fff4"}">
+                          <td>${ct.icon} ${ct.label}</td>
+                          <td style="color:${expired?"#b45309":"#15803d"};font-weight:600">${expired?"⚠ Expired":"✓ Valid"}</td>
+                          <td>${cert.issuedDate||"—"}</td>
+                          <td>${cert.expiryDate||"—"}</td>
+                        </tr>`;
+                      }).join("");
+                      const userMachineComps = Object.values((machineComps||{})[u.id]||{});
+                      const machineTypesForExport = allMachineTypes || [];
+                      const machineRows = userMachineComps.map(mc=>{
+                        const mType = machineTypesForExport.find(x=>x.id===mc.machineId)||{label:mc.machineId,icon:"🔧"};
+                        const expired = mc.licenceExpiry && mc.licenceExpiry < new Date().toISOString().slice(0,10);
+                        return `<tr style="background:${expired?"#fff8f0":"#fff"}">
+                          <td>${mType.icon||"🔧"} ${mType.label||mc.machineId}</td>
+                          <td style="color:${mc.status==="competent"?"#15803d":mc.status==="provisional"?"#b45309":"#dc2626"};font-weight:600;text-transform:capitalize">${mc.status||"—"}</td>
+                          <td>${mc.assessmentDate||"—"}</td>
+                          <td style="color:${expired?"#dc2626":"inherit"}">${mc.licenceExpiry||"—"}${expired?" ⚠ Expired":""}</td>
+                        </tr>`;
+                      }).join("");
                       return `<div class="page-break">
                         <div class="header">
                           <div><h1>${u.name}</h1><p>${u.jobTitle||""}${u.manager?" · Manager: "+u.manager:""}</p><p style="color:#94a3b8;font-size:12px">Generated: ${today}</p></div>
@@ -225,6 +262,9 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
                         <h2>Training</h2>
                         ${a===0?'<div class="no-data">No modules assigned</div>':`<table><thead><tr><th>Module</th><th>Status</th><th>Score</th><th>Date</th><th>Certificate</th></tr></thead><tbody>${trainingRows}</tbody></table>`}
                         ${docRows?`<h2>Document Acknowledgements</h2><table><thead><tr><th>Document</th><th>Type</th><th>Status</th></tr></thead><tbody>${docRows}</tbody></table>`:""}
+                        <h2>External Certificates</h2>
+                        <table><thead><tr><th>Certificate</th><th>Status</th><th>Issue Date</th><th>Expiry Date</th></tr></thead><tbody>${extCertRows}</tbody></table>
+                        ${userMachineComps.length>0?`<h2>Machinery Competence</h2><table><thead><tr><th>Machine</th><th>Status</th><th>Assessed</th><th>Licence Expiry</th></tr></thead><tbody>${machineRows}</tbody></table>`:""}
                       </div>`;
                     }).join("");
 

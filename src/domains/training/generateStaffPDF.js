@@ -1,6 +1,7 @@
 import { getExpiryStatus } from "../../lib/dates";
 import { EXT_CERT_TYPES } from "../../data/seedExtCerts";
 import { MACHINERY_TYPES } from "../../data/seedMachinery";
+import { E } from "../../lib/emoji";
 
 function generateStaffPDF(u, allModules, assigns, comps, docs, docAssignments, docAcknowledgements, extCerts, machineComps, lastLoginMap, Z, allMachineTypes) {
   const machineTypes = allMachineTypes || MACHINERY_TYPES;
@@ -124,23 +125,23 @@ function generateStaffPDF(u, allModules, assigns, comps, docs, docAssignments, d
     <div class="meta-card"><div class="label">Overall Compliance</div><div class="value" style="color:${statusColor}">${pct}%</div></div>
   </div>
 
-  <h2>{E("📚 ","")}Training Modules</h2>
+  <h2>${E("📚 ","")}Training Modules</h2>
   ${assignedIds.length===0
     ? '<div class="no-data">No modules assigned</div>'
     : `<table><thead><tr><th>Module</th><th>Status</th><th>Score</th><th>Date</th><th>Expiry</th><th>Certificate ID</th></tr></thead><tbody>${trainingRows}</tbody></table>`
   }
 
-  <h2>{E("📄 ","")}Document Acknowledgements</h2>
+  <h2>${E("📄 ","")}Document Acknowledgements</h2>
   ${assignedDocs.length===0
     ? '<div class="no-data">No documents assigned</div>'
     : `<table><thead><tr><th>Document</th><th>Type</th><th>Acknowledgement</th><th>Version</th></tr></thead><tbody>${docRows}</tbody></table>`
   }
 
-  <h2>{E("🩺 ","")}External Certificates</h2>
+  <h2>${E("🩺 ","")}External Certificates</h2>
   <table><thead><tr><th>Certificate</th><th>Status</th><th>Issue Date</th><th>Expiry Date</th></tr></thead><tbody>${extCertRows}</tbody></table>
 
   ${userMachineComps.length>0?`
-  <h2>{E("⚙ ","")}Machinery Competence</h2>
+  <h2>${E("⚙ ","")}Machinery Competence</h2>
   <table><thead><tr><th>Machine</th><th>Status</th><th>Assessed</th><th>Licence Expiry</th></tr></thead><tbody>${machineRows}</tbody></table>
   `:""}
 

@@ -356,6 +356,7 @@ export default function App() {
             return [...kept, ...docRows.map(r => ({
               id: r.id, title: r.title, date: r.date, size: r.size,
               type: r.type, ext: r.ext, fileName: r.file_name, fileData: r.file_url || null, fileUrl: r.file_url || null, version: r.version || 1, reviewDate: r.review_date || null,
+              description: r.description || null,
             }))];
           });
         }
@@ -677,7 +678,7 @@ export default function App() {
       type: doc.type, ext: doc.ext, file_name: doc.fileName, file_url: doc.fileUrl || null,
       version: doc.version || 1,
       review_date: doc.reviewDate || null,
-      description: doc.description || null,   // new
+      description: doc.description || null,
     }, { onConflict: "id" });
   }
 
@@ -692,24 +693,9 @@ export default function App() {
   }
 
   async function dbSaveDseReport(userId, reports) {
-    // Upsert-and-prune instead of delete-then-insert. The old version deleted all
-    // rows for this user then re-inserted, which is two separate network round-trips
-    // with no transaction wrapping them — if this function fires twice in quick
-    // succession (e.g. a double-click or a re-fired effect), the second insert can
-    // land before the first delete has propagated, hitting a 409 on the
-    // user_id+report_idx unique constraint. Upsert-and-prune avoids the gap.
-    const uid = String(userId);
+    await sb.from("dse_reports").delete().eq("user_id", userId);
     if (reports.length) {
-      await sb.from("dse_reports").upsert(
-        reports.map((r, i) => ({ user_id: uid, report_idx: i, data: r })),
-        { onConflict: "user_id,report_idx" }
-      );
-    }
-    const { data: existing } = await sb.from("dse_reports").select("report_idx").eq("user_id", uid);
-    if (existing && existing.length) {
-      const currentIdxs = new Set(reports.map((_, i) => i));
-      const toDelete = existing.filter(r => !currentIdxs.has(r.report_idx)).map(r => r.report_idx);
-      for (const idx of toDelete) await sb.from("dse_reports").delete().match({ user_id: uid, report_idx: idx });
+      await sb.from("dse_reports").insert(reports.map((r, i) => ({ user_id: String(userId), report_idx: i, data: r })));
     }
   }
 
@@ -1371,9 +1357,8 @@ export default function App() {
   }
 
   // ── Certificate Modal ─────────────────────────────────────────────────────
-  const CertModal = () => {
+  const CertModal = () => cert && (() => {
     const certRef = React.useRef(null);
-    if (!cert) return null;
     const certId = cert.certId || "ZSL-"+Math.random().toString(36).slice(2,8).toUpperCase();
     const issueDate = cert.date;
     const moduleIcon = cert.module.icon || "🏅";
@@ -1548,7 +1533,7 @@ export default function App() {
         </div>
       </div>
     );
-  };
+  })();
 
   // ══════════════════════════════════════════════════════════════════════════
   // STAFF PORTAL
@@ -3764,7 +3749,7 @@ export default function App() {
 
           {atab==="reports" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
-            <LazyReportsTab staff={staff} assigns={assigns} comps={comps} docs={docs} docAssignments={docAssignments} docAcknowledgements={docAcknowledgements} reportView={adminReportView} setReportView={setAdminReportView} dseReports={dseReports} adminResponses={adminResponses} setAdminResponses={setAdminResponses} darkMode={darkMode} Z={T} font={font} modules={allModules} machineComps={machineComps} lastLoginMap={lastLoginMap} extCerts={extCerts} quizFailures={quizFailures} setQuizFailures={setQuizFailures} incidents={incidents} inspections={siteInspections} ras={ras} investigations={investigations} setAtab={setAtab} onExportPDF={u=>generateStaffPDF(u,allModules,assigns,comps,docs,docAssignments,docAcknowledgements,extCerts,machineComps,lastLoginMap,T)}/>
+            <LazyReportsTab staff={staff} assigns={assigns} comps={comps} docs={docs} docAssignments={docAssignments} docAcknowledgements={docAcknowledgements} reportView={adminReportView} setReportView={setAdminReportView} dseReports={dseReports} adminResponses={adminResponses} setAdminResponses={setAdminResponses} darkMode={darkMode} Z={T} font={font} modules={allModules} machineComps={machineComps} lastLoginMap={lastLoginMap} extCerts={extCerts} quizFailures={quizFailures} setQuizFailures={setQuizFailures} incidents={incidents} inspections={siteInspections} ras={ras} investigations={investigations} onExportPDF={u=>generateStaffPDF(u,allModules,assigns,comps,docs,docAssignments,docAcknowledgements,extCerts,machineComps,lastLoginMap,T)}/>
             </React.Suspense>
           )}
 

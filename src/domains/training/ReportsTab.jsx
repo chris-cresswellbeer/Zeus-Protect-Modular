@@ -6,12 +6,12 @@ import { E } from "../../lib/emoji";
 import { sb } from "../../lib/supabase";
 import { TRAINING_MODULES } from "../../data/seedTraining";
 import { getExpiryStatus } from "../../lib/dates";
-import { isWarehouseWorker, MACHINERY_TYPES } from "../../data/seedMachinery";
+import { isWarehouseWorker, machineExpiryStatus } from "../../data/seedMachinery";
 import { EXT_CERT_TYPES } from "../../data/seedExtCerts";
 import { ManagerRow } from "./ManagerRow";
 import { AdminDSETab } from "../dse/AdminDSETab";
 
-function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledgements, reportView, setReportView, dseReports, adminResponses, setAdminResponses, darkMode, Z, font, modules, machineComps, lastLoginMap, extCerts, quizFailures, setQuizFailures, incidents, inspections, ras, investigations, onExportPDF, setAtab }) {
+function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledgements, reportView, setReportView, dseReports, adminResponses, setAdminResponses, darkMode, Z, font, modules, machineComps, allMachineTypes, lastLoginMap, extCerts, quizFailures, setQuizFailures, incidents, inspections, ras, investigations, onExportPDF, setAtab }) {
   const isMobile = useWindowWidth() <= 1024;
   const [rptFilterSearch, setRptFilterSearch] = React.useState("");
   const [showTeamExport, setShowTeamExport] = React.useState(false);
@@ -505,6 +505,42 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
                                       <a href={cert.fileUrl} target="_blank" rel="noreferrer"
                                         style={{fontSize:11,color:Z.accentLt,textDecoration:"none",fontWeight:700,flexShrink:0}}>View</a>
                                     )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      {/* Machinery Competence */}
+                      {(() => {
+                        const userMachComps = Object.values(machineComps[u.id]||{});
+                        if (!userMachComps.length) return null;
+                        const machineTypes = allMachineTypes || [];
+                        return (
+                          <div style={{marginTop:16,paddingTop:16,borderTop:`1px solid ${Z.border}`}}>
+                            <p style={{fontSize:11,fontWeight:700,letterSpacing:1,color:Z.muted,margin:"0 0 10px",textTransform:"uppercase"}}>Machinery Competence</p>
+                            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:8}}>
+                              {userMachComps.map(comp => {
+                                const mType = machineTypes.find(m=>m.id===comp.machineId) || {label:comp.machineId, icon:"🔧"};
+                                const ex = machineExpiryStatus(comp, machineTypes);
+                                const isExpired = comp.status==="expired" || ex?.status==="expired";
+                                const isProvisional = comp.status==="provisional";
+                                const bg = isExpired?"rgba(239,68,68,0.08)":isProvisional?"rgba(245,158,11,0.08)":"rgba(16,185,129,0.08)";
+                                const border = isExpired?"rgba(239,68,68,0.25)":isProvisional?"rgba(245,158,11,0.25)":"rgba(16,185,129,0.25)";
+                                const statusColor = isExpired?"#f87171":isProvisional?Z.amber:Z.green;
+                                return (
+                                  <div key={comp.id} style={{background:bg,border:`1px solid ${border}`,borderRadius:12,padding:"10px 12px",display:"flex",alignItems:"center",gap:10}}>
+                                    <span style={{fontSize:20,flexShrink:0}}>{mType.icon}</span>
+                                    <div style={{flex:1,minWidth:0}}>
+                                      <div style={{fontWeight:700,fontSize:12,color:Z.white,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{mType.label}</div>
+                                      <div style={{fontSize:10,color:statusColor,marginTop:2}}>
+                                        {isExpired?"⚠ Renewal required":isProvisional?"⏳ Provisional":"✓ Competent"}
+                                      </div>
+                                      {comp.licenceExpiry && <div style={{fontSize:10,color:Z.muted}}>Licence expires: {comp.licenceExpiry}</div>}
+                                      {comp.licenceRef && <div style={{fontSize:9,fontFamily:"monospace",color:Z.gold,marginTop:1}}>{comp.licenceRef}</div>}
+                                    </div>
                                   </div>
                                 );
                               })}
@@ -1056,7 +1092,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
                 const status = daysLeft < 0 ? "expired" : daysLeft <= 60 ? "expiring" : "valid";
                 const bg = status==="expired"?"rgba(239,68,68,0.08)":status==="expiring"?"rgba(245,158,11,0.08)":"rgba(16,185,129,0.08)";
                 const color = status==="expired"?"#ef4444":status==="expiring"?"#f59e0b":"#10b981";
-                const mType = MACHINERY_TYPES.find(x=>x.id===comp.machineId)||{label:comp.machineId,icon:"🔧"};
+                const mType = (allMachineTypes||[]).find(x=>x.id===comp.machineId)||{label:comp.machineId,icon:"🔧"};
                 machExpiries.push({ u, comp, expDate, daysLeft, status, bg, color, mType });
               });
             });

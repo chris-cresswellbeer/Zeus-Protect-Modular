@@ -2,9 +2,11 @@ import { useState, useEffect, useRef } from "react";
 import { useWindowWidth } from "../../shared/hooks";
 import { Avatar } from "../../shared/primitives";
 import { HelpTip } from "../../shared/HelpTip";
-import { machineExpiryStatus, MACHINERY_TYPES, MACHINE_CATEGORIES, COMP_STATUS, isWarehouseWorker } from "../../data/seedMachinery";
+import { machineExpiryStatus, COMP_STATUS, isWarehouseWorker } from "../../data/seedMachinery";
 
-function AdminMachineryTab({ allStaff, machineComps, setMachineComps, Z, font }) {
+function AdminMachineryTab({ allStaff, machineComps, setMachineComps, allMachineTypes, allMachineCategories, setCustomMachineTypes, dbDeleteCustomMachineType, Z, font }) {
+  const machineTypes = allMachineTypes || [];
+  const machineCategories = allMachineCategories || [];
   const isMobile = useWindowWidth() <= 1024;
   const warehouseStaff = allStaff.filter(u=>u.role!=="admin"&&isWarehouseWorker(u));
   const [selectedUser, setSelectedUser] = useState(warehouseStaff[0]?.id||null);
@@ -13,6 +15,8 @@ function AdminMachineryTab({ allStaff, machineComps, setMachineComps, Z, font })
   const [saved, setSaved] = useState(false);
   const [newObs, setNewObs] = useState("");
   const formRef = useRef(null);
+  const [addingType, setAddingType] = useState(false);
+  const [typeForm, setTypeForm] = useState({ label:"", icon:"🔧", category:"", newCategory:"", licenceRequired:false, renewalMonths:0, notes:"" });
 
   useEffect(()=>{
     if (editingId && formRef.current) {
@@ -49,6 +53,26 @@ function AdminMachineryTab({ allStaff, machineComps, setMachineComps, Z, font })
     });
   }
 
+  function saveCustomType() {
+    const category = typeForm.newCategory.trim() || typeForm.category;
+    if (!typeForm.label.trim() || !category) return;
+    const id = "cm"+Date.now();
+    const newType = {
+      id, icon: typeForm.icon||"🔧", label: typeForm.label.trim(), category,
+      licenceRequired: typeForm.licenceRequired, renewalMonths: Number(typeForm.renewalMonths)||0,
+      notes: typeForm.notes, _custom: true,
+    };
+    setCustomMachineTypes(prev=>[...prev,newType]);
+    setTypeForm({ label:"", icon:"🔧", category:"", newCategory:"", licenceRequired:false, renewalMonths:0, notes:"" });
+    setAddingType(false);
+  }
+
+  function deleteCustomType(id) {
+    if (!window.confirm("Remove this custom machine type? Any existing competence records referencing it will no longer show a label.")) return;
+    setCustomMachineTypes(prev=>prev.filter(t=>t.id!==id));
+    dbDeleteCustomMachineType(id);
+  }
+
   function addObs() {
     if (!newObs) return;
     setF("observationDates",[...form.observationDates, newObs].sort());
@@ -77,7 +101,56 @@ function AdminMachineryTab({ allStaff, machineComps, setMachineComps, Z, font })
           <h2 style={{fontSize:22,fontWeight:900,letterSpacing:-.5,margin:"0 0 4px"}}>Machinery Competence Records <HelpTip dark={false} text="Track which staff are authorised to operate specific machinery. Each record shows the type of authorisation, date assessed and licence expiry if applicable. Expired records are flagged with a warning."/></h2>
           <p style={{color:Z.muted,margin:0,fontSize:13}}>Manage assessed competencies for warehouse and operational staff only</p>
         </div>
+        <button onClick={()=>setAddingType(v=>!v)}
+          style={{background:addingType?"rgba(37,99,235,0.2)":`linear-gradient(135deg,${Z.accent},${Z.blue})`,color:addingType?Z.accentLt:"#fff",border:addingType?`1px solid ${Z.accent}55`:"none",borderRadius:10,padding:"10px 18px",cursor:"pointer",fontFamily:font,fontWeight:700,fontSize:13,whiteSpace:"nowrap"}}>
+          {addingType?"✕ Cancel":"+ Add Machine Type"}
+        </button>
       </div>
+
+      {addingType && (
+        <div style={{background:`linear-gradient(135deg,${Z.navyMd},${Z.navy})`,borderRadius:16,padding:24,marginBottom:20,border:`1px solid rgba(37,99,235,0.35)`}}>
+          <h3 style={{margin:"0 0 16px",fontSize:14,fontWeight:800,color:Z.accentLt,letterSpacing:.5,textTransform:"uppercase"}}>New Custom Machine Type</h3>
+          <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"80px 1fr 1fr",gap:14,marginBottom:14}}>
+            <div>
+              <label style={labelStyle}>ICON</label>
+              <input value={typeForm.icon} onChange={e=>setTypeForm(p=>({...p,icon:e.target.value}))} placeholder="🔧" style={inputStyle}/>
+            </div>
+            <div>
+              <label style={labelStyle}>EQUIPMENT NAME *</label>
+              <input value={typeForm.label} onChange={e=>setTypeForm(p=>({...p,label:e.target.value}))} placeholder="e.g. Mobile Crane" style={inputStyle}/>
+            </div>
+            <div>
+              <label style={labelStyle}>CATEGORY *</label>
+              <select value={typeForm.category} onChange={e=>setTypeForm(p=>({...p,category:e.target.value,newCategory:""}))} style={selStyle}>
+                <option value="">— Select existing —</option>
+                {machineCategories.map(c=><option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{marginBottom:14}}>
+            <label style={labelStyle}>OR NEW CATEGORY NAME</label>
+            <input value={typeForm.newCategory} onChange={e=>setTypeForm(p=>({...p,newCategory:e.target.value,category:""}))} placeholder="Leave blank to use an existing category above" style={inputStyle}/>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:14,marginBottom:14,alignItems:"end"}}>
+            <div>
+              <label style={labelStyle}>RENEWAL PERIOD (MONTHS, 0 = NEVER)</label>
+              <input type="number" min="0" value={typeForm.renewalMonths} onChange={e=>setTypeForm(p=>({...p,renewalMonths:e.target.value}))} style={inputStyle}/>
+            </div>
+            <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",paddingBottom:9}}>
+              <input type="checkbox" checked={typeForm.licenceRequired} onChange={e=>setTypeForm(p=>({...p,licenceRequired:e.target.checked}))}/>
+              <span style={{fontSize:13,color:Z.white}}>Formal licence required</span>
+            </label>
+          </div>
+          <div style={{marginBottom:18}}>
+            <label style={labelStyle}>NOTES (shown to staff in their record)</label>
+            <textarea value={typeForm.notes} onChange={e=>setTypeForm(p=>({...p,notes:e.target.value}))} rows={2} placeholder="e.g. Site-specific induction required before use." style={{...inputStyle,resize:"vertical",lineHeight:1.6}}/>
+          </div>
+          <button onClick={saveCustomType} disabled={!typeForm.label.trim()||!(typeForm.category||typeForm.newCategory.trim())}
+            style={{background:`linear-gradient(135deg,${Z.accent},${Z.blue})`,color:"#fff",border:"none",borderRadius:10,padding:"11px 28px",fontWeight:800,cursor:"pointer",fontFamily:font,fontSize:13,opacity:(typeForm.label.trim()&&(typeForm.category||typeForm.newCategory.trim()))?1:.45,boxShadow:`0 4px 16px ${Z.accent}44`}}>
+            Save Machine Type →
+          </button>
+        </div>
+      )}
 
       {/* Staff selector — dropdown */}
       <div style={{background:`linear-gradient(135deg,${Z.navyMd},${Z.navy})`,borderRadius:14,padding:"14px 18px",marginBottom:16,border:`1px solid ${Z.border}`,display:"flex",gap:12,alignItems:"center",flexWrap:"wrap"}}>
@@ -88,7 +161,7 @@ function AdminMachineryTab({ allStaff, machineComps, setMachineComps, Z, font })
           style={{flex:1,minWidth:200,background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:10,padding:"9px 13px",color:Z.white,fontSize:13,outline:"none",fontFamily:font,cursor:"pointer"}}>
           {warehouseStaff.map(u=>{
             const uc = Object.values(machineComps[u.id]||{});
-            const expiredCnt = uc.filter(c=>{const ex=machineExpiryStatus(c);return c.status==="expired"||(ex&&ex.status==="expired");}).length;
+            const expiredCnt = uc.filter(c=>{const ex=machineExpiryStatus(c,machineTypes);return c.status==="expired"||(ex&&ex.status==="expired");}).length;
             return (
               <option key={u.id} value={u.id}>
                 {u.name}{u.jobTitle?` — ${u.jobTitle}`:""}
@@ -110,7 +183,7 @@ function AdminMachineryTab({ allStaff, machineComps, setMachineComps, Z, font })
             </div>
             <div style={{display:"flex",gap:8}}>
               <span style={{fontSize:12,background:"rgba(16,185,129,0.1)",color:"#10b981",padding:"4px 12px",borderRadius:8,fontWeight:600}}>
-                {userComps.filter(c=>c.status==="competent"&&!( machineExpiryStatus(c)?.status==="expired")).length} competent
+                {userComps.filter(c=>c.status==="competent"&&!( machineExpiryStatus(c,machineTypes)?.status==="expired")).length} competent
               </span>
               {userComps.filter(c=>c.status==="provisional").length>0&&<span style={{fontSize:12,background:"rgba(245,158,11,0.1)",color:"#f59e0b",padding:"4px 12px",borderRadius:8,fontWeight:600}}>{userComps.filter(c=>c.status==="provisional").length} provisional</span>}
             </div>
@@ -122,7 +195,7 @@ function AdminMachineryTab({ allStaff, machineComps, setMachineComps, Z, font })
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
                 <h3 style={{margin:0,fontSize:14,fontWeight:800,color:Z.accentLt,letterSpacing:.5,textTransform:"uppercase"}}>
                   {editingId==="new"?"Add New":"Edit"} Competence Record
-                  {form.machineId&&<span style={{marginLeft:8,fontSize:13,color:Z.white}}>— {MACHINERY_TYPES.find(m=>m.id===form.machineId)?.label}</span>}
+                  {form.machineId&&<span style={{marginLeft:8,fontSize:13,color:Z.white}}>— {machineTypes.find(m=>m.id===form.machineId)?.label}</span>}
                 </h3>
                 <button onClick={()=>{setEditingId(null);setForm(null);}} style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:8,padding:"5px 12px",color:Z.muted,cursor:"pointer",fontFamily:font,fontSize:12,fontWeight:700}}>✕ Cancel</button>
               </div>
@@ -132,7 +205,7 @@ function AdminMachineryTab({ allStaff, machineComps, setMachineComps, Z, font })
                   <label style={labelStyle}>EQUIPMENT TYPE *</label>
                   <select value={form.machineId} onChange={e=>setF("machineId",e.target.value)} style={selStyle}>
                     <option value="">— Select equipment —</option>
-                    {MACHINERY_TYPES.map(m=><option key={m.id} value={m.id}>{m.icon} {m.label} ({m.category})</option>)}
+                    {machineTypes.map(m=><option key={m.id} value={m.id}>{m.icon} {m.label} ({m.category})</option>)}
                   </select>
                 </div>
               )}
@@ -222,8 +295,8 @@ function AdminMachineryTab({ allStaff, machineComps, setMachineComps, Z, font })
           )}
 
           {/* Competence list by category */}
-          {MACHINE_CATEGORIES.map(cat=>{
-            const catMachines = MACHINERY_TYPES.filter(m=>m.category===cat);
+          {machineCategories.map(cat=>{
+            const catMachines = machineTypes.filter(m=>m.category===cat);
             const catComps = userComps.filter(c=>catMachines.some(m=>m.id===c.machineId));
             const unassigned = catMachines.filter(m=>!userComps.find(c=>c.machineId===m.id));
             return (
@@ -232,9 +305,9 @@ function AdminMachineryTab({ allStaff, machineComps, setMachineComps, Z, font })
                   <h3 style={{fontSize:11,fontWeight:800,letterSpacing:1,color:Z.muted,textTransform:"uppercase",margin:0}}>{cat}</h3>
                 </div>
                 {catComps.length>0&&catComps.map(comp=>{
-                  const type = MACHINERY_TYPES.find(m=>m.id===comp.machineId);
+                  const type = machineTypes.find(m=>m.id===comp.machineId);
                   const st = COMP_STATUS[comp.status]||COMP_STATUS.not_assessed;
-                  const ex = machineExpiryStatus(comp);
+                  const ex = machineExpiryStatus(comp,machineTypes);
                   const effectiveSt = (ex?.status==="expired"&&comp.status==="competent")?COMP_STATUS.expired:st;
                   return (
                     <div key={comp.id} style={{background:`linear-gradient(135deg,${Z.navyMd},${Z.navy})`,borderRadius:13,border:`1px solid ${effectiveSt.color}33`,marginBottom:8,padding:"13px 16px",display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
@@ -262,10 +335,17 @@ function AdminMachineryTab({ allStaff, machineComps, setMachineComps, Z, font })
                 {unassigned.length>0&&(
                   <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                     {unassigned.map(m=>(
-                      <button key={m.id} onClick={()=>startNew(m.id)}
-                        style={{display:"flex",alignItems:"center",gap:6,padding:"7px 14px",borderRadius:10,border:`1px dashed ${Z.borderMd}`,background:Z.overlay,color:Z.muted,cursor:"pointer",fontFamily:font,fontSize:12,transition:"all .2s"}}>
-                        <span>{m.icon}</span>+ {m.label}
-                      </button>
+                      <span key={m.id} style={{display:"inline-flex",alignItems:"center",gap:0,borderRadius:10,border:`1px dashed ${Z.borderMd}`,background:Z.overlay,overflow:"hidden"}}>
+                        <button onClick={()=>startNew(m.id)}
+                          style={{display:"flex",alignItems:"center",gap:6,padding:"7px 14px",border:"none",background:"none",color:Z.muted,cursor:"pointer",fontFamily:font,fontSize:12}}>
+                          <span>{m.icon}</span>+ {m.label}
+                          {m._custom&&<span style={{fontSize:9,fontWeight:700,color:Z.gold,marginLeft:4}}>CUSTOM</span>}
+                        </button>
+                        {m._custom&&(
+                          <button onClick={()=>deleteCustomType(m.id)} title="Remove custom machine type"
+                            style={{border:"none",background:"none",color:"#f87171",cursor:"pointer",padding:"7px 10px",fontSize:12}}>×</button>
+                        )}
+                      </span>
                     ))}
                   </div>
                 )}

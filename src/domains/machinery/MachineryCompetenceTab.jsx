@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { machineExpiryStatus, MACHINERY_TYPES, MACHINE_CATEGORIES, COMP_STATUS, isWarehouseWorker } from "../../data/seedMachinery";
+import { machineExpiryStatus, COMP_STATUS, isWarehouseWorker } from "../../data/seedMachinery";
 
-function MachineryCompetenceTab({ user, machineComps, setMachineComps, Z, font }) {
+function MachineryCompetenceTab({ user, machineComps, setMachineComps, allMachineTypes, allMachineCategories, Z, font }) {
   const myComps = machineComps[user.id] || [];
   const [expandedId, setExpandedId] = useState(null);
   const isWarehouse = isWarehouseWorker(user);
@@ -17,18 +17,21 @@ function MachineryCompetenceTab({ user, machineComps, setMachineComps, Z, font }
     </div>
   );
 
-  const grouped = MACHINE_CATEGORIES.map(cat=>({
+  const machineTypes = allMachineTypes || [];
+  const machineCategories = allMachineCategories || [];
+
+  const grouped = machineCategories.map(cat=>({
     cat,
-    machines: MACHINERY_TYPES.filter(m=>m.category===cat).map(m=>({
+    machines: machineTypes.filter(m=>m.category===cat).map(m=>({
       type:m,
       comp: myComps.find(c=>c.machineId===m.id)||null,
     }))
   }));
 
-  const validCount    = myComps.filter(c=>{ const ex=machineExpiryStatus(c); return c.status==="competent"&&(!ex||ex.status==="valid"); }).length;
-  const expiringCount = myComps.filter(c=>{ const ex=machineExpiryStatus(c); return ex?.status==="expiring"; }).length;
+  const validCount    = myComps.filter(c=>{ const ex=machineExpiryStatus(c,machineTypes); return c.status==="competent"&&(!ex||ex.status==="valid"); }).length;
+  const expiringCount = myComps.filter(c=>{ const ex=machineExpiryStatus(c,machineTypes); return ex?.status==="expiring"; }).length;
   const expiredCount  = myComps.filter(c=>{
-    const ex=machineExpiryStatus(c);
+    const ex=machineExpiryStatus(c,machineTypes);
     return c.status==="expired"||(ex&&ex.status==="expired");
   }).length;
 
@@ -64,7 +67,7 @@ function MachineryCompetenceTab({ user, machineComps, setMachineComps, Z, font }
             <div style={{display:"grid",gap:10}}>
               {active.map(({type,comp})=>{
                 const st = COMP_STATUS[comp.status]||COMP_STATUS.not_assessed;
-                const ex = machineExpiryStatus(comp);
+                const ex = machineExpiryStatus(comp,machineTypes);
                 const effectiveSt = (ex?.status==="expired"&&comp.status==="competent") ? COMP_STATUS.expired : st;
                 const isOpen = expandedId===comp.id;
                 return (

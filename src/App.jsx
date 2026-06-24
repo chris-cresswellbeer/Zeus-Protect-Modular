@@ -8,7 +8,7 @@ import { FA_ZONES } from "./data/seedFirstAid";
 import { INIT_INCIDENTS } from "./data/seedIncidents";
 import { INIT_SITE_INSPECTIONS } from "./data/seedInspections";
 import { INIT_INVESTIGATIONS } from "./data/seedInvestigations";
-import { isWarehouseWorker, INIT_MACHINE_COMPS } from "./data/seedMachinery";
+import { isWarehouseWorker, INIT_MACHINE_COMPS, MACHINERY_TYPES } from "./data/seedMachinery";
 import { INIT_RAS } from "./data/seedRiskAssessments";
 import { TRAINING_MODULES } from "./data/seedTraining";
 import { USERS } from "./data/seedUsers";
@@ -94,6 +94,7 @@ export default function App() {
   const [machineComps, setMachineComps] = useState(INIT_MACHINE_COMPS);
   const [siteInspections, setSiteInspections] = useState(INIT_SITE_INSPECTIONS);
   const [customModules, setCustomModules] = useState([]); // admin-created training modules
+  const [customMachineTypes, setCustomMachineTypes] = useState([]); // admin-created machinery types
   const [ras, setRas] = useState(INIT_RAS);
   const [permits, setPermits] = useState([]);
   const [contractors, setContractors] = useState([]);
@@ -119,6 +120,12 @@ export default function App() {
     ...TRAINING_MODULES.map(m => customModules.find(c=>c.id===m.id&&c._override) || m),
     ...customModules.filter(c=>!c._override),
   ];
+  // allMachineTypes: same override/merge pattern as allModules
+  const allMachineTypes = [
+    ...MACHINERY_TYPES.map(m => customMachineTypes.find(c=>c.id===m.id&&c._override) || m),
+    ...customMachineTypes.filter(c=>!c._override),
+  ];
+  const allMachineCategories = [...new Set(allMachineTypes.map(m=>m.category))];
   const [showAddStaff, setShowAddStaff] = useState(false);
   const [staffFilterManager,  setStaffFilterManager]  = useState("all");
   const [staffFilterSearch,   setStaffFilterSearch]   = useState("");
@@ -234,7 +241,7 @@ export default function App() {
           llRes, pwRes, usersRes, upRes, ecRes, qfRes, conRes, conIndRes,
           conCertRes, conVisitRes, permitRes, raRes, cmRes, mcRes, eqRes,
           siRes, msdsRes, ccRes, fwRes, fdRes, fatRes, fexRes, felRes,
-          ffrRes, faRes,
+          ffrRes, faRes, cmtRes,
         ] = await Promise.allSettled([
           sb.from("training_assigns").select("*"),
           sb.from("training_completions").select("*"),
@@ -270,6 +277,7 @@ export default function App() {
           sb.from("fire_emerg_lighting").select("*"),
           sb.from("fire_fra_reviews").select("*"),
           sb.from("first_aid_register").select("*").eq("id","singleton"),
+          sb.from("custom_machine_types").select("*"),
         ]);
 
         // Small helper: allSettled wraps each result in {status, value} or
@@ -278,7 +286,7 @@ export default function App() {
         // everything else's processing below.
         const rows = (res) => (res.status === "fulfilled" ? (res.value?.data ?? null) : null);
         if (usersRes.status === "rejected") console.error("Supabase load error (users):", usersRes.reason);
-        [aRes,cRes,iRes,invRes,ackRes,daRes,docRes,dseRes,resRes,llRes,pwRes,upRes,ecRes,qfRes,conRes,conIndRes,conCertRes,conVisitRes,permitRes,raRes,cmRes,mcRes,eqRes,siRes,msdsRes,ccRes,fwRes,fdRes,fatRes,fexRes,felRes,ffrRes,faRes]
+        [aRes,cRes,iRes,invRes,ackRes,daRes,docRes,dseRes,resRes,llRes,pwRes,upRes,ecRes,qfRes,conRes,conIndRes,conCertRes,conVisitRes,permitRes,raRes,cmRes,mcRes,eqRes,siRes,msdsRes,ccRes,fwRes,fdRes,fatRes,fexRes,felRes,ffrRes,faRes,cmtRes]
           .forEach(r => { if (r.status === "rejected") console.error("Supabase load error:", r.reason); });
 
         // Training assigns
@@ -470,6 +478,12 @@ export default function App() {
           setCustomModules(cmRows.map(r => r.data));
         }
 
+        // Custom machinery types (admin-added equipment categories)
+        const cmtRows = rows(cmtRes);
+        if (cmtRows && cmtRows.length) {
+          setCustomMachineTypes(cmtRows.map(r => r.data));
+        }
+
         // Machine completions
         const mcRows = rows(mcRes);
         if (mcRows && mcRows.length) {
@@ -610,6 +624,10 @@ export default function App() {
   useEffect(() => { if (!_ready.current) return;
     customModules.forEach(m => dbSaveCustomModule(m));
   }, [customModules]); // eslint-disable-line
+
+  useEffect(() => { if (!_ready.current) return;
+    customMachineTypes.forEach(m => dbSaveCustomMachineType(m));
+  }, [customMachineTypes]); // eslint-disable-line
 
   useEffect(() => { if (!_ready.current) return;
     Object.entries(passwords).forEach(([uid, pw]) => dbSavePassword(Number(uid), pw));
@@ -788,6 +806,14 @@ export default function App() {
 
   async function dbDeleteCustomModule(id) {
     await sb.from("custom_modules").delete().eq("id", id);
+  }
+
+  async function dbSaveCustomMachineType(type) {
+    await sb.from("custom_machine_types").upsert({ id: type.id, data: type }, { onConflict: "id" });
+  }
+
+  async function dbDeleteCustomMachineType(id) {
+    await sb.from("custom_machine_types").delete().eq("id", id);
   }
 
   async function dbSaveMachineComp(userId, machineId, data) {
@@ -2161,7 +2187,7 @@ export default function App() {
 
           {stab==="machinery" && isWarehouseWorker(user) && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
-            <LazyMachineryCompetenceTab user={user} machineComps={machineComps} setMachineComps={setMachineComps} Z={T} font={font}/>
+            <LazyMachineryCompetenceTab user={user} machineComps={machineComps} setMachineComps={setMachineComps} allMachineTypes={allMachineTypes} allMachineCategories={allMachineCategories} Z={T} font={font}/>
             </React.Suspense>
           )}
 
@@ -3749,7 +3775,7 @@ export default function App() {
 
           {atab==="reports" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
-            <LazyReportsTab staff={staff} assigns={assigns} comps={comps} docs={docs} docAssignments={docAssignments} docAcknowledgements={docAcknowledgements} reportView={adminReportView} setReportView={setAdminReportView} dseReports={dseReports} adminResponses={adminResponses} setAdminResponses={setAdminResponses} darkMode={darkMode} Z={T} font={font} modules={allModules} machineComps={machineComps} lastLoginMap={lastLoginMap} extCerts={extCerts} quizFailures={quizFailures} setQuizFailures={setQuizFailures} incidents={incidents} inspections={siteInspections} ras={ras} investigations={investigations} onExportPDF={u=>generateStaffPDF(u,allModules,assigns,comps,docs,docAssignments,docAcknowledgements,extCerts,machineComps,lastLoginMap,T)}/>
+            <LazyReportsTab staff={staff} assigns={assigns} comps={comps} docs={docs} docAssignments={docAssignments} docAcknowledgements={docAcknowledgements} reportView={adminReportView} setReportView={setAdminReportView} dseReports={dseReports} adminResponses={adminResponses} setAdminResponses={setAdminResponses} darkMode={darkMode} Z={T} font={font} modules={allModules} machineComps={machineComps} allMachineTypes={allMachineTypes} lastLoginMap={lastLoginMap} extCerts={extCerts} quizFailures={quizFailures} setQuizFailures={setQuizFailures} incidents={incidents} inspections={siteInspections} ras={ras} investigations={investigations} onExportPDF={u=>generateStaffPDF(u,allModules,assigns,comps,docs,docAssignments,docAcknowledgements,extCerts,machineComps,lastLoginMap,T,allMachineTypes)}/>
             </React.Suspense>
           )}
 
@@ -3781,7 +3807,7 @@ export default function App() {
 
           {atab==="machinery" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
-            <LazyAdminMachineryTab allStaff={staff} machineComps={machineComps} setMachineComps={setMachineComps} Z={T} font={font}/>
+            <LazyAdminMachineryTab allStaff={staff} machineComps={machineComps} setMachineComps={setMachineComps} allMachineTypes={allMachineTypes} allMachineCategories={allMachineCategories} setCustomMachineTypes={setCustomMachineTypes} dbDeleteCustomMachineType={dbDeleteCustomMachineType} Z={T} font={font}/>
             </React.Suspense>
           )}
 

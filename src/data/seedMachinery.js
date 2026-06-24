@@ -16,6 +16,8 @@ const MACHINERY_TYPES = [
   { id:"wrapper",  icon:"🌀",  label:"Pallet Wrapper",           category:"Machinery",licenceRequired:false, renewalMonths:0,  notes:"Trip hazard from film. Correct wrapping tension to prevent load shift." },
   { id:"conveyor", icon:"➡",   label:"Conveyor Systems",         category:"Machinery",licenceRequired:false, renewalMonths:24, notes:"Entrapment risks. Emergency stop locations must be known before operation." },
   { id:"docklevy", icon:"🚪",  label:"Dock Leveller",            category:"Handling", licenceRequired:false, renewalMonths:24, notes:"Bridging plate load limits. Vehicle restraint use where fitted." },
+  { id:"tractor",  icon:"🚜",  label:"Yard Tractor",             category:"Handling", licenceRequired:true,  renewalMonths:36, notes:"Site yard tractor. Not licensed for road use unless otherwise specified." },
+  { id:"scissor",  icon:"🪜",  label:"Scissor / Boom Lift (MEWP)",category:"Machinery",licenceRequired:true,  renewalMonths:36, notes:"IPAF PA1/PA3A or equivalent required. Working at height rules apply." },
 
 ];
 
@@ -28,8 +30,9 @@ const COMP_STATUS = {
   not_assessed:{ label:"Not Assessed",       color:"#64748b", bg:"rgba(100,116,139,0.12)",icon:"—"  },
 };
 
-function machineExpiryStatus(comp) {
-  const m = MACHINERY_TYPES.find(x=>x.id===comp.machineId);
+function machineExpiryStatus(comp, types) {
+  const list = types || MACHINERY_TYPES;
+  const m = list.find(x=>x.id===comp.machineId);
   if (!m || !m.renewalMonths || !comp.assessmentDate) return null;
   return getExpiryStatus(comp.assessmentDate, m.renewalMonths);
 }

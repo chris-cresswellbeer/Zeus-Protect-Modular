@@ -2,7 +2,8 @@ import { getExpiryStatus } from "../../lib/dates";
 import { EXT_CERT_TYPES } from "../../data/seedExtCerts";
 import { MACHINERY_TYPES } from "../../data/seedMachinery";
 
-function generateStaffPDF(u, allModules, assigns, comps, docs, docAssignments, docAcknowledgements, extCerts, machineComps, lastLoginMap, Z) {
+function generateStaffPDF(u, allModules, assigns, comps, docs, docAssignments, docAcknowledgements, extCerts, machineComps, lastLoginMap, Z, allMachineTypes) {
+  const machineTypes = allMachineTypes || MACHINERY_TYPES;
   const today = new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"long",year:"numeric"});
   const assignedIds = assigns[u.id]||[];
   const userComps = comps[u.id]||{};
@@ -68,7 +69,7 @@ function generateStaffPDF(u, allModules, assigns, comps, docs, docAssignments, d
   // Machinery
   const userMachineComps = Object.values(machineComps[u.id]||{});
   const machineRows = userMachineComps.map(mc=>{
-    const mType = MACHINERY_TYPES.find(x=>x.id===mc.machineId)||{label:mc.machineId,icon:"🔧"};
+    const mType = machineTypes.find(x=>x.id===mc.machineId)||{label:mc.machineId,icon:"🔧"};
     const expired = mc.licenceExpiry && mc.licenceExpiry < new Date().toISOString().slice(0,10);
     return `<tr style="background:${expired?"#fff8f0":"#fff"}">
       <td>${mType.icon||"🔧"} ${mType.label||mc.machineId}</td>

@@ -8,6 +8,8 @@ function DocCard({ d, staff, assignedIds, assignedStaff, readCount, unreadCount,
   const [expanded, setExpanded] = React.useState(false);
   const [editingReview, setEditingReview] = React.useState(false);
   const [reviewInput, setReviewInput] = React.useState(d.reviewDate||"");
+  const [editingDesc, setEditingDesc] = React.useState(false);
+  const [descInput, setDescInput] = React.useState(d.description||"");
   const extIcons={PDF:"📕",DOCX:"📘",DOC:"📘",XLSX:"📗",XLS:"📗",PPTX:"📙",PPT:"📙",PNG:"🖼️",JPG:"🖼️",JPEG:"🖼️",TXT:"📄",CSV:"📊"};
   const docIcon = extIcons[d.ext] || "📄";
 
@@ -28,12 +30,34 @@ function DocCard({ d, staff, assignedIds, assignedStaff, readCount, unreadCount,
     setEditingReview(false);
   }
 
+  function saveDescription(val) {
+    const updated = {...d, description: val||null};
+    setDocs(p=>p.map(x=>x.id===d.id?updated:x));
+    dbSaveDoc(updated, null);
+    setEditingDesc(false);
+  }
+
   return (
     <div style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:16,border:`1px solid ${reviewOverdue?"rgba(239,68,68,0.4)":reviewSoon?"rgba(245,158,11,0.35)":T.border}`,overflow:"hidden"}}>
       <div style={{padding:"14px 20px",display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
         <span style={{fontSize:26,flexShrink:0}}>{docIcon}</span>
         <div style={{flex:1,minWidth:0}}>
           <div style={{fontWeight:700,fontSize:14,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{d.title}</div>
+          {!editingDesc ? (
+            <div onClick={()=>{setDescInput(d.description||"");setEditingDesc(true);}}
+              style={{color:d.description?T.muted:"rgba(255,255,255,0.3)",fontSize:12,marginTop:2,cursor:"pointer",fontStyle:d.description?"normal":"italic",
+                whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+              {d.description || "+ Add description"}
+            </div>
+          ) : (
+            <div style={{display:"flex",alignItems:"flex-start",gap:6,marginTop:4}}>
+              <textarea value={descInput} onChange={e=>setDescInput(e.target.value)} autoFocus rows={2}
+                placeholder="What is this document for?"
+                style={{background:T.overlay,border:`1px solid ${T.borderMd}`,borderRadius:6,padding:"4px 8px",color:T.white,fontSize:12,outline:"none",fontFamily:font,resize:"vertical",flex:1,minWidth:180}}/>
+              <button onClick={()=>saveDescription(descInput)} style={{background:"rgba(16,185,129,0.15)",color:T.green,border:"1px solid rgba(16,185,129,0.3)",borderRadius:6,padding:"2px 8px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font}}>✓</button>
+              <button onClick={()=>setEditingDesc(false)} style={{background:"none",border:"none",color:T.muted,cursor:"pointer",fontSize:11,fontFamily:font}}>✕</button>
+            </div>
+          )}
           <div style={{color:T.muted,fontSize:12,marginTop:2,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
             <span>{d.date} · {d.size}{d.fileName?` · ${d.fileName.split(".").pop().toUpperCase()}`:""}</span>
             {/* Review date display / edit */}

@@ -677,6 +677,7 @@ export default function App() {
       type: doc.type, ext: doc.ext, file_name: doc.fileName, file_url: doc.fileUrl || null,
       version: doc.version || 1,
       review_date: doc.reviewDate || null,
+      description: doc.description || null,   // new
     }, { onConflict: "id" });
   }
 

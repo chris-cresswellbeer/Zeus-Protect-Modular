@@ -991,7 +991,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
               </div>
             )}
             {managerData.map((mgr,mi)=>(
-              <ManagerRow key={mgr.name} mgr={mgr} assigns={assigns} comps={comps} Z={Z} font={font} modules={allModules}/>
+              <ManagerRow key={mgr.name} mgr={mgr} assigns={assigns} comps={comps} Z={Z} font={font} modules={allModules} extCerts={extCerts} machineComps={machineComps} allMachineTypes={allMachineTypes}/>
             ))}
 
           </div>

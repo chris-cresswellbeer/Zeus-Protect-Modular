@@ -73,17 +73,20 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
   }
 
   async function saveModule() {
-    // Wait for any in-progress video uploads before saving
-    const anyUploading = slides.some(s => s.video && s.video.uploading);
+    // Wait for any in-progress video or image uploads before saving
+    const anyUploading = slides.some(s => (s.video && s.video.uploading) || (s.image && s.image.uploading));
     if (anyUploading) {
-      setErr("Please wait — video is still uploading.");
+      setErr("Please wait — a file is still uploading.");
       return;
     }
-    // Strip out any video entries that failed (no url and no data)
+    // Strip out any video/image entries that failed (no url and no data)
     const cleanSlides = slides.map(s => ({
       ...s,
       video: s.video && (s.video.url || s.video.data)
         ? { name: s.video.name, type: s.video.type, url: s.video.url || s.video.data, data: s.video.url || s.video.data }
+        : null,
+      image: s.image && (s.image.url || s.image.data)
+        ? { name: s.image.name, type: s.image.type, url: s.image.url || s.image.data, data: s.image.url || s.image.data }
         : null,
     }));
     const newModule = {
@@ -95,7 +98,12 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
       _custom: true,
     };
     // Save directly to Supabase before updating state
-    await sb.from("custom_modules").upsert({ id: newModule.id, data: newModule }, { onConflict: "id" });
+    const { error } = await sb.from("custom_modules").upsert({ id: newModule.id, data: newModule }, { onConflict: "id" });
+    if (error) {
+      console.error("Failed to save module:", error);
+      setErr(`Failed to save module — your changes were not saved. ${error}`);
+      return;
+    }
     onSave(newModule);
   }
 
@@ -199,10 +207,14 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
                 <label style={lbl}>Image (optional)</label>
                 {s.image ? (
                   <div style={{background:Z.overlaySm,borderRadius:10,padding:"12px 14px",border:`1px solid ${Z.borderMd}`,display:"flex",alignItems:"center",gap:12}}>
-                    <img src={s.image.data||s.image.url} alt={s.image.name} style={{width:64,height:48,objectFit:"cover",borderRadius:6,flexShrink:0}}/>
+                    {s.image.uploading ? (
+                      <span style={{fontSize:20}}>🖼️</span>
+                    ) : (
+                      <img src={s.image.url||s.image.data} alt={s.image.name} style={{width:64,height:48,objectFit:"cover",borderRadius:6,flexShrink:0}}/>
+                    )}
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{fontSize:12,fontWeight:700,color:Z.white,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.image.name}</div>
-                      <div style={{fontSize:10,color:Z.muted,marginTop:2}}>✓ Uploaded</div>
+                      <div style={{fontSize:10,color:Z.muted,marginTop:2}}>{s.image.uploading ? "Uploading…" : (s.image.url || s.image.data) ? "✓ Uploaded" : ""}</div>
                     </div>
                     <button onClick={()=>updateSlide(i,"image",null)} style={{background:"rgba(239,68,68,0.1)",color:"#f87171",border:"1px solid rgba(239,68,68,0.25)",borderRadius:7,padding:"5px 10px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font}}>Remove</button>
                   </div>
@@ -210,11 +222,15 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
                   <>
                     <input ref={el=>imageInputRefs.current[i]=el} type="file" accept={ACCEPT_IMAGES}
                       style={{display:"none"}}
-                      onChange={e=>{
+                      onChange={async e=>{
                         const file=e.target.files[0]; if(!file) return;
-                        const reader=new FileReader();
-                        reader.onload=ev=>updateSlide(i,"image",{name:file.name,type:file.type,data:ev.target.result,url:ev.target.result});
-                        reader.readAsDataURL(file);
+                        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+                        const path = `slideimg_${Date.now()}_${safeName}`;
+                        updateSlide(i,"image",{name:file.name,type:file.type,data:null,uploading:true});
+                        const { error } = await sb.storage.upload("documents", path, file);
+                        if (error) { alert("Image upload failed: " + error); updateSlide(i,"image",null); return; }
+                        const url = `${SUPABASE_URL}/storage/v1/object/public/documents/${path}`;
+                        updateSlide(i,"image",{name:file.name,type:file.type,data:url,url});
                         e.target.value="";
                       }}/>
                     <div onClick={()=>imageInputRefs.current[i]&&imageInputRefs.current[i].click()}

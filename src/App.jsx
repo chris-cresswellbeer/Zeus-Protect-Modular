@@ -801,7 +801,10 @@ export default function App() {
   }
 
   async function dbSaveCustomModule(mod) {
-    await sb.from("custom_modules").upsert({ id: mod.id, data: mod }, { onConflict: "id" });
+    const { error } = await sb.from("custom_modules").upsert({ id: mod.id, data: mod }, { onConflict: "id" });
+    if (error) {
+      console.error(`Failed to save module "${mod.title || mod.id}":`, error);
+    }
   }
 
   async function dbDeleteCustomModule(id) {

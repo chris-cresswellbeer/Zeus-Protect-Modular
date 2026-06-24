@@ -2753,7 +2753,7 @@ export default function App() {
               </div>
             );
 
-            const listCard = (items, emptyMsg, renderItem) => (
+            const listCard = (items, emptyMsg, renderItem, onMoreClick) => (
               <div style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:14,border:`1px solid ${T.border}`,overflow:"hidden"}}>
                 {items.length===0
                   ? <div style={{padding:"20px",textAlign:"center",color:T.green,fontSize:13,fontWeight:600}}>✓ {emptyMsg}</div>
@@ -2763,7 +2763,13 @@ export default function App() {
                     </div>
                   ))
                 }
-                {items.length>5 && <div style={{padding:"8px 16px",borderTop:`1px solid ${T.border}`,fontSize:11,color:T.muted,textAlign:"center"}}>+{items.length-5} more</div>}
+                {items.length>5 && (
+                  <div onClick={onMoreClick} style={{padding:"8px 16px",borderTop:`1px solid ${T.border}`,fontSize:11,color:onMoreClick?T.accentLt:T.muted,textAlign:"center",cursor:onMoreClick?"pointer":"default",fontWeight:onMoreClick?700:400,transition:"background .15s"}}
+                    onMouseEnter={e=>{if(onMoreClick)e.currentTarget.style.background="rgba(37,99,235,0.08)";}}
+                    onMouseLeave={e=>{e.currentTarget.style.background="";}}>
+                    +{items.length-5} more{onMoreClick?" →":""}
+                  </div>
+                )}
               </div>
             );
 
@@ -2869,7 +2875,7 @@ export default function App() {
                         </div>
                         <button onClick={()=>setAtab("assign")} style={{background:"rgba(37,99,235,0.1)",color:T.accentLt,border:`1px solid ${T.accent}33`,borderRadius:7,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font,flexShrink:0}}>Assign →</button>
                       </>);
-                    })
+                    },()=>setAtab("assign"))
                   )}
 
                   {/* Open incidents */}
@@ -2884,7 +2890,7 @@ export default function App() {
                         {inc.riddor&&!inc.riddorReported&&<span style={{fontSize:10,fontWeight:700,color:"#f87171",background:"rgba(239,68,68,0.1)",padding:"2px 7px",borderRadius:6,border:"1px solid rgba(239,68,68,0.25)",flexShrink:0}}>RIDDOR ⚠</span>}
                         <button onClick={()=>{setFocusIncidentId(inc.id);setAtab("incidents");}} style={{background:"rgba(239,68,68,0.1)",color:"#f87171",border:"1px solid rgba(239,68,68,0.2)",borderRadius:7,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font,flexShrink:0}}>View →</button>
                       </>
-                    ))
+                    ),()=>setAtab("incidents"))
                   )}
 
                   {/* Equipment overdue */}
@@ -2900,7 +2906,7 @@ export default function App() {
                         </div>
                         <button onClick={()=>setAtab("equipment")} style={{background:"rgba(245,158,11,0.1)",color:"#f59e0b",border:"1px solid rgba(245,158,11,0.2)",borderRadius:7,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font,flexShrink:0}}>View →</button>
                       </>);
-                    })
+                    },()=>setAtab("equipment"))
                   )}
 
                   {/* Expiring external certs */}
@@ -2914,7 +2920,7 @@ export default function App() {
                         </div>
                         <button onClick={()=>setAtab("assign")} style={{background:"rgba(239,68,68,0.1)",color:"#f87171",border:"1px solid rgba(239,68,68,0.2)",borderRadius:7,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font,flexShrink:0}}>Update →</button>
                       </>
-                    ))
+                    ),()=>setAtab("assign"))
                   )}
                 </div>
 
@@ -2928,7 +2934,7 @@ export default function App() {
                         <div style={{fontSize:11,color:T.muted}}>{inc.date} · {inc.location} · {inc.closed?"Closed":"Open"}</div>
                       </div>
                     </>
-                  ))
+                  ),()=>setAtab("incidents"))
                 )}
               </div>
             );

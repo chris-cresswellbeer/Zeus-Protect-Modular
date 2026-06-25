@@ -88,7 +88,8 @@ function WorkerDetailModal({ worker, companyId, contractorInductions, setContrac
                               const file=e.target.files[0]; if(!file) return;
                               setCertUploading(ct.id);
                               const path=`contractor_certs/${wid}_${ct.id}_${file.name.replace(/[^a-zA-Z0-9._-]/g,"_")}`;
-                              await sb.storage.upload("documents",path,file);
+                              const { error } = await sb.storage.upload("documents",path,file);
+                              if (error) { console.error("Cert upload failed:", error); alert("Upload failed: " + error); setCertUploading(null); return; }
                               const fileUrl=sb.storage.getPublicUrl("documents",path);
                               const issued=prompt("Issue date (YYYY-MM-DD):","")||"";
                               const expiry=prompt("Expiry date (YYYY-MM-DD):","")||"";

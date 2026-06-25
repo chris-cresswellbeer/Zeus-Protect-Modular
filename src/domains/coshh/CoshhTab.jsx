@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useWindowWidth } from "../../shared/hooks";
 import { HelpTip } from "../../shared/HelpTip";
-import { sb } from "../../lib/supabase";
+import { sb, dbWrite } from "../../lib/supabase";
 import { coshhHazardLevel } from "./coshhHazardLevel";
 import { COSHH_DATA } from "../../data/seedCoshh";
 import { CoshhAssessmentForm } from "./CoshhAssessmentForm";
@@ -52,7 +52,7 @@ function CoshhTab({ Z, font, msdsFiles, setMsdsFiles, customChemicals, setCustom
     if (allChemicals.some(c=>c.code.trim().toLowerCase()===addForm.code.trim().toLowerCase())) { setAddErr(`Code ${addForm.code.trim()} already exists in the register.`); return; }
     const chem = {...addForm, code:addForm.code.trim(), name:addForm.name.trim(), supplier:addForm.supplier.trim(), _custom:true};
     setCustomChemicals(prev=>[...prev, chem]);
-    sb.from("custom_chemicals").upsert({ code: chem.code, data: chem }, { onConflict: "code" });
+    dbWrite(sb.from("custom_chemicals").upsert({ code: chem.code, data: chem }, { onConflict: "code" }), "chemical", { alertOnError: true });
     setAddForm(BLANK_CHEM);
     setShowAddForm(false);
     setAddErr("");
@@ -61,16 +61,16 @@ function CoshhTab({ Z, font, msdsFiles, setMsdsFiles, customChemicals, setCustom
 
   async function saveAssessment(code, data) {
     setAssessments(p=>({...p,[code]:data}));
-    await sb.from("coshh_assessments").upsert({ code, data }, { onConflict: "code" });
+    await dbWrite(sb.from("coshh_assessments").upsert({ code, data }, { onConflict: "code" }), "COSHH assessment", { alertOnError: true });
   }
 
   async function deleteChemical(code) {
     setCustomChemicals(prev=>prev.filter(c=>c.code!==code));
     const msds = msdsFiles[code];
-    if (msds) await sb.storage.remove("documents", [`msds/${code}/${msds.fileName}`]);
+    if (msds) await dbWrite(sb.storage.remove("documents", [`msds/${code}/${msds.fileName}`]), "MSDS file delete");
     setMsdsFiles(prev=>{ const n={...prev}; delete n[code]; return n; });
-    await sb.from("custom_chemicals").delete().eq("code", code);
-    await sb.from("msds_files").delete().eq("code", code);
+    await dbWrite(sb.from("custom_chemicals").delete().eq("code", code), "chemical delete");
+    await dbWrite(sb.from("msds_files").delete().eq("code", code), "MSDS record delete");
     if(expandedCode===code) setExpandedCode(null);
   }
 
@@ -87,17 +87,17 @@ function CoshhTab({ Z, font, msdsFiles, setMsdsFiles, customChemicals, setCustom
     const fileUrl = sb.storage.getPublicUrl("documents", path);
     const rec = { fileName: file.name, fileData: fileUrl, fileUrl, uploadedAt: new Date().toLocaleDateString("en-GB") };
     setMsdsFiles(prev => ({...prev, [code]: rec}));
-    await sb.from("msds_files").upsert({ code, file_name: file.name, file_url: fileUrl, uploaded_at: new Date().toLocaleDateString("en-GB") }, { onConflict: "code" });
+    await dbWrite(sb.from("msds_files").upsert({ code, file_name: file.name, file_url: fileUrl, uploaded_at: new Date().toLocaleDateString("en-GB") }, { onConflict: "code" }), "MSDS record", { alertOnError: true });
   }
 
   async function removeMsds(code) {
     const msds = msdsFiles[code];
     if (msds) {
       const safeName = msds.fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
-      await sb.storage.remove("documents", [`msds_${code}_${safeName}`]);
+      await dbWrite(sb.storage.remove("documents", [`msds_${code}_${safeName}`]), "MSDS file delete");
     }
     setMsdsFiles(prev => { const n = {...prev}; delete n[code]; return n; });
-    await sb.from("msds_files").delete().eq("code", code);
+    await dbWrite(sb.from("msds_files").delete().eq("code", code), "MSDS record delete");
   }
 
   // MSDS full-screen preview modal

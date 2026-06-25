@@ -41,7 +41,7 @@ const LazyReportsTab = React.lazy(() => import("./domains/training/ReportsTab").
 import { generateStaffPDF } from "./domains/training/generateStaffPDF";
 import { getExpiryStatus } from "./lib/dates";
 import { EmojiCtx, E, syncEmojiMode } from "./lib/emoji";
-import { sb, hashPassword, DEFAULT_HASH } from "./lib/supabase";
+import { sb, hashPassword, DEFAULT_HASH, dbWrite } from "./lib/supabase";
 import { HelpTip } from "./shared/HelpTip";
 import { ZeusLogo, ZeusProtectLogo, ZEUS_LOGO_LIGHT_SRC } from "./shared/Logo";
 import { NotificationBell } from "./shared/NotificationBell";
@@ -412,7 +412,7 @@ export default function App() {
           // First run — seed the users table from the hardcoded USERS constant
           setAllUsers(USERS);
           try {
-            await sb.from("users").insert(USERS.map(u => ({ id: String(u.id), data: u })));
+            await dbWrite(sb.from("users").insert(USERS.map(u => ({ id: String(u.id), data: u }))), "seed users");
           } catch(seedErr) {
             console.warn("User seed error (may already exist):", seedErr);
           }
@@ -637,7 +637,7 @@ export default function App() {
 
   async function dbSaveAssigns(newAssigns) {
     for (const [uid, mids] of Object.entries(newAssigns)) {
-      await sb.from("training_assigns").delete().eq("user_id", String(uid));
+      await dbWrite(sb.from("training_assigns").delete().eq("user_id", String(uid)), "training assignments clear");
       if (mids && mids.length) {
         const rows = mids.map(mid => ({ user_id: String(uid), module_id: String(mid) }));
         const { error } = await sb.from("training_assigns").insert(rows);
@@ -647,14 +647,14 @@ export default function App() {
   }
 
   async function dbSaveCompletion(userId, moduleId, rec) {
-    await sb.from("training_completions").upsert({
+    await dbWrite(sb.from("training_completions").upsert({
       user_id: userId, module_id: moduleId,
       score: rec.score, date: rec.date, cert_id: rec.certId, answers: rec.answers,
-    }, { onConflict: "user_id,module_id" });
+    }, { onConflict: "user_id,module_id" }), "training completion");
   }
 
   async function dbSaveIncident(inc) {
-    await sb.from("incidents").upsert({
+    await dbWrite(sb.from("incidents").upsert({
       id: inc.id, date: inc.date, type: inc.type, accident_code: inc.accidentCode,
       number_code: inc.numberCode, location: inc.location, reported_by: inc.reportedBy,
       description: inc.description, injury_type: inc.injuryType, riddor: inc.riddor, closed: inc.closed,
@@ -662,24 +662,24 @@ export default function App() {
       riddor_reported_date: inc.riddorReportedDate||null,
       hse_reference: inc.hseReference||null,
       riddor_reported_by: inc.riddorReportedBy||null,
-    }, { onConflict: "id" });
+    }, { onConflict: "id" }), "incident", { alertOnError: true });
   }
 
   async function dbDeleteIncident(id) {
-    await sb.from("incidents").delete().eq("id", id);
+    await dbWrite(sb.from("incidents").delete().eq("id", id), "incident delete");
   }
 
   async function dbSaveInvestigation(incidentId, data) {
-    await sb.from("investigations").upsert({ incident_id: incidentId, data }, { onConflict: "incident_id" });
+    await dbWrite(sb.from("investigations").upsert({ incident_id: incidentId, data }, { onConflict: "incident_id" }), "investigation");
   }
 
   async function dbAcknowledgeDoc(userId, docId, date) {
-    await sb.from("doc_acknowledgements").upsert({ user_id: String(userId), doc_id: String(docId), date }, { onConflict: "user_id,doc_id" });
+    await dbWrite(sb.from("doc_acknowledgements").upsert({ user_id: String(userId), doc_id: String(docId), date }, { onConflict: "user_id,doc_id" }), "document acknowledgement");
   }
 
   async function dbSaveDocAssignments(docId, userIds) {
-    await sb.from("doc_assignments").delete().eq("doc_id", String(docId));
-    if (userIds.length) await sb.from("doc_assignments").insert(userIds.map(uid => ({ doc_id: String(docId), user_id: String(uid) })));
+    await dbWrite(sb.from("doc_assignments").delete().eq("doc_id", String(docId)), "doc assignments clear");
+    if (userIds.length) await dbWrite(sb.from("doc_assignments").insert(userIds.map(uid => ({ doc_id: String(docId), user_id: String(uid) }))), "doc assignments");
   }
 
   async function dbSaveDoc(doc, file) {
@@ -691,48 +691,48 @@ export default function App() {
       if (error) { console.error("Doc upload failed:", error); alert("Upload failed: " + error); return; }
       doc.fileUrl = sb.storage.getPublicUrl("documents", path);
     }
-    await sb.from("documents").upsert({
+    await dbWrite(sb.from("documents").upsert({
       id: doc.id, title: doc.title, date: doc.date, size: doc.size,
       type: doc.type, ext: doc.ext, file_name: doc.fileName, file_url: doc.fileUrl || null,
       version: doc.version || 1,
       review_date: doc.reviewDate || null,
       description: doc.description || null,
-    }, { onConflict: "id" });
+    }, { onConflict: "id" }), "document", { alertOnError: true });
   }
 
   async function dbDeleteDoc(id, fileName) {
     if (fileName) {
       const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
-      await sb.storage.remove("documents", [`doc_${id}_${safeName}`]);
+      await dbWrite(sb.storage.remove("documents", [`doc_${id}_${safeName}`]), "document file delete");
     }
-    await sb.from("documents").delete().eq("id", id);
-    await sb.from("doc_assignments").delete().eq("doc_id", id);
-    await sb.from("doc_acknowledgements").delete().eq("doc_id", id);
+    await dbWrite(sb.from("documents").delete().eq("id", id), "document delete");
+    await dbWrite(sb.from("doc_assignments").delete().eq("doc_id", id), "doc assignments delete");
+    await dbWrite(sb.from("doc_acknowledgements").delete().eq("doc_id", id), "doc acknowledgements delete");
   }
 
   async function dbSaveDseReport(userId, reports) {
-    await sb.from("dse_reports").delete().eq("user_id", userId);
+    await dbWrite(sb.from("dse_reports").delete().eq("user_id", userId), "DSE reports clear");
     if (reports.length) {
-      await sb.from("dse_reports").insert(reports.map((r, i) => ({ user_id: String(userId), report_idx: i, data: r })));
+      await dbWrite(sb.from("dse_reports").insert(reports.map((r, i) => ({ user_id: String(userId), report_idx: i, data: r }))), "DSE reports");
     }
   }
 
   async function dbSaveDseAdminResponse(userId, reportIdx, issueIdx, rec) {
-    await sb.from("dse_admin_responses").upsert({
+    await dbWrite(sb.from("dse_admin_responses").upsert({
       user_id: userId, report_idx: reportIdx, issue_idx: issueIdx,
       comment: rec.comment, resolved: rec.resolved,
-    }, { onConflict: "user_id,report_idx,issue_idx" });
+    }, { onConflict: "user_id,report_idx,issue_idx" }), "DSE admin response");
   }
 
   async function dbRecordLogin(userId, ts) {
-    await sb.from("last_logins").upsert({ user_id: String(userId), last_login: ts }, { onConflict: "user_id" });
+    await dbWrite(sb.from("last_logins").upsert({ user_id: String(userId), last_login: ts }, { onConflict: "user_id" }), "last login");
   }
 
   async function dbSavePassword(userId, password) {
     // Always store hashed — hash it here if it's not already a 64-char hex hash
     const isAlreadyHashed = /^[0-9a-f]{64}$/.test(password);
     const hashed = isAlreadyHashed ? password : await hashPassword(password);
-    await sb.from("user_passwords").upsert({ user_id: String(userId), password: hashed }, { onConflict: "user_id" });
+    await dbWrite(sb.from("user_passwords").upsert({ user_id: String(userId), password: hashed }, { onConflict: "user_id" }), "password", { alertOnError: true });
   }
 
   async function dbSaveTheme(userId, themeKey) {
@@ -742,7 +742,7 @@ export default function App() {
     const merged = { ...(existing?.data || {}), theme: themeKey };
     window.__userProfiles = profiles.map(r => String(r.user_id)===sid ? {...r, data:merged} : r);
     if (!existing) window.__userProfiles.push({ user_id: sid, data: merged });
-    await sb.from("user_profiles").upsert({ user_id: sid, data: merged }, { onConflict: "user_id" });
+    await dbWrite(sb.from("user_profiles").upsert({ user_id: sid, data: merged }, { onConflict: "user_id" }), "theme preference");
   }
 
   async function dbSaveEmojiMode(userId, enabled) {
@@ -752,75 +752,72 @@ export default function App() {
     const merged = { ...(existing?.data || {}), emojiMode: enabled };
     window.__userProfiles = profiles.map(r => String(r.user_id)===sid ? {...r, data:merged} : r);
     if (!existing) window.__userProfiles.push({ user_id: sid, data: merged });
-    await sb.from("user_profiles").upsert({ user_id: sid, data: merged }, { onConflict: "user_id" });
+    await dbWrite(sb.from("user_profiles").upsert({ user_id: sid, data: merged }, { onConflict: "user_id" }), "emoji mode preference");
   }
 
   async function dbSaveUser(user) {
-    await sb.from("users").upsert({ id: String(user.id), data: user }, { onConflict: "id" });
+    await dbWrite(sb.from("users").upsert({ id: String(user.id), data: user }, { onConflict: "id" }), "user", { alertOnError: true });
   }
 
   async function dbDeleteUser(userId) {
-    await sb.from("users").delete().eq("id", String(userId));
+    await dbWrite(sb.from("users").delete().eq("id", String(userId)), "user delete", { alertOnError: true });
   }
 
   async function dbSaveUserProfile(user) {
-    await sb.from("user_profiles").upsert({ user_id: String(user.id), data: user }, { onConflict: "user_id" });
+    await dbWrite(sb.from("user_profiles").upsert({ user_id: String(user.id), data: user }, { onConflict: "user_id" }), "user profile");
   }
 
   async function dbDeleteUserProfile(userId) {
-    await sb.from("user_profiles").delete().eq("user_id", String(userId));
+    await dbWrite(sb.from("user_profiles").delete().eq("user_id", String(userId)), "user profile delete");
   }
 
-  async function dbSaveContractor(c) { await sb.from("contractors").upsert({id:c.id,data:c},{onConflict:"id"}); }
-  async function dbDeleteContractor(id) { await sb.from("contractors").delete().eq("id",id); }
-  async function dbSaveContractorInductions(cid,data) { await sb.from("contractor_inductions").upsert({contractor_id:cid,data},{onConflict:"contractor_id"}); }
-  async function dbSaveContractorCerts(cid,data) { await sb.from("contractor_certs").upsert({contractor_id:cid,data},{onConflict:"contractor_id"}); }
-  async function dbSaveContractorVisits(cid,data) { await sb.from("contractor_visits").upsert({contractor_id:cid,data},{onConflict:"contractor_id"}); }
+  async function dbSaveContractor(c) { await dbWrite(sb.from("contractors").upsert({id:c.id,data:c},{onConflict:"id"}), "contractor"); }
+  async function dbDeleteContractor(id) { await dbWrite(sb.from("contractors").delete().eq("id",id), "contractor delete"); }
+  async function dbSaveContractorInductions(cid,data) { await dbWrite(sb.from("contractor_inductions").upsert({contractor_id:cid,data},{onConflict:"contractor_id"}), "contractor inductions"); }
+  async function dbSaveContractorCerts(cid,data) { await dbWrite(sb.from("contractor_certs").upsert({contractor_id:cid,data},{onConflict:"contractor_id"}), "contractor certs"); }
+  async function dbSaveContractorVisits(cid,data) { await dbWrite(sb.from("contractor_visits").upsert({contractor_id:cid,data},{onConflict:"contractor_id"}), "contractor visits"); }
 
   async function dbSavePermit(p) {
-    await sb.from("permits").upsert({ id: p.id, data: p }, { onConflict: "id" });
+    await dbWrite(sb.from("permits").upsert({ id: p.id, data: p }, { onConflict: "id" }), "permit", { alertOnError: true });
   }
   async function dbDeletePermit(id) {
-    await sb.from("permits").delete().eq("id", id);
+    await dbWrite(sb.from("permits").delete().eq("id", id), "permit delete");
   }
 
   async function dbSaveRA(ra) {
-    await sb.from("risk_assessments").upsert({ id: ra.id, data: ra }, { onConflict: "id" });
+    await dbWrite(sb.from("risk_assessments").upsert({ id: ra.id, data: ra }, { onConflict: "id" }), "risk assessment", { alertOnError: true });
   }
 
   async function dbSaveQuizFailure(record) {
-    await sb.from("quiz_failures").insert({ data: record });
+    await dbWrite(sb.from("quiz_failures").insert({ data: record }), "quiz failure record");
   }
 
   async function dbSaveExtCert(userId, certType, data) {
-    await sb.from("ext_certs").upsert({ user_id: String(userId), cert_type: certType, data }, { onConflict: "user_id,cert_type" });
+    await dbWrite(sb.from("ext_certs").upsert({ user_id: String(userId), cert_type: certType, data }, { onConflict: "user_id,cert_type" }), "external certificate", { alertOnError: true });
   }
 
   async function dbDeleteExtCert(userId, certType) {
-    await sb.from("ext_certs").delete().match({ user_id: userId, cert_type: certType });
+    await dbWrite(sb.from("ext_certs").delete().match({ user_id: userId, cert_type: certType }), "external certificate delete");
   }
 
   async function dbSaveCustomModule(mod) {
-    const { error } = await sb.from("custom_modules").upsert({ id: mod.id, data: mod }, { onConflict: "id" });
-    if (error) {
-      console.error(`Failed to save module "${mod.title || mod.id}":`, error);
-    }
+    await dbWrite(sb.from("custom_modules").upsert({ id: mod.id, data: mod }, { onConflict: "id" }), `module "${mod.title || mod.id}"`);
   }
 
   async function dbDeleteCustomModule(id) {
-    await sb.from("custom_modules").delete().eq("id", id);
+    await dbWrite(sb.from("custom_modules").delete().eq("id", id), "module delete");
   }
 
   async function dbSaveCustomMachineType(type) {
-    await sb.from("custom_machine_types").upsert({ id: type.id, data: type }, { onConflict: "id" });
+    await dbWrite(sb.from("custom_machine_types").upsert({ id: type.id, data: type }, { onConflict: "id" }), "custom machine type");
   }
 
   async function dbDeleteCustomMachineType(id) {
-    await sb.from("custom_machine_types").delete().eq("id", id);
+    await dbWrite(sb.from("custom_machine_types").delete().eq("id", id), "custom machine type delete");
   }
 
   async function dbSaveMachineComp(userId, machineId, data) {
-    await sb.from("machine_completions").upsert({ user_id: String(userId), machine_id: String(machineId), data }, { onConflict: "user_id,machine_id" });
+    await dbWrite(sb.from("machine_completions").upsert({ user_id: String(userId), machine_id: String(machineId), data }, { onConflict: "user_id,machine_id" }), "machine competence record", { alertOnError: true });
   }
 
   async function dbSaveEquipment(items) {
@@ -829,28 +826,28 @@ export default function App() {
     // were genuinely removed get deleted. The old version deleted and
     // reinserted the entire table on every single edit, regardless of how
     // many items actually changed.
-    if (items.length) await sb.from("equipment").upsert(items.map(e => ({ id: e.id, data: e })), { onConflict: "id" });
+    if (items.length) await dbWrite(sb.from("equipment").upsert(items.map(e => ({ id: e.id, data: e })), { onConflict: "id" }), "equipment sync");
     const { data: existing } = await sb.from("equipment").select("id");
     if (existing && existing.length) {
       const currentIds = new Set(items.map(e => e.id));
       const toDelete = existing.filter(r => !currentIds.has(r.id)).map(r => r.id);
-      for (const id of toDelete) await sb.from("equipment").delete().eq("id", id);
+      for (const id of toDelete) await dbWrite(sb.from("equipment").delete().eq("id", id), "equipment delete");
     }
   }
 
   async function dbSaveSiteInspections(items) {
     // Same upsert-and-prune approach as dbSaveEquipment above.
-    if (items.length) await sb.from("site_inspections").upsert(items.map(e => ({ id: e.id, data: e })), { onConflict: "id" });
+    if (items.length) await dbWrite(sb.from("site_inspections").upsert(items.map(e => ({ id: e.id, data: e })), { onConflict: "id" }), "site inspections sync");
     const { data: existing } = await sb.from("site_inspections").select("id");
     if (existing && existing.length) {
       const currentIds = new Set(items.map(e => e.id));
       const toDelete = existing.filter(r => !currentIds.has(r.id)).map(r => r.id);
-      for (const id of toDelete) await sb.from("site_inspections").delete().eq("id", id);
+      for (const id of toDelete) await dbWrite(sb.from("site_inspections").delete().eq("id", id), "site inspection delete");
     }
   }
 
   async function dbSaveFirstAidData(data) {
-    await sb.from("first_aid_register").upsert({ id: "singleton", data }, { onConflict: "id" });
+    await dbWrite(sb.from("first_aid_register").upsert({ id: "singleton", data }, { onConflict: "id" }), "first aid register");
   }
 
   async function dbSaveFireSafety(fs) {
@@ -859,7 +856,7 @@ export default function App() {
       const rows = table === "fire_fra_reviews"
         ? items.map(r => { const {fileData, _fileObj, ...rest} = r; return { id: r.id, data: rest }; })
         : items.map(r => { const {_fileObj, ...rest} = r; return { id: r.id, data: rest }; });
-      await sb.from(table).upsert(rows, { onConflict: "id" });
+      await dbWrite(sb.from(table).upsert(rows, { onConflict: "id" }), `fire safety: ${table}`);
     };
     const deleteRemoved = async (table, items) => {
       if (!items || !items.length) return;
@@ -869,7 +866,7 @@ export default function App() {
       const currentIds = new Set(items.map(r => r.id));
       const toDelete = existing.filter(r => !currentIds.has(r.id)).map(r => r.id);
       if (toDelete.length) {
-        for (const id of toDelete) await sb.from(table).delete().eq("id", id);
+        for (const id of toDelete) await dbWrite(sb.from(table).delete().eq("id", id), `fire safety delete: ${table}`);
       }
     };
     const sync = async (table, items) => {
@@ -894,7 +891,7 @@ export default function App() {
 
   async function dbDeleteFraDocument(reviewId, fileName) {
     const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
-    await sb.storage.remove("fire-safety", [`fra_${reviewId}_${safeName}`]);
+    await dbWrite(sb.storage.remove("fire-safety", [`fra_${reviewId}_${safeName}`]), "FRA document delete");
   }
 
   // ── Show loading screen until Supabase data is ready ────────────────────────

@@ -81,4 +81,19 @@ async function hashPassword(password) {
 let DEFAULT_HASH = "";
 hashPassword("pass123").then(h => { DEFAULT_HASH = h; });
 
-export { SUPABASE_URL, SUPABASE_ANON, sb, hashPassword, DEFAULT_HASH };
+// ─── Write helper — surfaces errors instead of silently swallowing them ────────
+// Wrap any sb.from(...).upsert/insert/update/delete(...) or sb.storage.upload/remove(...)
+// call. Logs on failure (and optionally alerts) so a failed save is never silent.
+// Usage: await dbWrite(sb.from("incidents").upsert({...}), "incident");
+async function dbWrite(promise, label, opts = {}) {
+  const { error } = await promise;
+  if (error) {
+    console.error(`[dbWrite] Save failed${label ? ` [${label}]` : ""}:`, error);
+    if (opts.alertOnError) {
+      alert(`Failed to save${label ? ` ${label}` : ""}. Your changes may not have been saved.\n\n${error}`);
+    }
+  }
+  return !error;
+}
+
+export { SUPABASE_URL, SUPABASE_ANON, sb, hashPassword, DEFAULT_HASH, dbWrite };

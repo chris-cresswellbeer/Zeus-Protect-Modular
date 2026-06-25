@@ -1,6 +1,6 @@
 import React from "react";
 import { Pill } from "../../shared/primitives";
-import { sb } from "../../lib/supabase";
+import { sb, dbWrite } from "../../lib/supabase";
 import { ACCEPT_IMG_DOCS } from "../../lib/constants";
 import { DocAssignPanel } from "./DocAssignPanel";
 
@@ -116,12 +116,13 @@ function DocCard({ d, staff, assignedIds, assignedStaff, readCount, unreadCount,
                 const n={};
                 Object.keys(p).forEach(uid=>{
                   n[uid]={...p[uid]};
-                  if(n[uid][d.id]) { delete n[uid][d.id]; sb.from("doc_acknowledgements").delete().match({user_id:String(uid),doc_id:String(d.id)}); }
+                  if(n[uid][d.id]) { delete n[uid][d.id]; dbWrite(sb.from("doc_acknowledgements").delete().match({user_id:String(uid),doc_id:String(d.id)}), "doc acknowledgement delete"); }
                 });
                 return n;
               });
               setDocs(p=>p.map(x=>x.id===d.id?newDoc:x));
-              sb.storage.upload("documents",path2,file).then(()=>{
+              sb.storage.upload("documents",path2,file).then(({error})=>{
+                if (error) { console.error("New version upload failed:", error); alert("Upload failed: " + error); return; }
                 newDoc.fileUrl=sb.storage.getPublicUrl("documents",path2);
                 newDoc.fileData=newDoc.fileUrl;
                 setDocs(p=>p.map(x=>x.id===d.id?newDoc:x));

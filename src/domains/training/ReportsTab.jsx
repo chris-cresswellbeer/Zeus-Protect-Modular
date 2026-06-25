@@ -3,7 +3,7 @@ import { useWindowWidth } from "../../shared/hooks";
 import { Pill, Avatar, StatCard, Bar } from "../../shared/primitives";
 import { HelpTip } from "../../shared/HelpTip";
 import { E } from "../../lib/emoji";
-import { sb } from "../../lib/supabase";
+import { sb, dbWrite } from "../../lib/supabase";
 import { TRAINING_MODULES } from "../../data/seedTraining";
 import { getExpiryStatus } from "../../lib/dates";
 import { isWarehouseWorker, machineExpiryStatus } from "../../data/seedMachinery";
@@ -611,7 +611,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
               <button onClick={()=>{
                 const updated = (quizFailures||[]).map(f=>({...f,acknowledged:true}));
                 setQuizFailures(updated);
-                updated.forEach(f=>sb.from("quiz_failures").upsert({data:f},{onConflict:"data->>'id'"}));
+                updated.forEach(f=>dbWrite(sb.from("quiz_failures").upsert({data:f},{onConflict:"data->>'id'"}), "quiz failure update"));
               }} style={{background:"rgba(16,185,129,0.1)",color:Z.green,border:"1px solid rgba(16,185,129,0.25)",borderRadius:10,padding:"8px 16px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font}}>
                 ✓ Mark all as reviewed
               </button>
@@ -646,7 +646,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
                         : <button onClick={()=>{
                             const updated = (quizFailures||[]).map(x=>x.id===f.id?{...x,acknowledged:true}:x);
                             setQuizFailures(updated);
-                            sb.from("quiz_failures").upsert({data:{...f,acknowledged:true}},{onConflict:"data->>'id'"});
+                            dbWrite(sb.from("quiz_failures").upsert({data:{...f,acknowledged:true}},{onConflict:"data->>'id'"}), "quiz failure acknowledgement");
                           }} style={{background:"rgba(37,99,235,0.1)",color:Z.accentLt,border:`1px solid rgba(37,99,235,0.25)`,borderRadius:8,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font}}>
                             Mark reviewed
                           </button>

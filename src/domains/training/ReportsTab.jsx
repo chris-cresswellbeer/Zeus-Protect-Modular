@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useWindowWidth } from "../../shared/hooks";
 import { Pill, Avatar, StatCard, Bar } from "../../shared/primitives";
 import { HelpTip } from "../../shared/HelpTip";
+import { riskLevel } from "../../shared/RiskMatrix";
 import { E } from "../../lib/emoji";
 import { sb, dbWrite } from "../../lib/supabase";
 import { TRAINING_MODULES } from "../../data/seedTraining";
@@ -847,22 +848,22 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
         // ── Incident corrective actions ────────────────────────────────────
         (incidents||[]).forEach(inc=>{
           const inv = investigations[inc.id];
-          if (!inv?.correctiveActions?.length) return;
-          inv.correctiveActions.forEach((a,i)=>{
-            if (a.actionStatus==="complete") return;
-            const daysOld = a.date ? Math.floor((new Date()-new Date(a.date))/86400000) : null;
+          if (!inv?.actions?.length) return;
+          inv.actions.forEach((a,i)=>{
+            if (a.status==="complete") return;
+            const daysOld = inv.investigationDate ? Math.floor((new Date()-new Date(inv.investigationDate))/86400000) : null;
             allActions.push({
               id: `inc_${inc.id}_${i}`,
               source: "Incident",
               sourceIcon: "🚨",
-              title: a.action||"Corrective action",
+              title: a.description||"Corrective action",
               ref: inc.description?.slice(0,50)||(inc.location||"Unknown location"),
-              assignedTo: a.assignedTo||"Unassigned",
+              assignedTo: a.owner||"Unassigned",
               dueDate: a.dueDate||null,
-              raisedDate: a.date||inc.date||null,
+              raisedDate: inv.investigationDate||inc.date||null,
               daysOld,
-              priority: inc.riddor?"high":daysOld>30?"high":daysOld>14?"medium":"low",
-              status: a.actionStatus||"open",
+              priority: a.priority||(inc.riddor?"high":daysOld>30?"high":daysOld>14?"medium":"low"),
+              status: a.status||"open",
               onClick: ()=>setAtab("incidents"),
             });
           });
@@ -890,26 +891,26 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
           });
         });
 
-        // ── Risk assessment actions ─────────────────────────────────────────
+        // ── Risk assessment further controls ────────────────────────────────
         (ras||[]).forEach(ra=>{
           (ra.hazards||[]).forEach((h,hi)=>{
-            (h.actions||[]).forEach((a,ai)=>{
-              if (a.done) return;
-              const daysOld = ra.date ? Math.floor((new Date()-new Date(ra.date))/86400000) : null;
-              allActions.push({
-                id: `ra_${ra.id}_${hi}_${ai}`,
-                source: "Risk Assessment",
-                sourceIcon: "⚠️",
-                title: a.action||a.text||"Control measure",
-                ref: `${ra.title||ra.location||"Unknown RA"}`,
-                assignedTo: ra.assessor||"Unassigned",
-                dueDate: a.dueDate||ra.reviewDate||null,
-                raisedDate: ra.date||null,
-                daysOld,
-                priority: h.residualRisk==="high"||h.riskLevel==="high"?"high":daysOld>30?"high":"medium",
-                status: "open",
-                onClick: ()=>setAtab("ra"),
-              });
+            if (h.actionComplete) return;
+            if (!h.furtherControls || !h.furtherControls.trim()) return;
+            const daysOld = ra.date ? Math.floor((new Date()-new Date(ra.date))/86400000) : null;
+            const rRl = h.residualRisk?.likelihood && h.residualRisk?.severity ? riskLevel(h.residualRisk.likelihood,h.residualRisk.severity).label : null;
+            allActions.push({
+              id: `ra_${ra.id}_${hi}`,
+              source: "Risk Assessment",
+              sourceIcon: "⚠️",
+              title: h.furtherControls,
+              ref: `${ra.title||ra.location||"Unknown RA"}`,
+              assignedTo: h.responsiblePerson||ra.assessor||"Unassigned",
+              dueDate: h.targetDate||null,
+              raisedDate: ra.date||null,
+              daysOld,
+              priority: rRl==="Very High"||rRl==="High"?"high":daysOld>30?"high":daysOld>14?"medium":"low",
+              status: "open",
+              onClick: ()=>setAtab("ra"),
             });
           });
         });

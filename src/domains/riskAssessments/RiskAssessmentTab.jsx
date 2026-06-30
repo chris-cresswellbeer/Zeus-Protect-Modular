@@ -7,7 +7,9 @@ import { generateRAHtml } from "./generateRAHtml";
 
 function RiskAssessmentTab({ docs, setDocs, setAtab, ras, setRas, dbSaveRA, Z, font }) {
   const isMobile = useWindowWidth() <= 1024;
-  const [view, setView]     = useState("list");  // "list" | "new" | "edit"
+  const [view, setView]     = useState("list");  // "list" | "new" | "edit" | "tracker"
+  const [trackerStatus, setTrackerStatus] = useState("all"); // "all" | "overdue" | "pending" | "complete"
+  const [trackerOwner, setTrackerOwner]   = useState("all");
   const [editId, setEditId] = useState(null);
   const [form, setForm]     = useState(null);
   const [step, setStep]     = useState(0); // 0=details, 1=hazards, 2=review
@@ -30,6 +32,30 @@ function RiskAssessmentTab({ docs, setDocs, setAtab, ras, setRas, dbSaveRA, Z, f
   }
 
   function setF(k,v){ setForm(p=>({...p,[k]:v})); }
+
+  // Toggle a hazard's "further control complete" flag directly from the tracker,
+  // without entering the edit flow. Writes back through the same setRas+dbSaveRA
+  // path used everywhere else.
+  function toggleTrackerAction(raId, hazardId) {
+    setRas(prev => {
+      const next = prev.map(ra => {
+        if (ra.id !== raId) return ra;
+        const updatedRa = {
+          ...ra,
+          hazards: ra.hazards.map(h => h.id===hazardId ? {...h, actionComplete: !h.actionComplete} : h)
+        };
+        if (dbSaveRA) dbSaveRA(updatedRa);
+        return updatedRa;
+      });
+      return next;
+    });
+  }
+
+  function trackerStatusOf(h) {
+    if (h.actionComplete) return "complete";
+    if (h.targetDate && h.targetDate < new Date().toISOString().slice(0,10)) return "overdue";
+    return "pending";
+  }
 
   function addHazard() {
     setForm(p=>({...p, hazards:[...p.hazards, EMPTY_HAZARD()]}));
@@ -87,10 +113,16 @@ function RiskAssessmentTab({ docs, setDocs, setAtab, ras, setRas, dbSaveRA, Z, f
           <h2 style={{fontSize:22,fontWeight:900,letterSpacing:-.5,margin:"0 0 4px"}}>Risk Assessment Builder <HelpTip dark={false} text="Create and manage risk assessments for activities and work areas. Hazards are scored by likelihood and severity to produce initial and residual risk ratings. Completed assessments are added to the Documents tab automatically."/></h2>
           <p style={{color:Z.muted,margin:0,fontSize:13}}>Create 5×5 risk assessments — completed RAs are published to the Documents tab for staff</p>
         </div>
-        <button onClick={newRA}
-          style={{background:`linear-gradient(135deg,${Z.accent},${Z.blue})`,color:"#fff",border:"none",borderRadius:10,padding:"10px 22px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:13,boxShadow:`0 4px 16px ${Z.accent}44`}}>
-          + New Risk Assessment
-        </button>
+        <div style={{display:"flex",gap:10}}>
+          <button onClick={()=>setView("tracker")}
+            style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:10,padding:"10px 22px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:13,color:Z.white}}>
+            📋 Further Controls Tracker
+          </button>
+          <button onClick={newRA}
+            style={{background:`linear-gradient(135deg,${Z.accent},${Z.blue})`,color:"#fff",border:"none",borderRadius:10,padding:"10px 22px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:13,boxShadow:`0 4px 16px ${Z.accent}44`}}>
+            + New Risk Assessment
+          </button>
+        </div>
       </div>
 
       {ras.length===0 ? (
@@ -157,6 +189,110 @@ function RiskAssessmentTab({ docs, setDocs, setAtab, ras, setRas, dbSaveRA, Z, f
       )}
     </div>
   );
+
+  // ── Further Controls Tracker ────────────────────────────────────────────────
+  if (view==="tracker") {
+    const rows = ras.flatMap(ra =>
+      ra.hazards
+        .filter(h=>h.furtherControls && h.furtherControls.trim())
+        .map(h=>({ ra, h, status: trackerStatusOf(h) }))
+    ).sort((a,b)=>(a.h.targetDate||"9999").localeCompare(b.h.targetDate||"9999"));
+
+    const owners = [...new Set(rows.map(r=>r.h.responsiblePerson).filter(Boolean))].sort();
+    const counts = { overdue:0, pending:0, complete:0 };
+    rows.forEach(r=>counts[r.status]++);
+
+    const filtered = rows.filter(r=>
+      (trackerStatus==="all"||r.status===trackerStatus) &&
+      (trackerOwner==="all"||r.h.responsiblePerson===trackerOwner)
+    );
+
+    const pillStyle = (active,color) => ({
+      fontSize:12,fontWeight:700,padding:"7px 14px",borderRadius:9,cursor:"pointer",fontFamily:font,
+      border:`1px solid ${active?color:Z.borderMd}`,
+      background:active?`${color}22`:Z.overlay,
+      color:active?color:Z.muted,
+    });
+
+    return (
+      <div>
+        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:24,flexWrap:"wrap"}}>
+          <button onClick={()=>setView("list")}
+            style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:8,padding:"7px 14px",color:Z.muted,cursor:"pointer",fontFamily:font,fontWeight:700,fontSize:12}}>← Back</button>
+          <h2 style={{margin:0,fontSize:20,fontWeight:900,letterSpacing:-.5,flex:1}}>Further Controls Tracker <HelpTip dark={false} text="All 'further controls required' identified across every risk assessment, in one place, so they can be monitored through to completion."/></h2>
+        </div>
+
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:20}}>
+          <div style={{background:"rgba(239,68,68,0.1)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:10,padding:"10px 16px",textAlign:"center",minWidth:90}}>
+            <div style={{fontSize:20,fontWeight:900,color:"#f87171"}}>{counts.overdue}</div>
+            <div style={{fontSize:11,color:Z.muted}}>Overdue</div>
+          </div>
+          <div style={{background:"rgba(245,158,11,0.1)",border:"1px solid rgba(245,158,11,0.3)",borderRadius:10,padding:"10px 16px",textAlign:"center",minWidth:90}}>
+            <div style={{fontSize:20,fontWeight:900,color:"#f59e0b"}}>{counts.pending}</div>
+            <div style={{fontSize:11,color:Z.muted}}>Pending</div>
+          </div>
+          <div style={{background:"rgba(16,185,129,0.1)",border:"1px solid rgba(16,185,129,0.3)",borderRadius:10,padding:"10px 16px",textAlign:"center",minWidth:90}}>
+            <div style={{fontSize:20,fontWeight:900,color:"#10b981"}}>{counts.complete}</div>
+            <div style={{fontSize:11,color:Z.muted}}>Complete</div>
+          </div>
+        </div>
+
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:18,alignItems:"center"}}>
+          <span style={{...labelStyle,marginBottom:0}}>STATUS</span>
+          {[["all","All",Z.accentLt],["overdue","Overdue","#f87171"],["pending","Pending","#f59e0b"],["complete","Complete","#10b981"]].map(([k,lbl,color])=>(
+            <button key={k} onClick={()=>setTrackerStatus(k)} style={pillStyle(trackerStatus===k,color)}>{lbl}</button>
+          ))}
+          {owners.length>0 && (
+            <>
+              <span style={{...labelStyle,marginBottom:0,marginLeft:12}}>OWNER</span>
+              <select value={trackerOwner} onChange={e=>setTrackerOwner(e.target.value)} style={{...selStyle,width:"auto",padding:"7px 12px"}}>
+                <option value="all">All</option>
+                {owners.map(o=><option key={o} value={o}>{o}</option>)}
+              </select>
+            </>
+          )}
+        </div>
+
+        {filtered.length===0 ? (
+          <div style={{background:`linear-gradient(135deg,${Z.navyMd},${Z.navy})`,borderRadius:16,padding:48,textAlign:"center",border:`1px solid ${Z.border}`}}>
+            <div style={{fontSize:40,marginBottom:10}}>✅</div>
+            <p style={{color:Z.white,fontWeight:700,margin:0}}>Nothing to show for this filter</p>
+            <p style={{color:Z.muted,fontSize:12,margin:"6px 0 0"}}>{rows.length===0?"No further controls have been identified across any risk assessment yet.":"Try a different status or owner filter."}</p>
+          </div>
+        ) : (
+          <div style={{background:`linear-gradient(135deg,${Z.navyMd},${Z.navy})`,borderRadius:16,border:`1px solid ${Z.border}`,overflow:"hidden"}}>
+            {filtered.map(({ra,h,status},i)=>{
+              const sc = { overdue:{color:"#f87171",bg:"rgba(239,68,68,0.12)",lbl:"⚠ Overdue"}, pending:{color:"#f59e0b",bg:"rgba(245,158,11,0.12)",lbl:"⏳ Pending"}, complete:{color:"#10b981",bg:"rgba(16,185,129,0.12)",lbl:"✓ Complete"} }[status];
+              return (
+                <div key={ra.id+h.id} style={{padding:"16px 20px",borderTop:i>0?`1px solid ${Z.border}`:"none",display:"flex",gap:14,alignItems:"flex-start",flexWrap:"wrap"}}>
+                  <span style={{fontSize:11,background:sc.bg,color:sc.color,padding:"4px 10px",borderRadius:6,fontWeight:700,whiteSpace:"nowrap",flexShrink:0,marginTop:2}}>{sc.lbl}</span>
+                  <div style={{flex:1,minWidth:240}}>
+                    <div style={{fontSize:11,color:Z.muted,marginBottom:3}}>{ra.title}{ra.reference?` · ${ra.reference}`:""}</div>
+                    <div style={{fontSize:13,fontWeight:600,color:Z.white,marginBottom:4}}>{h.hazard}</div>
+                    <div style={{fontSize:12,color:Z.muted,lineHeight:1.5}}>{h.furtherControls}</div>
+                    <div style={{display:"flex",gap:10,marginTop:8,flexWrap:"wrap",fontSize:11,color:Z.muted}}>
+                      {h.responsiblePerson && <span>👤 {h.responsiblePerson}</span>}
+                      {h.targetDate && <span>📅 Target: {h.targetDate}</span>}
+                    </div>
+                  </div>
+                  <div style={{display:"flex",gap:8,flexShrink:0}}>
+                    <button onClick={()=>editRA(ra)}
+                      style={{background:"rgba(37,99,235,0.15)",color:Z.accentLt,border:`1px solid ${Z.accent}44`,borderRadius:8,padding:"7px 14px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font,whiteSpace:"nowrap"}}>
+                      ✏ Open RA
+                    </button>
+                    <button onClick={()=>toggleTrackerAction(ra.id,h.id)}
+                      style={{display:"flex",alignItems:"center",gap:6,padding:"7px 14px",borderRadius:8,border:`2px solid ${h.actionComplete?"rgba(16,185,129,0.5)":Z.borderMd}`,background:h.actionComplete?"rgba(16,185,129,0.1)":Z.overlay,color:h.actionComplete?"#10b981":Z.muted,cursor:"pointer",fontFamily:font,fontWeight:700,fontSize:11,whiteSpace:"nowrap"}}>
+                      {h.actionComplete?"✓ Complete":"○ Mark Complete"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   if (!form) return null;
 

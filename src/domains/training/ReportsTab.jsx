@@ -932,6 +932,73 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
 
         const priorityStyle = p=>p==="high"?{color:"#f87171",bg:"rgba(239,68,68,0.1)",border:"rgba(239,68,68,0.25)"}:p==="medium"?{color:"#f59e0b",bg:"rgba(245,158,11,0.1)",border:"rgba(245,158,11,0.25)"}:{color:Z.muted,bg:Z.overlay,border:Z.borderMd};
 
+        function exportActionsPDF() {
+          const todayLong = new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"long",year:"numeric"});
+          const groupRows = (list) => list.map(a=>{
+            const isOverdue = a.dueDate && a.dueDate<today;
+            const daysUntil = a.dueDate ? Math.ceil((new Date(a.dueDate)-new Date())/86400000) : null;
+            const dueTxt = a.dueDate ? (isOverdue?`${Math.abs(daysUntil)}d overdue`:`Due in ${daysUntil}d`) : "No due date";
+            const dueColor = isOverdue?"#dc2626":a.dueDate?"#b45309":"#94a3b8";
+            const prCol = a.priority==="high"?"#dc2626":a.priority==="medium"?"#b45309":"#64748b";
+            return `<tr>
+              <td>${a.sourceIcon||""} ${a.source}</td>
+              <td>${a.title}<div style="color:#94a3b8;font-size:11px;margin-top:2px">${a.ref||""}</div></td>
+              <td style="text-transform:capitalize;color:${prCol};font-weight:700">${a.priority}</td>
+              <td>${a.assignedTo||"Unassigned"}</td>
+              <td style="color:${dueColor};font-weight:600">${a.dueDate||"—"}${a.dueDate?` (${dueTxt})`:""}</td>
+              <td>${a.raisedDate||"—"}</td>
+            </tr>`;
+          }).join("");
+
+          const section = (title,list,color) => list.length===0 ? "" : `
+            <h2 style="color:${color}">${title} (${list.length})</h2>
+            <table><thead><tr><th>Source</th><th>Action</th><th>Priority</th><th>Assigned To</th><th>Due Date</th><th>Raised</th></tr></thead>
+            <tbody>${groupRows(list)}</tbody></table>`;
+
+          const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
+            <title>Overdue Actions Report — ${todayLong}</title>
+            <style>
+              *{margin:0;padding:0;box-sizing:border-box}
+              body{font-family:'Segoe UI',Arial,sans-serif;color:#1e293b;background:#fff;padding:32px;font-size:13px}
+              @media print{body{padding:20px}@page{margin:15mm;size:A4}}
+              .header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;padding-bottom:14px;border-bottom:3px solid #0d1f5c}
+              .header h1{font-size:20px;font-weight:900;color:#0d1f5c;margin-bottom:3px}
+              .header p{color:#64748b;font-size:12px;margin-top:2px}
+              .meta-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:20px}
+              .meta-card{background:#f8fafc;border-radius:8px;padding:10px 14px;border:1px solid #e2e8f0;text-align:center}
+              .meta-card .label{font-size:10px;font-weight:700;letter-spacing:.5px;color:#94a3b8;text-transform:uppercase;margin-bottom:3px}
+              .meta-card .value{font-size:18px;font-weight:900;color:#0d1f5c}
+              h2{font-size:13px;font-weight:800;color:#0d1f5c;margin:18px 0 8px;padding-bottom:4px;border-bottom:2px solid #e2e8f0;text-transform:uppercase;letter-spacing:.5px}
+              table{width:100%;border-collapse:collapse;margin-bottom:4px;font-size:12px}
+              th{background:#f1f5f9;text-align:left;padding:7px 10px;font-size:10px;font-weight:700;letter-spacing:.5px;color:#64748b;text-transform:uppercase;border-bottom:1px solid #e2e8f0}
+              td{padding:8px 10px;border-bottom:1px solid #f1f5f9;vertical-align:top}
+              .no-data{padding:16px;text-align:center;color:#15803d;font-weight:600;background:#f0fff4;border-radius:8px;margin-top:8px}
+              .footer{margin-top:32px;padding-top:14px;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;font-size:11px;color:#94a3b8}
+            </style></head><body>
+            <div class="header">
+              <div><h1>Overdue Actions Report</h1><p>All open corrective actions across incidents, inspections and risk assessments</p></div>
+              <div style="text-align:right"><div style="font-size:11px;color:#94a3b8">Zeus Protect H&S Portal</div><div style="font-size:12px;color:#64748b;margin-top:4px">Generated ${todayLong}</div></div>
+            </div>
+            <div class="meta-grid">
+              <div class="meta-card"><div class="label">Overdue</div><div class="value" style="color:#dc2626">${overdue.length}</div></div>
+              <div class="meta-card"><div class="label">Upcoming</div><div class="value" style="color:#b45309">${upcoming.length}</div></div>
+              <div class="meta-card"><div class="label">No Due Date</div><div class="value" style="color:#64748b">${noDue.length}</div></div>
+            </div>
+            ${allActions.length===0
+              ? '<div class="no-data">No open actions — everything is up to date</div>'
+              : section("Overdue",overdue,"#dc2626") + section("Upcoming",upcoming,"#b45309") + section("No Due Date",noDue,"#64748b")}
+            <div class="footer">
+              <span>Zeus Protect Health & Safety Portal · Confidential</span>
+              <span>Generated ${todayLong}</span>
+            </div>
+            </body></html>`;
+
+          const win = window.open("","_blank","width=900,height=700");
+          win.document.write(html);
+          win.document.close();
+          win.onload = () => win.print();
+        }
+
         const ActionRow = ({a,i})=>{
           const ps=priorityStyle(a.priority);
           const isOverdue=a.dueDate&&a.dueDate<today;
@@ -966,13 +1033,17 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
                 <h3 style={{fontSize:18,fontWeight:800,margin:"0 0 4px"}}>Overdue Actions</h3>
                 <p style={{color:Z.muted,fontSize:13,margin:0}}>All open corrective actions across incidents, inspections and risk assessments.</p>
               </div>
-              <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+              <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"center"}}>
                 {[["🚨",overdue.length,"Overdue","#f87171"],["⏳",upcoming.length,"Upcoming","#f59e0b"],["📋",noDue.length,"No Due Date",Z.muted]].map(([icon,count,label,col])=>(
                   <div key={label} style={{background:`linear-gradient(135deg,${Z.navyMd},${Z.navy})`,borderRadius:12,padding:"10px 16px",border:`1px solid ${Z.border}`,textAlign:"center",minWidth:80}}>
                     <div style={{fontSize:20,fontWeight:900,color:col}}>{count}</div>
                     <div style={{fontSize:10,color:Z.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:.5}}>{icon} {label}</div>
                   </div>
                 ))}
+                <button onClick={exportActionsPDF}
+                  style={{padding:"10px 18px",borderRadius:10,border:"1px solid rgba(16,185,129,0.35)",background:"rgba(16,185,129,0.12)",color:Z.green,fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:13,display:"flex",alignItems:"center",gap:6,whiteSpace:"nowrap"}}>
+                  🖨 Export PDF
+                </button>
               </div>
             </div>
 

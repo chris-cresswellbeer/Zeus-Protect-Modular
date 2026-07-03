@@ -9,7 +9,7 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
   const ICONS = ["📋","🔥","💪","🧠","⚡","🏥","🦺","🧯","☢️","🌿","🔧","📊","🚧","👁","🩺","🎓","⚠️","🔐","🚨","📡"];
   const CATEGORIES = ["Fire Safety","Physical Safety","Mental Health","Hazardous Substances","Electrical Safety","First Aid","Environmental","Equipment Safety","Manual Handling","General H&S","Food Safety","Compliance","Custom"];
   const LEVELS = ["Mandatory","Recommended","Optional"];
-  const BLANK_SLIDE = { heading:"", text:"", video:null, image:null }; // video/image: { name, data/url, type }
+  const BLANK_SLIDE = { heading:"", text:"", video:null, images:[] }; // video: { name, data/url, type }; images: array of same
   const BLANK_Q = { q:"", options:["","","",""], answer:0 };
 
   const [step, setStep] = useState("details");
@@ -27,8 +27,9 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
     heading: s.heading||"",
     text: s.text||s.body||"",
     video: s.video||null,
-    image: s.image||null,
-  })) : [{ heading:"", text:"", video:null, image:null }]);
+    // backwards compat: old modules have single `image`, new ones have `images[]`
+    images: s.images ? [...s.images] : (s.image ? [s.image] : []),
+  })) : [{ heading:"", text:"", video:null, images:[] }]);
   const [quiz, setQuiz] = useState(editingModule ? (editingModule.quiz||[]).map(q=>({...q, options:[...q.options]})) : [{ q:"", options:["","","",""], answer:0 }]);
   const [err, setErr] = useState("");
   const videoInputRefs = useRef({});
@@ -74,7 +75,7 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
 
   async function saveModule() {
     // Wait for any in-progress video or image uploads before saving
-    const anyUploading = slides.some(s => (s.video && s.video.uploading) || (s.image && s.image.uploading));
+    const anyUploading = slides.some(s => (s.video && s.video.uploading) || (s.images||[]).some(img=>img.uploading));
     if (anyUploading) {
       setErr("Please wait — a file is still uploading.");
       return;
@@ -85,9 +86,9 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
       video: s.video && (s.video.url || s.video.data)
         ? { name: s.video.name, type: s.video.type, url: s.video.url || s.video.data, data: s.video.url || s.video.data }
         : null,
-      image: s.image && (s.image.url || s.image.data)
-        ? { name: s.image.name, type: s.image.type, url: s.image.url || s.image.data, data: s.image.url || s.image.data }
-        : null,
+      images: (s.images||[]).filter(img=>img.url||img.data).map(img=>({
+        name: img.name, type: img.type, url: img.url||img.data, data: img.url||img.data,
+      })),
     }));
     const newModule = {
       id: editingModule ? editingModule.id : `custom_${Date.now()}`,
@@ -204,45 +205,64 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
               </div>
               {/* Image upload */}
               <div style={{marginBottom:12}}>
-                <label style={lbl}>Image (optional)</label>
-                {s.image ? (
-                  <div style={{background:Z.overlaySm,borderRadius:10,padding:"12px 14px",border:`1px solid ${Z.borderMd}`,display:"flex",alignItems:"center",gap:12}}>
-                    {s.image.uploading ? (
-                      <span style={{fontSize:20}}>🖼️</span>
-                    ) : (
-                      <img src={s.image.url||s.image.data} alt={s.image.name} style={{width:64,height:48,objectFit:"cover",borderRadius:6,flexShrink:0}}/>
-                    )}
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:12,fontWeight:700,color:Z.white,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.image.name}</div>
-                      <div style={{fontSize:10,color:Z.muted,marginTop:2}}>{s.image.uploading ? "Uploading…" : (s.image.url || s.image.data) ? "✓ Uploaded" : ""}</div>
-                    </div>
-                    <button onClick={()=>updateSlide(i,"image",null)} style={{background:"rgba(239,68,68,0.1)",color:"#f87171",border:"1px solid rgba(239,68,68,0.25)",borderRadius:7,padding:"5px 10px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font}}>Remove</button>
+                <label style={lbl}>Images (optional — add as many as needed)</label>
+                {(s.images||[]).length>0 && (
+                  <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:8}}>
+                    {(s.images||[]).map((img,imgIdx)=>(
+                      <div key={imgIdx} style={{background:Z.overlaySm,borderRadius:10,padding:"10px 14px",border:`1px solid ${Z.borderMd}`,display:"flex",alignItems:"center",gap:12}}>
+                        {img.uploading ? (
+                          <span style={{fontSize:20}}>🖼️</span>
+                        ) : (
+                          <img src={img.url||img.data} alt={img.name} style={{width:64,height:48,objectFit:"cover",borderRadius:6,flexShrink:0}}/>
+                        )}
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:12,fontWeight:700,color:Z.white,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{img.name}</div>
+                          <div style={{fontSize:10,color:Z.muted,marginTop:2}}>{img.uploading?"Uploading…":(img.url||img.data)?"✓ Uploaded":""}</div>
+                        </div>
+                        <button
+                          onClick={()=>updateSlide(i,"images",(s.images||[]).filter((_,ii)=>ii!==imgIdx))}
+                          style={{background:"rgba(239,68,68,0.1)",color:"#f87171",border:"1px solid rgba(239,68,68,0.25)",borderRadius:7,padding:"5px 10px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font,flexShrink:0}}>
+                          Remove
+                        </button>
+                      </div>
+                    ))}
                   </div>
-                ) : (
-                  <>
-                    <input ref={el=>imageInputRefs.current[i]=el} type="file" accept={ACCEPT_IMAGES}
-                      style={{display:"none"}}
-                      onChange={async e=>{
-                        const file=e.target.files[0]; if(!file) return;
-                        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-                        const path = `slideimg_${Date.now()}_${safeName}`;
-                        updateSlide(i,"image",{name:file.name,type:file.type,data:null,uploading:true});
-                        const { error } = await sb.storage.upload("documents", path, file);
-                        if (error) { alert("Image upload failed: " + error); updateSlide(i,"image",null); return; }
-                        const url = `${SUPABASE_URL}/storage/v1/object/public/documents/${path}`;
-                        updateSlide(i,"image",{name:file.name,type:file.type,data:url,url});
-                        e.target.value="";
-                      }}/>
-                    <div onClick={()=>imageInputRefs.current[i]&&imageInputRefs.current[i].click()}
-                      style={{border:`2px dashed ${Z.borderMd}`,borderRadius:10,padding:"16px",cursor:"pointer",textAlign:"center",transition:"border-color .2s"}}
-                      onMouseEnter={e=>e.currentTarget.style.borderColor=Z.accent}
-                      onMouseLeave={e=>e.currentTarget.style.borderColor=Z.borderMd}>
-                      <div style={{fontSize:24,marginBottom:4}}>🖼️</div>
-                      <div style={{fontSize:12,fontWeight:700,color:Z.white,marginBottom:2}}>Upload Image</div>
-                      <div style={{fontSize:11,color:Z.muted}}>Click to browse · JPG, PNG, GIF, WebP</div>
-                    </div>
-                  </>
                 )}
+                <input
+                  ref={el=>imageInputRefs.current[i]=el}
+                  type="file" accept={ACCEPT_IMAGES}
+                  style={{display:"none"}}
+                  onChange={async e=>{
+                    const file=e.target.files[0]; if(!file) return;
+                    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g,"_");
+                    const path = `slideimg_${Date.now()}_${safeName}`;
+                    const placeholder = {name:file.name,type:file.type,data:null,uploading:true};
+                    updateSlide(i,"images",[...(s.images||[]),placeholder]);
+                    const { error } = await sb.storage.upload("documents",path,file);
+                    if (error) {
+                      alert("Image upload failed: "+error);
+                      updateSlide(i,"images",(s.images||[]).filter(img=>img!==placeholder));
+                      return;
+                    }
+                    const url=`${SUPABASE_URL}/storage/v1/object/public/documents/${path}`;
+                    setSlides(prev=>prev.map((sl,idx)=>{
+                      if(idx!==i) return sl;
+                      const imgs=[...(sl.images||[])];
+                      const pi=imgs.findIndex(img=>img.uploading&&img.name===file.name);
+                      if(pi>-1) imgs[pi]={name:file.name,type:file.type,data:url,url};
+                      return {...sl,images:imgs};
+                    }));
+                    e.target.value="";
+                  }}/>
+                <div
+                  onClick={()=>imageInputRefs.current[i]&&imageInputRefs.current[i].click()}
+                  style={{border:`2px dashed ${Z.borderMd}`,borderRadius:10,padding:"14px",cursor:"pointer",textAlign:"center",transition:"border-color .2s"}}
+                  onMouseEnter={e=>e.currentTarget.style.borderColor=Z.accent}
+                  onMouseLeave={e=>e.currentTarget.style.borderColor=Z.borderMd}>
+                  <div style={{fontSize:22,marginBottom:3}}>🖼️</div>
+                  <div style={{fontSize:12,fontWeight:700,color:Z.white,marginBottom:2}}>{(s.images||[]).length>0?"Add Another Image":"Upload Image"}</div>
+                  <div style={{fontSize:11,color:Z.muted}}>Click to browse · JPG, PNG, GIF, WebP</div>
+                </div>
               </div>
               {/* Video upload */}
               <div style={{marginBottom:12}}>

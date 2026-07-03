@@ -67,7 +67,18 @@ function ModulePreviewModal({ m, staff, assigns, comps, isMobile, setAtab, onClo
                   <div style={{fontSize:10,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:1,marginBottom:12}}>{slides[previewSlide].type?.toUpperCase()||"CONTENT"} SLIDE</div>
                   {slides[previewSlide].heading && <h4 style={{margin:"0 0 12px",fontSize:18,fontWeight:800,color:T.white}}>{slides[previewSlide].heading}</h4>}
                   {(slides[previewSlide].body||slides[previewSlide].text) && <p style={{color:T.muted,fontSize:14,lineHeight:1.7,margin:0,whiteSpace:"pre-wrap"}}>{slides[previewSlide].body||slides[previewSlide].text}</p>}
-                  {(slides[previewSlide].image?.data||slides[previewSlide].image?.url||slides[previewSlide].imageData) && <img src={slides[previewSlide].image?.data||slides[previewSlide].image?.url||slides[previewSlide].imageData} alt="" style={{maxWidth:"100%",borderRadius:10,marginTop:12}}/>}
+                  {(slides[previewSlide].image?.data||slides[previewSlide].image?.url||slides[previewSlide].imageData||((slides[previewSlide].images||[]).length>0)) && (
+                    <div style={{display:"flex",flexWrap:"wrap",gap:10,marginTop:12}}>
+                      {/* new images[] array */}
+                      {(slides[previewSlide].images||[]).map((img,ii)=>(
+                        <img key={ii} src={img.url||img.data} alt="" style={{maxWidth:"100%",flex:"1 1 200px",borderRadius:10,objectFit:"contain",maxHeight:320}}/>
+                      ))}
+                      {/* backwards compat: old single image field */}
+                      {(slides[previewSlide].images||[]).length===0 && (slides[previewSlide].image?.data||slides[previewSlide].image?.url||slides[previewSlide].imageData) && (
+                        <img src={slides[previewSlide].image?.data||slides[previewSlide].image?.url||slides[previewSlide].imageData} alt="" style={{maxWidth:"100%",borderRadius:10}}/>
+                      )}
+                    </div>
+                  )}
                   {slides[previewSlide].videoUrl && <video controls style={{width:"100%",borderRadius:10,marginTop:12}}><source src={slides[previewSlide].videoUrl}/></video>}
                 </div>
                 <div style={{display:"flex",gap:6,marginTop:12,overflowX:"auto",paddingBottom:4}}>

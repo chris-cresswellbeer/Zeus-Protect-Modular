@@ -1248,9 +1248,16 @@ export default function App() {
                     {slide.heading}
                   </h2>
                 )}
-                {(slide.image?.data||slide.image?.url) && (
-                  <div style={{marginBottom:20,textAlign:"center"}}>
-                    <img src={slide.image.data||slide.image.url} alt={slide.image.name||""} style={{maxWidth:"100%",maxHeight:360,borderRadius:12,border:`1px solid ${T.borderMd}`,objectFit:"contain"}}/>
+                {((slide.images||[]).length>0 || slide.image?.data || slide.image?.url) && (
+                  <div style={{marginBottom:20,display:"flex",flexWrap:"wrap",gap:10,justifyContent:"center"}}>
+                    {/* new images[] array */}
+                    {(slide.images||[]).map((img,ii)=>(
+                      <img key={ii} src={img.url||img.data} alt={img.name||""} style={{maxWidth:"100%",flex:"1 1 220px",maxHeight:360,borderRadius:12,border:`1px solid ${T.borderMd}`,objectFit:"contain"}}/>
+                    ))}
+                    {/* backwards compat: old single image field */}
+                    {(slide.images||[]).length===0 && (slide.image?.data||slide.image?.url) && (
+                      <img src={slide.image.data||slide.image.url} alt={slide.image.name||""} style={{maxWidth:"100%",maxHeight:360,borderRadius:12,border:`1px solid ${T.borderMd}`,objectFit:"contain"}}/>
+                    )}
                   </div>
                 )}
                 {slide.video && (

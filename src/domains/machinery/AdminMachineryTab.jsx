@@ -4,7 +4,7 @@ import { Avatar } from "../../shared/primitives";
 import { HelpTip } from "../../shared/HelpTip";
 import { machineExpiryStatus, COMP_STATUS, isWarehouseWorker } from "../../data/seedMachinery";
 
-function AdminMachineryTab({ allStaff, machineComps, setMachineComps, allMachineTypes, allMachineCategories, setCustomMachineTypes, dbDeleteCustomMachineType, Z, font }) {
+function AdminMachineryTab({ allStaff, machineComps, setMachineComps, allMachineTypes, allMachineCategories, setCustomMachineTypes, dbDeleteCustomMachineType, dbSaveMachineComp, dbDeleteMachineComp, Z, font }) {
   const machineTypes = allMachineTypes || [];
   const machineCategories = allMachineCategories || [];
   const isMobile = useWindowWidth() <= 1024;
@@ -42,6 +42,7 @@ function AdminMachineryTab({ allStaff, machineComps, setMachineComps, allMachine
       const cur = p[selectedUser]||{};
       return {...p,[selectedUser]:{...cur,[id]:entry}};
     });
+    if (dbSaveMachineComp) dbSaveMachineComp(selectedUser, id, entry);
     setSaved(true); setEditingId(null); setForm(null);
   }
 
@@ -51,6 +52,7 @@ function AdminMachineryTab({ allStaff, machineComps, setMachineComps, allMachine
       delete cur[compId];
       return {...p,[selectedUser]:cur};
     });
+    if (dbDeleteMachineComp) dbDeleteMachineComp(selectedUser, compId);
   }
 
   function saveCustomType() {

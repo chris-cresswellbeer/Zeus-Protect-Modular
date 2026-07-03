@@ -600,12 +600,6 @@ export default function App() {
   }, [adminResponses]); // eslint-disable-line
 
   useEffect(() => { if (!_ready.current) return;
-    Object.entries(machineComps).forEach(([uid, machines]) => {
-      Object.entries(machines).forEach(([mid, data]) => dbSaveMachineComp(Number(uid), mid, data));
-    });
-  }, [machineComps]); // eslint-disable-line
-
-  useEffect(() => { if (!_ready.current) return;
     dbSaveEquipment(equipment);
   }, [equipment]); // eslint-disable-line
 
@@ -818,6 +812,10 @@ export default function App() {
 
   async function dbSaveMachineComp(userId, machineId, data) {
     await dbWrite(sb.from("machine_completions").upsert({ user_id: String(userId), machine_id: String(machineId), data }, { onConflict: "user_id,machine_id" }), "machine competence record", { alertOnError: true });
+  }
+
+  async function dbDeleteMachineComp(userId, machineId) {
+    await dbWrite(sb.from("machine_completions").delete().match({ user_id: String(userId), machine_id: String(machineId) }), "machine competence delete", { alertOnError: true });
   }
 
   async function dbSaveEquipment(items) {
@@ -3820,7 +3818,7 @@ export default function App() {
 
           {atab==="machinery" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
-            <LazyAdminMachineryTab allStaff={staff} machineComps={machineComps} setMachineComps={setMachineComps} allMachineTypes={allMachineTypes} allMachineCategories={allMachineCategories} setCustomMachineTypes={setCustomMachineTypes} dbDeleteCustomMachineType={dbDeleteCustomMachineType} Z={T} font={font}/>
+            <LazyAdminMachineryTab allStaff={staff} machineComps={machineComps} setMachineComps={setMachineComps} allMachineTypes={allMachineTypes} allMachineCategories={allMachineCategories} setCustomMachineTypes={setCustomMachineTypes} dbDeleteCustomMachineType={dbDeleteCustomMachineType} dbSaveMachineComp={dbSaveMachineComp} dbDeleteMachineComp={dbDeleteMachineComp} Z={T} font={font}/>
             </React.Suspense>
           )}
 

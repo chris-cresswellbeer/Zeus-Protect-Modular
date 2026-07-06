@@ -67,6 +67,7 @@ export default function App() {
   const [qans,    setQans]    = useState({});
   const [qsub,    setQsub]    = useState(false);
   const [showCelebration, setShowCelebration] = useState(false);
+  const [lightboxSrc, setLightboxSrc] = useState(null); // image URL to show in lightbox
   const [atab,    setAtab]    = useState("dashboard");
   const [adminReportView, setAdminReportView] = useState("staff");
   const [focusIncidentId, setFocusIncidentId] = useState(null);
@@ -1097,6 +1098,7 @@ export default function App() {
     }
 
     return (
+      <>
       <div style={{minHeight:"100vh",background:T.bg,fontFamily:font,color:T.white,overflowX:"hidden"}}>
 
         {/* Celebration Overlay */}
@@ -1250,11 +1252,13 @@ export default function App() {
                   <div style={{marginBottom:20,display:"flex",flexWrap:"wrap",gap:10,justifyContent:"center"}}>
                     {/* new images[] array */}
                     {(slide.images||[]).map((img,ii)=>(
-                      <img key={ii} src={img.url||img.data} alt={img.name||""} style={{maxWidth:"100%",flex:"1 1 220px",maxHeight:360,borderRadius:12,border:`1px solid ${T.borderMd}`,objectFit:"contain"}}/>
+                      <img key={ii} src={img.url||img.data} alt={img.name||""} onClick={()=>setLightboxSrc(img.url||img.data)}
+                        style={{maxWidth:"100%",flex:"1 1 220px",maxHeight:360,borderRadius:12,border:`1px solid ${T.borderMd}`,objectFit:"contain",cursor:"zoom-in"}}/>
                     ))}
                     {/* backwards compat: old single image field */}
                     {(slide.images||[]).length===0 && (slide.image?.data||slide.image?.url) && (
-                      <img src={slide.image.data||slide.image.url} alt={slide.image.name||""} style={{maxWidth:"100%",maxHeight:360,borderRadius:12,border:`1px solid ${T.borderMd}`,objectFit:"contain"}}/>
+                      <img src={slide.image.data||slide.image.url} alt={slide.image.name||""} onClick={()=>setLightboxSrc(slide.image.data||slide.image.url)}
+                        style={{maxWidth:"100%",maxHeight:360,borderRadius:12,border:`1px solid ${T.borderMd}`,objectFit:"contain",cursor:"zoom-in"}}/>
                     )}
                   </div>
                 )}
@@ -1384,10 +1388,29 @@ export default function App() {
           )}
         </div>
       </div>
+      {/* Lightbox overlay */}
+      {lightboxSrc && (
+        <div
+          onClick={()=>setLightboxSrc(null)}
+          onKeyDown={e=>e.key==="Escape"&&setLightboxSrc(null)}
+          tabIndex={-1}
+          style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.92)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2000,padding:20,cursor:"zoom-out"}}
+        >
+          <button
+            onClick={e=>{e.stopPropagation();setLightboxSrc(null);}}
+            style={{position:"absolute",top:18,right:22,background:"rgba(255,255,255,0.12)",border:"1px solid rgba(255,255,255,0.2)",borderRadius:99,width:38,height:38,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:18,cursor:"pointer",fontWeight:700,lineHeight:1}}
+          >✕</button>
+          <img
+            src={lightboxSrc}
+            alt=""
+            onClick={e=>e.stopPropagation()}
+            style={{maxWidth:"100%",maxHeight:"90vh",borderRadius:10,boxShadow:"0 24px 80px rgba(0,0,0,0.8)",objectFit:"contain",cursor:"default"}}
+          />
+        </div>
+      )}
+      </>
     );
   }
-
-  // ── Certificate Modal ─────────────────────────────────────────────────────
   const CertModal = () => cert && (() => {
     const certRef = React.useRef(null);
     const certId = cert.certId || "ZSL-"+Math.random().toString(36).slice(2,8).toUpperCase();

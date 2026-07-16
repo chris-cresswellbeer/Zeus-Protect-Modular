@@ -1,8 +1,11 @@
 import React from "react";
 import { Pill } from "../../shared/primitives";
 import { E } from "../../lib/emoji";
+import { sanitizeHtml } from "../../lib/sanitizeHtml";
+import { isHtmlContent, ensureRteStyles } from "./slideTextUtils";
 
 function ModulePreviewModal({ m, staff, assigns, comps, isMobile, setAtab, onClose, T, font }) {
+  React.useEffect(() => { ensureRteStyles(); }, []);
   const [previewSlide, setPreviewSlide] = React.useState(0);
   const [previewTab, setPreviewTab] = React.useState("overview");
   const slides = m.slides||m.content||[];
@@ -66,7 +69,12 @@ function ModulePreviewModal({ m, staff, assigns, comps, isMobile, setAtab, onClo
                 <div style={{background:T.overlay,borderRadius:14,padding:24,border:`1px solid ${T.borderMd}`,minHeight:200}}>
                   <div style={{fontSize:10,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:1,marginBottom:12}}>{slides[previewSlide].type?.toUpperCase()||"CONTENT"} SLIDE</div>
                   {slides[previewSlide].heading && <h4 style={{margin:"0 0 12px",fontSize:18,fontWeight:800,color:T.white}}>{slides[previewSlide].heading}</h4>}
-                  {(slides[previewSlide].body||slides[previewSlide].text) && <p style={{color:T.muted,fontSize:14,lineHeight:1.7,margin:0,whiteSpace:"pre-wrap"}}>{slides[previewSlide].body||slides[previewSlide].text}</p>}
+                  {(() => {
+                    const raw = slides[previewSlide].body||slides[previewSlide].text;
+                    if (!raw) return null;
+                    if (isHtmlContent(raw)) return <div className="rte-content" style={{color:T.muted,fontSize:14,lineHeight:1.7}} dangerouslySetInnerHTML={{__html: sanitizeHtml(raw)}}/>;
+                    return <p style={{color:T.muted,fontSize:14,lineHeight:1.7,margin:0,whiteSpace:"pre-wrap"}}>{raw}</p>;
+                  })()}
                   {(slides[previewSlide].image?.data||slides[previewSlide].image?.url||slides[previewSlide].imageData||((slides[previewSlide].images||[]).length>0)) && (
                     <div style={{display:"flex",flexWrap:"wrap",gap:10,marginTop:12}}>
                       {/* new images[] array */}

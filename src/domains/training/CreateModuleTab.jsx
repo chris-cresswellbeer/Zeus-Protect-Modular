@@ -3,6 +3,9 @@ import { useWindowWidth } from "../../shared/hooks";
 import { HelpTip } from "../../shared/HelpTip";
 import { sb, SUPABASE_URL } from "../../lib/supabase";
 import { ACCEPT_IMAGES, ACCEPT_VIDEO } from "../../lib/constants";
+import { RichTextEditor } from "./RichTextEditor";
+import { sanitizeHtml } from "../../lib/sanitizeHtml";
+import { htmlToPlainText } from "./slideTextUtils";
 
 function CreateModuleTab({ onSave, editingModule, Z, font }) {
   const isMobile = useWindowWidth() <= 1024;
@@ -62,7 +65,7 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
     }
     if(step==="slides") {
       if(slides.some(s=>!s.heading.trim())) { setErr("All slides must have a heading."); return; }
-      if(slides.some(s=>!s.text.trim()&&!s.video)) { setErr("Each slide must have either content text or a video."); return; }
+      if(slides.some(s=>!htmlToPlainText(s.text).trim()&&!s.video)) { setErr("Each slide must have either content text or a video."); return; }
     }
     if(step==="quiz") {
       for(const q of quiz) {
@@ -83,6 +86,7 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
     // Strip out any video/image entries that failed (no url and no data)
     const cleanSlides = slides.map(s => ({
       ...s,
+      text: sanitizeHtml(s.text||""),
       video: s.video && (s.video.url || s.video.data)
         ? { name: s.video.name, type: s.video.type, url: s.video.url || s.video.data, data: s.video.url || s.video.data }
         : null,
@@ -306,7 +310,13 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
               </div>
               <div>
                 <label style={lbl}>Slide Content {s.video?"(optional — shown below video)":"*"}</label>
-                <textarea value={s.text} onChange={e=>updateSlide(i,"text",e.target.value)} placeholder={s.video?"Optional supporting text for this slide…":"Write the full content for this slide…"} rows={s.video?3:5} style={{...inp,resize:"vertical",lineHeight:1.6}}/>
+                <RichTextEditor
+                  value={s.text}
+                  onChange={html=>updateSlide(i,"text",html)}
+                  Z={Z} font={font}
+                  minHeight={s.video?70:130}
+                  placeholder={s.video?"Optional supporting text for this slide…":"Write the full content for this slide… use the toolbar to format text or insert images inline."}
+                />
               </div>
             </div>
           ))}
@@ -384,7 +394,7 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
                     {s.video && <span style={{fontSize:10,fontWeight:700,color:"#a78bfa",background:"rgba(167,139,250,0.12)",border:"1px solid rgba(167,139,250,0.3)",borderRadius:6,padding:"2px 7px"}}>🎬 VIDEO</span>}
                   </div>
                   {s.video && <div style={{fontSize:11,color:Z.muted,marginBottom:4}}>📎 {s.video.name}</div>}
-                  {s.text && <div style={{fontSize:12,color:Z.muted,lineHeight:1.5,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>{s.text}</div>}
+                  {htmlToPlainText(s.text) && <div style={{fontSize:12,color:Z.muted,lineHeight:1.5,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>{htmlToPlainText(s.text)}</div>}
                 </div>
               ))}
             </div>

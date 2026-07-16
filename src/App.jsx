@@ -39,6 +39,8 @@ const LazyCreateModuleTab = React.lazy(() => import("./domains/training/CreateMo
 import { ModulePreviewModal } from "./domains/training/ModulePreviewModal";
 const LazyReportsTab = React.lazy(() => import("./domains/training/ReportsTab").then(m => ({ default: m.ReportsTab })));
 import { generateStaffPDF } from "./domains/training/generateStaffPDF";
+import { isHtmlContent, ensureRteStyles } from "./domains/training/slideTextUtils";
+import { sanitizeHtml } from "./lib/sanitizeHtml";
 import { getExpiryStatus } from "./lib/dates";
 import { EmojiCtx, E, syncEmojiMode } from "./lib/emoji";
 import { sb, hashPassword, DEFAULT_HASH, dbWrite } from "./lib/supabase";
@@ -114,6 +116,7 @@ export default function App() {
   useEffect(() => {
     syncEmojiMode(emojiMode);
   }, [emojiMode]);
+  useEffect(() => { ensureRteStyles(); }, []);
   const [fireSafety, setFireSafety] = useState({ wardens:INIT_FIRE_WARDENS, drills:INIT_FIRE_DRILLS, alarmTests:INIT_ALARM_TESTS, extinguishers:INIT_EXTINGUISHERS, emergLighting:INIT_EMERG_LIGHTING, fraReviews:INIT_FRA_REVIEWS });
   const [firstAidData, setFirstAidData] = useState({ aiders:[], kits:[], assessment:{} });
   // allModules: custom overrides replace built-in modules with same id
@@ -1271,20 +1274,24 @@ export default function App() {
                   </div>
                 )}
                 {slide.text && (
-                  <div style={{fontSize:15,lineHeight:1.9,color:T.slate}}>
-                    {slide.text.split(". ").map((sentence,i,arr)=>{
-                      const trimmed = sentence.trim();
-                      const stepMatch = trimmed.match(/^(Step\s)?(\d+)[.:\)]\s*(.*)/);
-                      if (stepMatch) return (
-                        <div key={i} style={{display:"flex",gap:12,marginBottom:10,alignItems:"flex-start"}}>
-                          <span style={{background:T.accent,color:"#fff",borderRadius:6,width:24,height:24,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:12,flexShrink:0,marginTop:1}}>{stepMatch[2]}</span>
-                          <span>{stepMatch[3]}</span>
-                        </div>
-                      );
-                      const full = sentence + (i<arr.length-1?". ":"");
-                      return <p key={i} style={{margin:"0 0 10px"}}>{full}</p>;
-                    })}
-                  </div>
+                  isHtmlContent(slide.text) ? (
+                    <div className="rte-content" style={{fontSize:15,lineHeight:1.9,color:T.slate}} dangerouslySetInnerHTML={{__html: sanitizeHtml(slide.text)}}/>
+                  ) : (
+                    <div style={{fontSize:15,lineHeight:1.9,color:T.slate}}>
+                      {slide.text.split(". ").map((sentence,i,arr)=>{
+                        const trimmed = sentence.trim();
+                        const stepMatch = trimmed.match(/^(Step\s)?(\d+)[.:\)]\s*(.*)/);
+                        if (stepMatch) return (
+                          <div key={i} style={{display:"flex",gap:12,marginBottom:10,alignItems:"flex-start"}}>
+                            <span style={{background:T.accent,color:"#fff",borderRadius:6,width:24,height:24,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:12,flexShrink:0,marginTop:1}}>{stepMatch[2]}</span>
+                            <span>{stepMatch[3]}</span>
+                          </div>
+                        );
+                        const full = sentence + (i<arr.length-1?". ":"");
+                        return <p key={i} style={{margin:"0 0 10px"}}>{full}</p>;
+                      })}
+                    </div>
+                  )
                 )}
               </div>
               <div style={{display:"flex",justifyContent:"space-between",marginTop:24,gap:12}}>

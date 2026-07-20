@@ -131,6 +131,7 @@ export default function App() {
   ];
   const allMachineCategories = [...new Set(allMachineTypes.map(m=>m.category))];
   const [showAddStaff, setShowAddStaff] = useState(false);
+  const [showHiddenModules, setShowHiddenModules] = useState(false);
   const [staffFilterManager,  setStaffFilterManager]  = useState("all");
   const [staffFilterSearch,   setStaffFilterSearch]   = useState("");
   const [showBulkReset, setShowBulkReset] = useState(false);
@@ -804,6 +805,40 @@ export default function App() {
 
   async function dbDeleteCustomModule(id) {
     await dbWrite(sb.from("custom_modules").delete().eq("id", id), "module delete");
+  }
+
+  function duplicateModule(m) {
+    // Deep clone via JSON round-trip — module data (slides, quiz, image/video URLs) is plain serializable data.
+    const cloned = JSON.parse(JSON.stringify(m));
+    cloned.id = `custom_${Date.now()}`;
+    cloned.title = `${m.title} (Copy)`;
+    cloned._custom = true;
+    delete cloned._override; // a duplicate is always a brand new, independent module — never an override
+    setCustomModules(prev=>[...prev, cloned]);
+    dbSaveCustomModule(cloned);
+    // Jump straight into the editor so the admin can rename/adjust the new version
+    setEditingModule(cloned);
+    setAtab("create");
+  }
+
+  // "Deleting" a built-in module can't remove it from the TRAINING_MODULES source — instead it's
+  // hidden (soft-delete) via an override flag, and can be unhidden again at any time. Fully custom
+  // modules are hidden the same way here; hard deletion of custom modules is handled separately.
+  function setModuleHidden(m, hidden) {
+    const isFullyCustom = m._custom && !m._override;
+    if (isFullyCustom) {
+      const updated = { ...m, _hidden: hidden };
+      setCustomModules(prev=>prev.map(x=>x.id===m.id?updated:x));
+      dbSaveCustomModule(updated);
+      return;
+    }
+    const existingOverride = customModules.find(x=>x.id===m.id && x._override);
+    const updated = { ...(existingOverride||m), _custom:true, _override:true, _hidden: hidden };
+    setCustomModules(prev=>{
+      if (existingOverride) return prev.map(x=>x.id===m.id?updated:x);
+      return [...prev, updated];
+    });
+    dbSaveCustomModule(updated);
   }
 
   async function dbSaveCustomMachineType(type) {
@@ -3372,6 +3407,9 @@ export default function App() {
 
                 const targetLabel = bulkTarget==="all"?`all ${staff.length} staff`:bulkTarget==="warehouse"?`${staff.filter(u=>u.isWarehouseWorker).length} warehouse staff`:bulkTarget==="team"?`${(targetStaff||[]).length} staff in ${effectiveBulkManager}'s team`:"selected staff";
 
+                // Hidden modules are excluded from new assignments — staff who already have them keep their records.
+                const assignableModules = allModules.filter(m=>!m._hidden);
+
                 const bulkAssignMod = (mid) => {
                   if (!targetStaff) return;
                   const m = allModules.find(x=>x.id===mid);
@@ -3406,11 +3444,11 @@ export default function App() {
                 };
                 const bulkAssignAll = () => {
                   if (!targetStaff) return;
-                  if (!window.confirm(`Assign ALL ${allModules.length} modules to ${targetLabel}? This will add every module to their training plan.`)) return;
+                  if (!window.confirm(`Assign ALL ${assignableModules.length} modules to ${targetLabel}? This will add every module to their training plan.`)) return;
                   setAssigns(p => {
                     const next = {...p};
                     const affected = {};
-                    targetStaff.forEach(u => { next[u.id] = allModules.map(m=>m.id); affected[u.id] = next[u.id]; });
+                    targetStaff.forEach(u => { next[u.id] = assignableModules.map(m=>m.id); affected[u.id] = next[u.id]; });
                     if (Object.keys(affected).length) dbSaveAssigns(affected);
                     return next;
                   });
@@ -3479,7 +3517,7 @@ export default function App() {
                     {/* Module list */}
                     <div style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:16,padding:24,border:`1px solid ${T.border}`}}>
                       <div style={{display:"grid",gap:10}}>
-                        {allModules.map(m=>{
+                        {assignableModules.map(m=>{
                           let on, partialCount=0;
                           if (bulkTarget==="individual") {
                             on = (assigns[String(target)]||[]).includes(m.id);
@@ -3580,13 +3618,25 @@ export default function App() {
 
           {atab==="modules" && (
             <div>
-              <h2 style={{fontSize:22,fontWeight:900,letterSpacing:-.5,marginBottom:24}}>Training Library <HelpTip dark={false} text="All available training modules. Built-in modules are provided by Zeus Protect. Custom modules are ones you've created. Modules with a renewal period will show as expired when due for re-completion."/></h2>
+              <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",flexWrap:"wrap",gap:12,marginBottom:24}}>
+                <h2 style={{fontSize:22,fontWeight:900,letterSpacing:-.5,margin:0}}>Training Library <HelpTip dark={false} text="All available training modules. Built-in modules are provided by Zeus Protect. Custom modules are ones you've created. Modules with a renewal period will show as expired when due for re-completion. Hidden modules are removed from this library and the assignment picker, but staff who already have them stay unaffected."/></h2>
+                {allModules.some(m=>m._hidden) && (
+                  <button onClick={()=>setShowHiddenModules(v=>!v)}
+                    style={{background:showHiddenModules?"rgba(37,99,235,0.1)":T.overlay,color:showHiddenModules?T.accentLt:T.muted,border:`1px solid ${showHiddenModules?"rgba(37,99,235,0.25)":T.borderMd}`,borderRadius:10,padding:"8px 16px",cursor:"pointer",fontFamily:font,fontWeight:700,fontSize:12,whiteSpace:"nowrap"}}>
+                    {showHiddenModules?"Hide hidden modules":`👁 Show hidden (${allModules.filter(m=>m._hidden).length})`}
+                  </button>
+                )}
+              </div>
+              {(() => {
+                const visibleModules = allModules.filter(m=>showHiddenModules || !m._hidden);
+                return (
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:16}}>
-                {allModules.map(m=>(
-                  <div key={m.id} style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:16,padding:24,border:`1px solid ${m._custom?"rgba(245,158,11,0.35)":T.border}`}}>
+                {visibleModules.map(m=>(
+                  <div key={m.id} style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:16,padding:24,border:`1px solid ${m._custom?"rgba(245,158,11,0.35)":T.border}`,opacity:m._hidden?0.55:1}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"start",marginBottom:12}}>
                       <span style={{fontSize:36}}>{m.icon||"📋"}</span>
                       <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                        {m._hidden && <span style={{fontSize:10,fontWeight:700,color:T.muted,background:"rgba(148,163,184,0.12)",border:`1px solid ${T.borderMd}`,borderRadius:6,padding:"2px 7px",letterSpacing:.5}}>HIDDEN</span>}
                         {m._custom && <span style={{fontSize:10,fontWeight:700,color:T.gold,background:"rgba(245,158,11,0.12)",border:"1px solid rgba(245,158,11,0.3)",borderRadius:6,padding:"2px 7px",letterSpacing:.5}}>CUSTOM</span>}
                         <Pill label={m.level} col={m.level==="Mandatory"?"red":"navy"}/>
                       </div>
@@ -3606,8 +3656,26 @@ export default function App() {
                         style={{background:"rgba(37,99,235,0.1)",color:T.accentLt,border:`1px solid rgba(37,99,235,0.25)`,borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font}}>
                         ✏ Edit
                       </button>
+                      <button onClick={()=>duplicateModule(m)}
+                        style={{background:"rgba(148,163,184,0.1)",color:T.slate||T.muted,border:`1px solid ${T.borderMd}`,borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font}}>
+                        ⧉ Duplicate
+                      </button>
+                      {m._hidden ? (
+                        <button onClick={()=>setModuleHidden(m,false)}
+                          style={{background:"rgba(37,99,235,0.1)",color:T.accentLt,border:"1px solid rgba(37,99,235,0.25)",borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font}}>
+                          👁 Unhide
+                        </button>
+                      ) : (
+                        <button onClick={()=>{
+                          if(!window.confirm(`Hide "${m.title||"this module"}" from the Training Library?\n\nIt won't appear here or in the assignment picker for new assignments, but staff who already have it assigned or completed keep their records. You can unhide it again at any time.`)) return;
+                          setModuleHidden(m,true);
+                        }} style={{background:T.overlay,color:T.muted,border:`1px solid ${T.borderMd}`,borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font}}>
+                          🙈 Hide
+                        </button>
+                      )}
                       {m._custom && !m._override && (
                         <button onClick={()=>{
+                          if(!window.confirm(`Delete "${m.title||"this module"}"?\n\nThis will permanently remove the module, its slides and quiz. Staff who have already completed it will keep their completion record. This cannot be undone.`)) return;
                           setCustomModules(prev=>prev.filter(x=>x.id!==m.id));
                           dbDeleteCustomModule(m.id);
                           setAtab("modules");
@@ -3617,6 +3685,7 @@ export default function App() {
                       )}
                       {m._override && (
                         <button onClick={()=>{
+                          if(!window.confirm(`Reset "${m.title||"this module"}" to its original built-in version?\n\nAny customisations you've made will be lost. This cannot be undone.`)) return;
                           setCustomModules(prev=>prev.filter(x=>x.id!==m.id));
                           dbDeleteCustomModule(m.id);
                           setAtab("modules");
@@ -3628,6 +3697,8 @@ export default function App() {
                   </div>
                 ))}
               </div>
+                );
+              })()}
             </div>
           )}
 

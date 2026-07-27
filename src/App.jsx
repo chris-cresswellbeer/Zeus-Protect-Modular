@@ -70,6 +70,7 @@ export default function App() {
   const [qsub,    setQsub]    = useState(false);
   const [showCelebration, setShowCelebration] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState(null); // image URL to show in lightbox
+  const [lightboxZoomed, setLightboxZoomed] = useState(false); // true = zoomed in past fit-to-screen
   const [atab,    setAtab]    = useState("dashboard");
   const [adminReportView, setAdminReportView] = useState("staff");
   const [focusIncidentId, setFocusIncidentId] = useState(null);
@@ -1290,12 +1291,12 @@ export default function App() {
                   <div style={{marginBottom:20,display:"flex",flexWrap:"wrap",gap:10,justifyContent:"center"}}>
                     {/* new images[] array */}
                     {(slide.images||[]).map((img,ii)=>(
-                      <img key={ii} src={img.url||img.data} alt={img.name||""} onClick={()=>setLightboxSrc(img.url||img.data)}
+                      <img key={ii} src={img.url||img.data} alt={img.name||""} onClick={()=>{setLightboxSrc(img.url||img.data);setLightboxZoomed(false);}}
                         style={{maxWidth:"100%",flex:"1 1 220px",maxHeight:360,borderRadius:12,border:`1px solid ${T.borderMd}`,objectFit:"contain",cursor:"zoom-in"}}/>
                     ))}
                     {/* backwards compat: old single image field */}
                     {(slide.images||[]).length===0 && (slide.image?.data||slide.image?.url) && (
-                      <img src={slide.image.data||slide.image.url} alt={slide.image.name||""} onClick={()=>setLightboxSrc(slide.image.data||slide.image.url)}
+                      <img src={slide.image.data||slide.image.url} alt={slide.image.name||""} onClick={()=>{setLightboxSrc(slide.image.data||slide.image.url);setLightboxZoomed(false);}}
                         style={{maxWidth:"100%",maxHeight:360,borderRadius:12,border:`1px solid ${T.borderMd}`,objectFit:"contain",cursor:"zoom-in"}}/>
                     )}
                   </div>
@@ -1433,20 +1434,27 @@ export default function App() {
       {/* Lightbox overlay */}
       {lightboxSrc && (
         <div
-          onClick={()=>setLightboxSrc(null)}
-          onKeyDown={e=>e.key==="Escape"&&setLightboxSrc(null)}
+          onClick={()=>{setLightboxSrc(null);setLightboxZoomed(false);}}
+          onKeyDown={e=>e.key==="Escape"&&(setLightboxSrc(null),setLightboxZoomed(false))}
           tabIndex={-1}
-          style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.92)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2000,padding:20,cursor:"zoom-out"}}
+          style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.92)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2000,padding:lightboxZoomed?0:20,cursor:lightboxZoomed?"zoom-out":"default",overflow:lightboxZoomed?"auto":"hidden"}}
         >
           <button
-            onClick={e=>{e.stopPropagation();setLightboxSrc(null);}}
-            style={{position:"absolute",top:18,right:22,background:"rgba(255,255,255,0.12)",border:"1px solid rgba(255,255,255,0.2)",borderRadius:99,width:38,height:38,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:18,cursor:"pointer",fontWeight:700,lineHeight:1}}
+            onClick={e=>{e.stopPropagation();setLightboxSrc(null);setLightboxZoomed(false);}}
+            style={{position:"fixed",top:18,right:22,background:"rgba(255,255,255,0.12)",border:"1px solid rgba(255,255,255,0.2)",borderRadius:99,width:38,height:38,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:18,cursor:"pointer",fontWeight:700,lineHeight:1,zIndex:2001}}
           >✕</button>
+          {!lightboxZoomed && (
+            <div style={{position:"fixed",bottom:22,left:0,right:0,textAlign:"center",color:"rgba(255,255,255,0.55)",fontSize:12,fontWeight:600,pointerEvents:"none"}}>
+              Click image to zoom in
+            </div>
+          )}
           <img
             src={lightboxSrc}
             alt=""
-            onClick={e=>e.stopPropagation()}
-            style={{maxWidth:"100%",maxHeight:"90vh",borderRadius:10,boxShadow:"0 24px 80px rgba(0,0,0,0.8)",objectFit:"contain",cursor:"default"}}
+            onClick={e=>{e.stopPropagation();setLightboxZoomed(z=>!z);}}
+            style={lightboxZoomed
+              ? {width:"auto",height:"auto",maxWidth:"none",maxHeight:"none",borderRadius:0,cursor:"zoom-out",display:"block"}
+              : {maxWidth:"100%",maxHeight:"90vh",borderRadius:10,boxShadow:"0 24px 80px rgba(0,0,0,0.8)",objectFit:"contain",cursor:"zoom-in"}}
           />
         </div>
       )}

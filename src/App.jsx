@@ -40,6 +40,7 @@ import { ModulePreviewModal } from "./domains/training/ModulePreviewModal";
 const LazyReportsTab = React.lazy(() => import("./domains/training/ReportsTab").then(m => ({ default: m.ReportsTab })));
 import { generateStaffPDF } from "./domains/training/generateStaffPDF";
 import { isHtmlContent, ensureRteStyles } from "./domains/training/slideTextUtils";
+import { HotspotActivity } from "./domains/training/HotspotActivity";
 import { sanitizeHtml } from "./lib/sanitizeHtml";
 import { getExpiryStatus } from "./lib/dates";
 import { EmojiCtx, E, syncEmojiMode } from "./lib/emoji";
@@ -68,6 +69,7 @@ export default function App() {
   const [step,    setStep]    = useState(0);
   const [qans,    setQans]    = useState({});
   const [qsub,    setQsub]    = useState(false);
+  const [hotspotComplete, setHotspotComplete] = useState({}); // { [step]: boolean } — gates "Next Slide" for hotspot activity slides
   const [showCelebration, setShowCelebration] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState(null); // image URL to show in lightbox
   const [lightboxZoomed, setLightboxZoomed] = useState(false); // true = zoomed in past fit-to-screen
@@ -1015,7 +1017,7 @@ export default function App() {
 
   function logout() { setUser(null); setView("login"); setMod(null); }
 
-  function startMod(m) { setMod(m); setStep(0); setQans({}); setQsub(false); setShowCelebration(false); }
+  function startMod(m) { setMod(m); setStep(0); setQans({}); setQsub(false); setShowCelebration(false); setHotspotComplete({}); }
 
   function submitQuiz() {
     let score=0;
@@ -1287,7 +1289,7 @@ export default function App() {
                     {slide.heading}
                   </h2>
                 )}
-                {((slide.images||[]).length>0 || slide.image?.data || slide.image?.url) && (
+                {((slide.images||[]).length>0 || slide.image?.data || slide.image?.url) && !(slide.hotspots&&slide.hotspots.length>0) && (
                   <div style={{marginBottom:20,display:"flex",flexWrap:"wrap",gap:10,justifyContent:"center"}}>
                     {/* new images[] array */}
                     {(slide.images||[]).map((img,ii)=>(
@@ -1329,12 +1331,23 @@ export default function App() {
                     </div>
                   )
                 )}
+                {slide.hotspots && slide.hotspots.length>0 && (
+                  <HotspotActivity
+                    imageUrl={(slide.images&&slide.images[0]&&(slide.images[0].url||slide.images[0].data))||slide.image?.url||slide.image?.data}
+                    instructions={slide.hotspotInstructions||"Click every hazard you can find in the image above."}
+                    hotspots={slide.hotspots}
+                    passThreshold={1}
+                    onStatusChange={complete=>setHotspotComplete(prev=>prev[step]===complete?prev:{...prev,[step]:complete})}
+                    Z={T} font={font}
+                  />
+                )}
               </div>
               <div style={{display:"flex",justifyContent:"space-between",marginTop:24,gap:12}}>
                 <button onClick={()=>{setStep(s=>s-1);window.scrollTo({top:0,behavior:"smooth"});}} disabled={step===1}
                   style={{background:T.headerBgMd,border:`1px solid ${T.borderMd}`,borderRadius:10,padding:"10px 28px",color:T.muted,cursor:"pointer",fontWeight:700,fontFamily:font,opacity:step===1?.4:1}}>← Previous</button>
                 <button onClick={()=>{setStep(s=>s+1);window.scrollTo({top:0,behavior:"smooth"});}}
-                  style={{background:`linear-gradient(135deg,${T.accent},${T.blue})`,border:"none",borderRadius:10,padding:"10px 28px",color:T.white,cursor:"pointer",fontWeight:800,fontFamily:font,boxShadow:`0 4px 16px ${T.accent}44`}}>
+                  disabled={slide.hotspots&&slide.hotspots.length>0&&!hotspotComplete[step]}
+                  style={{background:`linear-gradient(135deg,${T.accent},${T.blue})`,border:"none",borderRadius:10,padding:"10px 28px",color:T.white,cursor:"pointer",fontWeight:800,fontFamily:font,boxShadow:`0 4px 16px ${T.accent}44`,opacity:(slide.hotspots&&slide.hotspots.length>0&&!hotspotComplete[step])?.4:1}}>
                   {step===totalSlides?"Take Quiz →":"Next Slide →"}
                 </button>
               </div>

@@ -4,6 +4,7 @@ import { HelpTip } from "../../shared/HelpTip";
 import { sb, SUPABASE_URL } from "../../lib/supabase";
 import { ACCEPT_IMAGES, ACCEPT_VIDEO } from "../../lib/constants";
 import { RichTextEditor } from "./RichTextEditor";
+import { HotspotEditor } from "./HotspotEditor";
 import { sanitizeHtml } from "../../lib/sanitizeHtml";
 import { htmlToPlainText } from "./slideTextUtils";
 
@@ -12,7 +13,7 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
   const ICONS = ["📋","🔥","💪","🧠","⚡","🏥","🦺","🧯","☢️","🌿","🔧","📊","🚧","👁","🩺","🎓","⚠️","🔐","🚨","📡"];
   const CATEGORIES = ["Fire Safety","Physical Safety","Mental Health","Hazardous Substances","Electrical Safety","First Aid","Environmental","Equipment Safety","Manual Handling","General H&S","Food Safety","Compliance","Custom"];
   const LEVELS = ["Mandatory","Recommended","Optional"];
-  const BLANK_SLIDE = { heading:"", text:"", video:null, images:[] }; // video: { name, data/url, type }; images: array of same
+  const BLANK_SLIDE = { heading:"", text:"", video:null, images:[], hotspots:null, hotspotInstructions:"" }; // video: { name, data/url, type }; images: array of same; hotspots: array of { id,x,y,radius,correct,label,feedback } or null if no activity
   const BLANK_Q = { q:"", options:["","","",""], answer:0 };
 
   const [step, setStep] = useState("details");
@@ -32,7 +33,9 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
     video: s.video||null,
     // backwards compat: old modules have single `image`, new ones have `images[]`
     images: s.images ? [...s.images] : (s.image ? [s.image] : []),
-  })) : [{ heading:"", text:"", video:null, images:[] }]);
+    hotspots: s.hotspots ? s.hotspots.map(h=>({...h})) : null,
+    hotspotInstructions: s.hotspotInstructions||"",
+  })) : [{ heading:"", text:"", video:null, images:[], hotspots:null, hotspotInstructions:"" }]);
   const [quiz, setQuiz] = useState(editingModule ? (editingModule.quiz||[]).map(q=>({...q, options:[...q.options]})) : [{ q:"", options:["","","",""], answer:0 }]);
   const [err, setErr] = useState("");
   const videoInputRefs = useRef({});
@@ -66,6 +69,8 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
     if(step==="slides") {
       if(slides.some(s=>!s.heading.trim())) { setErr("All slides must have a heading."); return; }
       if(slides.some(s=>!htmlToPlainText(s.text).trim()&&!s.video)) { setErr("Each slide must have either content text or a video."); return; }
+      if(slides.some(s=>s.hotspots && s.hotspots.length>0 && !s.hotspots.some(h=>h.correct))) { setErr("Each hotspot activity needs at least one marker set as a hazard."); return; }
+      if(slides.some(s=>s.hotspots && s.hotspots.some(h=>!h.label.trim()))) { setErr("Every hotspot marker needs a short label."); return; }
     }
     if(step==="quiz") {
       for(const q of quiz) {
@@ -268,6 +273,34 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
                   <div style={{fontSize:11,color:Z.muted}}>Click to browse · JPG, PNG, GIF, WebP</div>
                 </div>
               </div>
+              {/* Interactive hotspot activity */}
+              <div style={{marginBottom:12}}>
+                <label style={lbl}>Interactive Hotspot Activity (optional)</label>
+                {(s.images||[]).length===0 ? (
+                  <div style={{fontSize:11,color:Z.muted,fontStyle:"italic"}}>Upload an image above first — the activity is placed on your first image.</div>
+                ) : !s.hotspots ? (
+                  <button onClick={()=>updateSlide(i,"hotspots",[])}
+                    style={{background:Z.overlay,border:`2px dashed ${Z.borderMd}`,borderRadius:10,padding:"10px",cursor:"pointer",color:Z.muted,fontSize:12,fontWeight:700,fontFamily:font,width:"100%"}}>
+                    🎯 + Add Hotspot Activity (e.g. "click every source of ignition")
+                  </button>
+                ) : (
+                  <div style={{background:Z.overlaySm,borderRadius:10,padding:12,border:`1px solid ${Z.border}`}}>
+                    <input value={s.hotspotInstructions} onChange={e=>updateSlide(i,"hotspotInstructions",e.target.value)}
+                      placeholder='Instructions shown to staff, e.g. "Click every source of ignition in this office."'
+                      style={{...inp,marginBottom:10}}/>
+                    <HotspotEditor
+                      imageUrl={s.images[0].url||s.images[0].data}
+                      hotspots={s.hotspots}
+                      onChange={hs=>updateSlide(i,"hotspots",hs)}
+                      Z={Z} font={font}
+                    />
+                    <button onClick={()=>updateSlide(i,"hotspots",null)}
+                      style={{marginTop:10,background:"rgba(239,68,68,0.1)",color:"#f87171",border:"1px solid rgba(239,68,68,0.25)",borderRadius:7,padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font}}>
+                      Remove Hotspot Activity
+                    </button>
+                  </div>
+                )}
+              </div>
               {/* Video upload */}
               <div style={{marginBottom:12}}>
                 <label style={lbl}>Video (optional)</label>
@@ -392,6 +425,7 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
                   <div style={{fontWeight:700,fontSize:13,color:Z.white,marginBottom:4,display:"flex",alignItems:"center",gap:8}}>
                     Slide {i+1}: {s.heading}
                     {s.video && <span style={{fontSize:10,fontWeight:700,color:"#a78bfa",background:"rgba(167,139,250,0.12)",border:"1px solid rgba(167,139,250,0.3)",borderRadius:6,padding:"2px 7px"}}>🎬 VIDEO</span>}
+                    {s.hotspots && s.hotspots.length>0 && <span style={{fontSize:10,fontWeight:700,color:Z.green,background:"rgba(16,185,129,0.12)",border:"1px solid rgba(16,185,129,0.3)",borderRadius:6,padding:"2px 7px"}}>🎯 HOTSPOT</span>}
                   </div>
                   {s.video && <div style={{fontSize:11,color:Z.muted,marginBottom:4}}>📎 {s.video.name}</div>}
                   {htmlToPlainText(s.text) && <div style={{fontSize:12,color:Z.muted,lineHeight:1.5,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>{htmlToPlainText(s.text)}</div>}

@@ -11,17 +11,28 @@ function RichTextEditor({ value, onChange, Z, font, placeholder, minHeight = 120
   const editorRef = useRef(null);
   const imageInputRef = useRef(null);
   const savedRangeRef = useRef(null);
+  const lastEmittedRef = useRef(null); // tracks the last HTML this editor itself produced
 
   useEffect(() => { ensureRteStyles(); }, []);
 
-  // Note: initial/updated content is set via dangerouslySetInnerHTML below, not an effect.
-  // React only touches the DOM when the __html string actually differs from what's already
-  // rendered, so typing (which updates `value` to match the current DOM) doesn't reset the
-  // cursor — a real reset only happens when the slide's content changes from outside (e.g. switching slides).
+  // Imperative sync: only overwrite the live DOM when `value` changed from
+  // OUTSIDE this editor — e.g. switching slides, loading a module for edit,
+  // or the blur-time sanitize pass. If `value` matches what this editor last
+  // emitted itself, the DOM already shows it — skip the write. Re-assigning
+  // innerHTML with the identical string still destroys and rebuilds the DOM
+  // nodes, which is what was resetting the cursor to the start on every
+  // keystroke.
+  useEffect(() => {
+    if (!editorRef.current) return;
+    if (value === lastEmittedRef.current) return;
+    editorRef.current.innerHTML = value || "";
+    lastEmittedRef.current = value || "";
+  }, [value]);
 
   function emitChange() {
     if (!editorRef.current) return;
     const html = editorRef.current.innerHTML;
+    lastEmittedRef.current = html;
     onChange(html);
   }
 
@@ -95,6 +106,7 @@ function RichTextEditor({ value, onChange, Z, font, placeholder, minHeight = 120
     if (!editorRef.current) return;
     const clean = sanitizeHtml(editorRef.current.innerHTML);
     if (clean !== editorRef.current.innerHTML) editorRef.current.innerHTML = clean;
+    lastEmittedRef.current = clean;
     onChange(clean);
   }
 
@@ -123,7 +135,6 @@ function RichTextEditor({ value, onChange, Z, font, placeholder, minHeight = 120
         onInput={emitChange}
         onBlur={handleBlur}
         data-placeholder={placeholder}
-        dangerouslySetInnerHTML={{ __html: value || "" }}
         style={{ minHeight, background: Z.overlay, border: `1px solid ${Z.borderMd}`, borderTop: "none", borderRadius: "0 0 10px 10px", padding: "9px 13px", color: Z.white, fontSize: 13, lineHeight: 1.6, outline: "none", fontFamily: font, boxSizing: "border-box" }}
       />
     </div>

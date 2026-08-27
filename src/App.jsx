@@ -1,4 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
+import { SortableContext, rectSortingStrategy, arrayMove, useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { INIT_DSE_REPORTS } from "./data/dseReports";
 import { HS_DOCS, INIT_ASSIGN, INIT_COMPLETE } from "./data/seedDocs";
 import { INIT_EQUIPMENT } from "./data/seedEquipment";
@@ -52,6 +55,32 @@ import { useWindowWidth, MobileCard, MobileCardRow } from "./shared/hooks";
 import { Pill, Avatar, Bar } from "./shared/primitives";
 import { Z, getThemeTokens } from "./theme/tokens";
 
+// Wraps a dashboard stat card to make it draggable. Only the small handle in
+// the corner starts a drag — the rest of the card keeps its own onClick
+// (navigating to the relevant tab) working exactly as before. Defined at
+// module scope (not inside a .map()) so useSortable is called consistently
+// once per rendered instance, per the Rules of Hooks.
+function SortableStatCard({ id, children }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+    zIndex: isDragging ? 20 : "auto",
+    position: "relative",
+  };
+  return (
+    <div ref={setNodeRef} style={style} {...attributes}>
+      <span
+        {...listeners}
+        title="Drag to reorder"
+        style={{ position: "absolute", top: 10, right: 10, zIndex: 5, cursor: "grab", fontSize: 13, color: "rgba(255,255,255,0.35)", userSelect: "none", touchAction: "none", padding: "4px 6px", lineHeight: 1 }}
+      >⠿⠿</span>
+      {children}
+    </div>
+  );
+}
+
 export default function App() {
   const [darkMode, setDarkMode] = useState(true); // kept for backward compat
   const [theme, setTheme] = useState("dark"); // "dark"|"light"|"slate"|"forest"|"graphite"|"arctic"|"sand"
@@ -74,6 +103,8 @@ export default function App() {
   const [lightboxSrc, setLightboxSrc] = useState(null); // image URL to show in lightbox
   const [lightboxZoomed, setLightboxZoomed] = useState(false); // true = zoomed in past fit-to-screen
   const [atab,    setAtab]    = useState("dashboard");
+  const [dashboardLayouts, setDashboardLayouts] = useState({}); // { [userId]: [cardId, ...] } — admin's saved stat-card order
+  const statDragSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
   const [adminReportView, setAdminReportView] = useState("staff");
   const [focusIncidentId, setFocusIncidentId] = useState(null);
   const [showAdminReportForm, setShowAdminReportForm] = useState(false);
@@ -249,7 +280,7 @@ export default function App() {
           llRes, pwRes, usersRes, upRes, ecRes, qfRes, conRes, conIndRes,
           conCertRes, conVisitRes, permitRes, raRes, cmRes, mcRes, eqRes,
           siRes, msdsRes, ccRes, fwRes, fdRes, fatRes, fexRes, felRes,
-          ffrRes, faRes, cmtRes,
+          ffrRes, faRes, cmtRes, dlRes,
         ] = await Promise.allSettled([
           sb.from("training_assigns").select("*"),
           sb.from("training_completions").select("*"),
@@ -286,6 +317,7 @@ export default function App() {
           sb.from("fire_fra_reviews").select("*"),
           sb.from("first_aid_register").select("*").eq("id","singleton"),
           sb.from("custom_machine_types").select("*"),
+          sb.from("dashboard_layout").select("*"),
         ]);
 
         // Small helper: allSettled wraps each result in {status, value} or
@@ -294,7 +326,7 @@ export default function App() {
         // everything else's processing below.
         const rows = (res) => (res.status === "fulfilled" ? (res.value?.data ?? null) : null);
         if (usersRes.status === "rejected") console.error("Supabase load error (users):", usersRes.reason);
-        [aRes,cRes,iRes,invRes,ackRes,daRes,docRes,dseRes,resRes,llRes,pwRes,upRes,ecRes,qfRes,conRes,conIndRes,conCertRes,conVisitRes,permitRes,raRes,cmRes,mcRes,eqRes,siRes,msdsRes,ccRes,fwRes,fdRes,fatRes,fexRes,felRes,ffrRes,faRes,cmtRes]
+        [aRes,cRes,iRes,invRes,ackRes,daRes,docRes,dseRes,resRes,llRes,pwRes,upRes,ecRes,qfRes,conRes,conIndRes,conCertRes,conVisitRes,permitRes,raRes,cmRes,mcRes,eqRes,siRes,msdsRes,ccRes,fwRes,fdRes,fatRes,fexRes,felRes,ffrRes,faRes,cmtRes,dlRes]
           .forEach(r => { if (r.status === "rejected") console.error("Supabase load error:", r.reason); });
 
         // Training assigns
@@ -490,6 +522,14 @@ export default function App() {
         const cmtRows = rows(cmtRes);
         if (cmtRows && cmtRows.length) {
           setCustomMachineTypes(cmtRows.map(r => r.data));
+        }
+
+        // Dashboard stat-card order (per admin)
+        const dlRows = rows(dlRes);
+        if (dlRows && dlRows.length) {
+          const map = {};
+          dlRows.forEach(r => { map[String(r.user_id)] = r.card_order || []; });
+          setDashboardLayouts(map);
         }
 
         // Machine completions
@@ -2873,80 +2913,107 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Stat grid */}
-                <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,1fr)",gap:14,marginBottom:28}}>
-                  {card(E("📚",""),"Training Incomplete",overdueTraining.length,`of ${staffList.length} staff`,null,overdueTraining.length>0,()=>setAtab("assign"))}
-                  {card(E("🔄",""),"Expiring/Expired",expiringTraining.length,"training renewals",expiringTraining.length>0,false,()=>{setAtab("reports");setAdminReportView("expiry");})}
-                  {card(E("⚠️",""),"Open Incidents",openIncidents2.length,`${riddorOpen2.length} RIDDOR unreported`,null,riddorOpen2.length>0,()=>setAtab("incidents"))}
-                  {card(E("📄",""),"Unread Documents",unreadDocs.length,"assigned but unacknowledged",unreadDocs.length>0,false,()=>setAtab("documents"))}
-                  {card(E("🔧",""),"Equipment Overdue",overdueEquipment.length,"inspection overdue",null,overdueEquipment.length>0,()=>setAtab("equipment"))}
-                  {card(E("📋",""),"Out of Service",outOfService.length,"equipment items",null,false,()=>setAtab("equipment"))}
-                  {card(E("❌",""),"Quiz Failures",unreviewedFailures.length,"unreviewed",unreviewedFailures.length>0,false,()=>{setAtab("reports");setAdminReportView("failures");})}
-                  {card(E("📅",""),"Reviews Overdue",overdueDocReviews.length+overdueRAReviews.length,"docs & RAs",overdueDocReviews.length+overdueRAReviews.length>0,false,()=>setAtab("documents"))}
-                  {(()=>{
-                    const onSiteWorkers = [];
-                    (contractors||[]).forEach(c=>{
-                      const todayV=(contractorVisits[c.id]||[]).filter(v=>v.date===today);
-                      todayV.forEach(v=>{
-                        if(v.workers&&v.workers.length>0) v.workers.forEach(wid=>{const w=(c.workers||[]).find(x=>x.id===wid);if(w)onSiteWorkers.push(w.name);});
-                        else onSiteWorkers.push(c.name);
+                {/* Stat grid — order is draggable per-admin via the ⠿⠿ handle, saved to Supabase */}
+                {(() => {
+                  const statCardDefs = [
+                    { id:"trainingIncomplete", node: card(E("📚",""),"Training Incomplete",overdueTraining.length,`of ${staffList.length} staff`,null,overdueTraining.length>0,()=>setAtab("assign")) },
+                    { id:"expiringExpired", node: card(E("🔄",""),"Expiring/Expired",expiringTraining.length,"training renewals",expiringTraining.length>0,false,()=>{setAtab("reports");setAdminReportView("expiry");}) },
+                    { id:"openIncidents", node: card(E("⚠️",""),"Open Incidents",openIncidents2.length,`${riddorOpen2.length} RIDDOR unreported`,null,riddorOpen2.length>0,()=>setAtab("incidents")) },
+                    { id:"unreadDocuments", node: card(E("📄",""),"Unread Documents",unreadDocs.length,"assigned but unacknowledged",unreadDocs.length>0,false,()=>setAtab("documents")) },
+                    { id:"equipmentOverdue", node: card(E("🔧",""),"Equipment Overdue",overdueEquipment.length,"inspection overdue",null,overdueEquipment.length>0,()=>setAtab("equipment")) },
+                    { id:"outOfService", node: card(E("📋",""),"Out of Service",outOfService.length,"equipment items",null,false,()=>setAtab("equipment")) },
+                    { id:"quizFailures", node: card(E("❌",""),"Quiz Failures",unreviewedFailures.length,"unreviewed",unreviewedFailures.length>0,false,()=>{setAtab("reports");setAdminReportView("failures");}) },
+                    { id:"reviewsOverdue", node: card(E("📅",""),"Reviews Overdue",overdueDocReviews.length+overdueRAReviews.length,"docs & RAs",overdueDocReviews.length+overdueRAReviews.length>0,false,()=>setAtab("documents")) },
+                    { id:"onSiteNow", node: (()=>{
+                      const onSiteWorkers = [];
+                      (contractors||[]).forEach(c=>{
+                        const todayV=(contractorVisits[c.id]||[]).filter(v=>v.date===today);
+                        todayV.forEach(v=>{
+                          if(v.workers&&v.workers.length>0) v.workers.forEach(wid=>{const w=(c.workers||[]).find(x=>x.id===wid);if(w)onSiteWorkers.push(w.name);});
+                          else onSiteWorkers.push(c.name);
+                        });
                       });
-                    });
-                    const uniqueOnSite=[...new Set(onSiteWorkers)];
-                    return card(E("🪪",""),"On Site Now",uniqueOnSite.length,uniqueOnSite.length>0?uniqueOnSite.slice(0,2).join(", ")+(uniqueOnSite.length>2?` +${uniqueOnSite.length-2} more`:""):"No contractors today",null,false,()=>setAtab("contractors"));
-                  })()}
-                  {(()=>{
-                    const fs = fireSafety||{};
-                    const wardens2 = fs.wardens||[];
-                    const drills2 = fs.drills||[];
-                    const extinguishers2 = fs.extinguishers||[];
-                    const fraReviews2 = fs.fraReviews||[];
-                    const lastDrill2 = drills2.length?drills2.slice().sort((a,b)=>b.date.localeCompare(a.date))[0]:null;
-                    const daysSinceDrill2 = lastDrill2?Math.floor((new Date()-new Date(lastDrill2.date))/86400000):null;
-                    const expiredWardens2 = wardens2.filter(w=>{ const exp=new Date(w.qualDate); exp.setMonth(exp.getMonth()+(w.renewalMonths||36)); return exp.toISOString().slice(0,10)<today; });
-                    const overdueExts2 = extinguishers2.filter(e=>e.nextServiceDue&&e.nextServiceDue<today);
-                    const lastFra2 = fraReviews2.length?fraReviews2.slice().sort((a,b)=>b.date.localeCompare(a.date))[0]:null;
-                    const fraOverdue2 = lastFra2?.nextReviewDue&&lastFra2.nextReviewDue<today;
-                    const issues = expiredWardens2.length+overdueExts2.length+(fraOverdue2?1:0)+(daysSinceDrill2!==null&&daysSinceDrill2>365?1:0);
-                    const sub = issues>0?`${issues} item${issues!==1?"s":""} need attention`:(daysSinceDrill2!==null?`Last drill ${daysSinceDrill2}d ago`:"");
-                    return card(E("🔥",""),"Fire Safety",wardens2.length,sub,null,issues>0,()=>setAtab("firesafety"));
-                  })()}
-                  {(()=>{
-                    const fa = firstAidData||{};
-                    const faAiders = fa.aiders||[];
-                    const faCustomZones = fa.customZones||[];
-                    const faAllZones = [...FA_ZONES, ...faCustomZones];
-                    const minPerShift = fa.assessment?.minPerShift||1;
-                    // Build combined aider list (manual + cert-detected), same logic as FirstAidRegisterTab
-                    const faCertAiders = [];
-                    Object.entries(extCerts||{}).forEach(([uid2, certs2])=>{
-                      if(certs2.first_aid){ const u2=staffList.find(s=>String(s.id)===String(uid2)); if(u2) faCertAiders.push({id:`cert_${uid2}`,expiryDate:certs2.first_aid.expiryDate||"",shifts:certs2.first_aid.shifts||[],zones:certs2.first_aid.zones||[]}); }
-                    });
-                    const manualIds = new Set(faAiders.filter(a=>a.staffId).map(a=>String(a.staffId)));
-                    const allFaAiders = [...faAiders, ...faCertAiders.filter(c=>!manualIds.has(String(c.staffId||c.id.replace("cert_",""))))];
-                    const validAiders = allFaAiders.filter(a=>{ if(!a.expiryDate) return false; return Math.ceil((new Date(a.expiryDate)-new Date())/86400000)>=0; });
-                    const expiredCount = allFaAiders.length - validAiders.length;
-                    // Count coverage gaps
-                    const SHIFTS3 = ["Day Shift (08:30–16:00)","Late Shift (16:00–02:00)","Office Hours (08:30–17:30)"];
-                    let gapCount = 0;
-                    faAllZones.forEach(zone=>{
-                      SHIFTS3.forEach(shift=>{
-                        const count = validAiders.filter(a=>{
-                          const shiftsOk = !a.shifts?.length || a.shifts.includes("All Shifts") || a.shifts.includes(shift);
-                          const zonesOk  = !a.zones?.length  || a.zones.includes(zone);
-                          return shiftsOk && zonesOk;
-                        }).length;
-                        if(count < minPerShift) gapCount++;
+                      const uniqueOnSite=[...new Set(onSiteWorkers)];
+                      return card(E("🪪",""),"On Site Now",uniqueOnSite.length,uniqueOnSite.length>0?uniqueOnSite.slice(0,2).join(", ")+(uniqueOnSite.length>2?` +${uniqueOnSite.length-2} more`:""):"No contractors today",null,false,()=>setAtab("contractors"));
+                    })() },
+                    { id:"fireSafety", node: (()=>{
+                      const fs = fireSafety||{};
+                      const wardens2 = fs.wardens||[];
+                      const drills2 = fs.drills||[];
+                      const extinguishers2 = fs.extinguishers||[];
+                      const fraReviews2 = fs.fraReviews||[];
+                      const lastDrill2 = drills2.length?drills2.slice().sort((a,b)=>b.date.localeCompare(a.date))[0]:null;
+                      const daysSinceDrill2 = lastDrill2?Math.floor((new Date()-new Date(lastDrill2.date))/86400000):null;
+                      const expiredWardens2 = wardens2.filter(w=>{ const exp=new Date(w.qualDate); exp.setMonth(exp.getMonth()+(w.renewalMonths||36)); return exp.toISOString().slice(0,10)<today; });
+                      const overdueExts2 = extinguishers2.filter(e=>e.nextServiceDue&&e.nextServiceDue<today);
+                      const lastFra2 = fraReviews2.length?fraReviews2.slice().sort((a,b)=>b.date.localeCompare(a.date))[0]:null;
+                      const fraOverdue2 = lastFra2?.nextReviewDue&&lastFra2.nextReviewDue<today;
+                      const issues = expiredWardens2.length+overdueExts2.length+(fraOverdue2?1:0)+(daysSinceDrill2!==null&&daysSinceDrill2>365?1:0);
+                      const sub = issues>0?`${issues} item${issues!==1?"s":""} need attention`:(daysSinceDrill2!==null?`Last drill ${daysSinceDrill2}d ago`:"");
+                      return card(E("🔥",""),"Fire Safety",wardens2.length,sub,null,issues>0,()=>setAtab("firesafety"));
+                    })() },
+                    { id:"firstAid", node: (()=>{
+                      const fa = firstAidData||{};
+                      const faAiders = fa.aiders||[];
+                      const faCustomZones = fa.customZones||[];
+                      const faAllZones = [...FA_ZONES, ...faCustomZones];
+                      const minPerShift = fa.assessment?.minPerShift||1;
+                      // Build combined aider list (manual + cert-detected), same logic as FirstAidRegisterTab
+                      const faCertAiders = [];
+                      Object.entries(extCerts||{}).forEach(([uid2, certs2])=>{
+                        if(certs2.first_aid){ const u2=staffList.find(s=>String(s.id)===String(uid2)); if(u2) faCertAiders.push({id:`cert_${uid2}`,expiryDate:certs2.first_aid.expiryDate||"",shifts:certs2.first_aid.shifts||[],zones:certs2.first_aid.zones||[]}); }
                       });
-                    });
-                    const sub = validAiders.length===0 ? "No qualified first aiders" :
-                      gapCount>0 ? `${gapCount} zone/shift gap${gapCount!==1?"s":""}` :
-                      expiredCount>0 ? `${expiredCount} cert${expiredCount!==1?"s":""} expired` :
-                      "All shifts covered";
-                    const isAlert = validAiders.length===0 || gapCount>0 || expiredCount>0;
-                    return card(E("🩺",""),"First Aid",validAiders.length,sub,null,isAlert,()=>setAtab("firstaid"));
-                  })()}
-                </div>
+                      const manualIds = new Set(faAiders.filter(a=>a.staffId).map(a=>String(a.staffId)));
+                      const allFaAiders = [...faAiders, ...faCertAiders.filter(c=>!manualIds.has(String(c.staffId||c.id.replace("cert_",""))))];
+                      const validAiders = allFaAiders.filter(a=>{ if(!a.expiryDate) return false; return Math.ceil((new Date(a.expiryDate)-new Date())/86400000)>=0; });
+                      const expiredCount = allFaAiders.length - validAiders.length;
+                      // Count coverage gaps
+                      const SHIFTS3 = ["Day Shift (08:30–16:00)","Late Shift (16:00–02:00)","Office Hours (08:30–17:30)"];
+                      let gapCount = 0;
+                      faAllZones.forEach(zone=>{
+                        SHIFTS3.forEach(shift=>{
+                          const count = validAiders.filter(a=>{
+                            const shiftsOk = !a.shifts?.length || a.shifts.includes("All Shifts") || a.shifts.includes(shift);
+                            const zonesOk  = !a.zones?.length  || a.zones.includes(zone);
+                            return shiftsOk && zonesOk;
+                          }).length;
+                          if(count < minPerShift) gapCount++;
+                        });
+                      });
+                      const sub = validAiders.length===0 ? "No qualified first aiders" :
+                        gapCount>0 ? `${gapCount} zone/shift gap${gapCount!==1?"s":""}` :
+                        expiredCount>0 ? `${expiredCount} cert${expiredCount!==1?"s":""} expired` :
+                        "All shifts covered";
+                      const isAlert = validAiders.length===0 || gapCount>0 || expiredCount>0;
+                      return card(E("🩺",""),"First Aid",validAiders.length,sub,null,isAlert,()=>setAtab("firstaid"));
+                    })() },
+                  ];
+
+                  const defaultOrder = statCardDefs.map(c => c.id);
+                  const savedOrder = (dashboardLayouts[String(user.id)] || []).filter(id => defaultOrder.includes(id));
+                  const order = [...savedOrder, ...defaultOrder.filter(id => !savedOrder.includes(id))];
+                  const nodeById = Object.fromEntries(statCardDefs.map(c => [c.id, c.node]));
+
+                  const handleStatDragEnd = (event) => {
+                    const { active, over } = event;
+                    if (!over || active.id === over.id) return;
+                    const newOrder = arrayMove(order, order.indexOf(active.id), order.indexOf(over.id));
+                    setDashboardLayouts(prev => ({ ...prev, [String(user.id)]: newOrder }));
+                    dbWrite(sb.from("dashboard_layout").upsert({ user_id: String(user.id), card_order: newOrder }, { onConflict: "user_id" }), "dashboard layout");
+                  };
+
+                  return (
+                    <DndContext sensors={statDragSensors} collisionDetection={closestCenter} onDragEnd={handleStatDragEnd}>
+                      <SortableContext items={order} strategy={rectSortingStrategy}>
+                        <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,1fr)",gap:14,marginBottom:28}}>
+                          {order.map(id => (
+                            <SortableStatCard key={id} id={id}>{nodeById[id]}</SortableStatCard>
+                          ))}
+                        </div>
+                      </SortableContext>
+                    </DndContext>
+                  );
+                })()}
 
                 <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:20}}>
                   {/* Incomplete training */}

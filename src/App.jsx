@@ -1808,7 +1808,14 @@ export default function App() {
             }} style={{background:T.overlay,border:`1px solid ${T.borderMd}`,borderRadius:8,padding:"5px 10px",color:T.muted,cursor:"pointer",fontSize:14,fontFamily:font,display:"flex",alignItems:"center",gap:4,transition:"all .15s"}}>
               {theme==="dark"?"🌙":theme==="light"?"☀️":theme==="slate"?"◼":theme==="forest"?"🌲":theme==="graphite"?"⬛":theme==="arctic"?"🌌":theme==="sand"?"🏜":"🌸"}
             </button>
-            <div style={{width:1,height:20,background:T.headerBgMd,margin:"0 4px"}}/>
+            {user.role==="admin" && (<>
+              <button onClick={()=>setView("admin")}
+                title="Back to the admin panel"
+                style={{background:T.overlay,border:`1px solid ${T.borderMd}`,borderRadius:8,padding:"5px 12px",color:T.muted,cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font,display:"flex",alignItems:"center",gap:5,transition:"all .15s"}}>
+                {E("🛠 ","")}Back to Admin
+              </button>
+              <div style={{width:1,height:20,background:T.headerBgMd,margin:"0 4px"}}/>
+            </>)}
             <div onClick={()=>setStab("account")}
               title="My Account"
               style={{display:"flex",alignItems:"center",gap:7,cursor:"pointer",padding:"4px 8px 4px 4px",borderRadius:10,transition:"background .15s",background:stab==="account"?T.overlay:"transparent",border:stab==="account"?`1px solid ${T.borderMd}`:"1px solid transparent"}}
@@ -2745,6 +2752,13 @@ export default function App() {
               else if(soonReviews.length) notifications.push({type:"document",urgent:false,title:`${soonReviews.length} document${soonReviews.length!==1?"s":""} due for review soon`,detail:soonReviews.map(d=>d.title).join(", "),nav:{tab:"documents"}});
               return <NotificationBell notifications={notifications} onNavigate={n=>{setAtab(n.tab);if(n.view)setAdminReportView(n.view);}} Z={T} font={font}/>;
             })()}
+            <div style={{width:1,height:20,background:T.headerBgMd,margin:"0 4px"}}/>
+            {/* My Training — lets an admin see/complete their own assigned training via the staff view */}
+            <button onClick={()=>{ setStab("training"); setView("staff"); }}
+              title="View your own assigned training"
+              style={{background:T.overlay,border:`1px solid ${T.borderMd}`,borderRadius:8,padding:"5px 12px",color:T.muted,cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font,display:"flex",alignItems:"center",gap:5,transition:"all .15s"}}>
+              {E("📚 ","")}My Training
+            </button>
             <div style={{width:1,height:20,background:T.headerBgMd,margin:"0 4px"}}/>
             {/* Quick theme cycle button */}
             <button onClick={()=>{

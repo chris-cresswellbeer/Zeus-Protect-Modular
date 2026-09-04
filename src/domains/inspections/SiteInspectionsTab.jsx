@@ -19,6 +19,7 @@ function SiteInspectionsTab({ inspections, setInspections, staff, Z, font }) {
   const [formSection, setFormSection] = useState(0);
   const [ncForm, setNcForm] = useState(null); // { section, finding, severity, photos, actionOwner, actionDue }
   const [editNcIdx, setEditNcIdx] = useState(null);
+  const [ncReturnSection, setNcReturnSection] = useState(null); // section index to jump back to after saving/cancelling an NC flagged from a checklist question
   const [editingInspId, setEditingInspId] = useState(null);
   const [editInspForm, setEditInspForm] = useState(null);
 
@@ -81,12 +82,13 @@ function SiteInspectionsTab({ inspections, setInspections, staff, Z, font }) {
 
   function saveNC() {
     if (!ncForm?.finding?.trim()) return;
-    const nc = { id:`nc_${Date.now()}`, ...ncForm, actionStatus:"open", actionNote:"" };
+    const nc = { id:ncForm.id||`nc_${Date.now()}`, ...ncForm, actionStatus:ncForm.actionStatus||"open", actionNote:ncForm.actionNote||"" };
     setForm(p=>({
       ...p,
       nonConformances: editNcIdx!==null ? p.nonConformances.map((n,i)=>i===editNcIdx?nc:n) : [...p.nonConformances, nc]
     }));
     setNcForm(null); setEditNcIdx(null);
+    if (ncReturnSection!==null) { setFormSection(ncReturnSection); setNcReturnSection(null); }
   }
 
   function submitInspection() {
@@ -353,12 +355,25 @@ function SiteInspectionsTab({ inspections, setInspections, staff, Z, font }) {
     const isLastSec = formSection===sections.length-1;
     const { earned, possible } = calcScore(form.type, form.sections);
     const allAnswered = sec?.questions.every(q=>(form.sections[sec.id]||{})[q.id]!==undefined);
-    const BLANK_NC = { section:"", finding:"", severity:"major", photos:[], actionOwner:"", actionDue:"" };
+    const BLANK_NC = { section:"", sectionId:"", questionId:"", finding:"", severity:"major", photos:[], actionOwner:"", actionDue:"" };
+    // Jump to the Non-Conformances tab with a finding pre-filled from a specific checklist question
+    const flagQuestion = (secForQ, q, ans) => {
+      setNcForm({ ...BLANK_NC, section:secForQ.label, sectionId:secForQ.id, questionId:q.id, severity:ans===0?"major":"minor", finding:q.text });
+      setEditNcIdx(null);
+      setNcReturnSection(formSection);
+      setFormSection(sections.length);
+    };
+    const editLinkedNc = (idx) => {
+      setNcForm({...form.nonConformances[idx]});
+      setEditNcIdx(idx);
+      setNcReturnSection(formSection);
+      setFormSection(sections.length);
+    };
 
     return (
       <div>
         <div style={{display:"flex",gap:12,alignItems:"center",marginBottom:20,flexWrap:"wrap"}}>
-          <button onClick={()=>{setView("list");setForm(BLANK_FORM);setFormSection(0);setNcForm(null);}} style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:8,padding:"7px 14px",color:Z.muted,cursor:"pointer",fontFamily:font,fontSize:12,fontWeight:700}}>← Cancel</button>
+          <button onClick={()=>{setView("list");setForm(BLANK_FORM);setFormSection(0);setNcForm(null);setEditNcIdx(null);setNcReturnSection(null);}} style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:8,padding:"7px 14px",color:Z.muted,cursor:"pointer",fontFamily:font,fontSize:12,fontWeight:700}}>← Cancel</button>
           <div style={{flex:1}}>
             <h2 style={{margin:0,fontSize:20,fontWeight:900,color:Z.white}}>New {ti.label}</h2>
             <p style={{margin:0,color:Z.muted,fontSize:13}}>Complete all checklist sections then log any non-conformances</p>
@@ -373,7 +388,7 @@ function SiteInspectionsTab({ inspections, setInspections, staff, Z, font }) {
           <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:14,marginBottom:14}}>
             <div>
               <label style={lbl}>Inspection Type *</label>
-              <select value={form.type} onChange={e=>{setForm(p=>({...BLANK_FORM,type:e.target.value,date:p.date,inspector:p.inspector,location:p.location}));setFormSection(0);}} style={{...inp,cursor:"pointer"}}>
+              <select value={form.type} onChange={e=>{setForm(p=>({...BLANK_FORM,type:e.target.value,date:p.date,inspector:p.inspector,location:p.location}));setFormSection(0);setNcForm(null);setEditNcIdx(null);setNcReturnSection(null);}} style={{...inp,cursor:"pointer"}}>
                 {INSP_TYPES.map(t=><option key={t.id} value={t.id}>{t.icon} {t.label}</option>)}
               </select>
             </div>
@@ -420,6 +435,7 @@ function SiteInspectionsTab({ inspections, setInspections, staff, Z, font }) {
             <div style={{display:"grid",gap:10}}>
               {sec.questions.map(q=>{
                 const ans = (form.sections[sec.id]||{})[q.id];
+                const linkedNcIdx = form.nonConformances.findIndex(n=>n.sectionId===sec.id&&n.questionId===q.id);
                 return (
                   <div key={q.id} style={{padding:"14px 16px",background:Z.overlay,borderRadius:12,border:`1px solid ${ans===0?"rgba(239,68,68,0.3)":ans===1?"rgba(245,158,11,0.3)":ans===2?"rgba(16,185,129,0.3)":Z.border}`}}>
                     <p style={{margin:"0 0 10px",fontSize:13,fontWeight:600,color:Z.white,lineHeight:1.5}}>{q.text}</p>
@@ -431,6 +447,24 @@ function SiteInspectionsTab({ inspections, setInspections, staff, Z, font }) {
                         </button>
                       ))}
                     </div>
+                    {(ans===0||ans===1) && (
+                      <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${Z.border}`}}>
+                        {linkedNcIdx===-1 ? (
+                          <button onClick={()=>flagQuestion(sec,q,ans)}
+                            style={{background:"rgba(239,68,68,0.1)",color:"#f87171",border:"1px solid rgba(239,68,68,0.25)",borderRadius:8,padding:"6px 14px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:11.5}}>
+                            + Add Non-Conformance for this
+                          </button>
+                        ) : (
+                          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                            <span style={{fontSize:11.5,color:"#f87171",fontWeight:700}}>⚠ Non-conformance logged</span>
+                            <button onClick={()=>editLinkedNc(linkedNcIdx)}
+                              style={{background:"rgba(37,99,235,0.1)",color:Z.accentLt,border:`1px solid ${Z.accent}33`,borderRadius:7,padding:"4px 10px",cursor:"pointer",fontFamily:font,fontSize:11,fontWeight:700}}>
+                              View / Edit
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -450,7 +484,7 @@ function SiteInspectionsTab({ inspections, setInspections, staff, Z, font }) {
           <div style={{background:`linear-gradient(135deg,${Z.navyMd},${Z.navy})`,borderRadius:14,padding:"18px 20px",marginBottom:16,border:`1px solid ${Z.borderMd}`}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
               <h3 style={{margin:0,fontSize:14,fontWeight:700,color:Z.white}}>Non-Conformances & Actions</h3>
-              {!ncForm && <button onClick={()=>{setNcForm({...BLANK_NC,section:sections[0]?.label||""});setEditNcIdx(null);}}
+              {!ncForm && <button onClick={()=>{setNcForm({...BLANK_NC,section:sections[0]?.label||""});setEditNcIdx(null);setNcReturnSection(null);}}
                 style={{background:`linear-gradient(135deg,${Z.green},#059669)`,color:"#fff",border:"none",borderRadius:8,padding:"7px 16px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:12,boxShadow:"0 3px 10px rgba(16,185,129,0.3)"}}>
                 + Add Non-Conformance
               </button>}
@@ -465,7 +499,7 @@ function SiteInspectionsTab({ inspections, setInspections, staff, Z, font }) {
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
                     <div>
                       <label style={lbl}>Section</label>
-                      <select value={ncForm.section} onChange={e=>setNcForm(p=>({...p,section:e.target.value}))} style={{...inp,cursor:"pointer"}}>
+                      <select value={ncForm.section} onChange={e=>{const newSec=sections.find(s=>s.label===e.target.value);setNcForm(p=>({...p,section:e.target.value,sectionId:newSec?.id||"",questionId:newSec?.id===p.sectionId?p.questionId:""}));}} style={{...inp,cursor:"pointer"}}>
                         {sections.map(s=><option key={s.id} value={s.label}>{s.label}</option>)}
                       </select>
                     </div>
@@ -508,7 +542,7 @@ function SiteInspectionsTab({ inspections, setInspections, staff, Z, font }) {
                   <button onClick={saveNC} style={{background:`linear-gradient(135deg,${Z.green},#059669)`,color:"#fff",border:"none",borderRadius:8,padding:"7px 18px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:12}}>
                     {editNcIdx!==null?"Save Changes":"Add Finding"}
                   </button>
-                  <button onClick={()=>{setNcForm(null);setEditNcIdx(null);}} style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:8,padding:"7px 14px",color:Z.muted,cursor:"pointer",fontFamily:font,fontSize:12,fontWeight:700}}>Cancel</button>
+                  <button onClick={()=>{setNcForm(null);setEditNcIdx(null);if(ncReturnSection!==null){setFormSection(ncReturnSection);setNcReturnSection(null);}}} style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:8,padding:"7px 14px",color:Z.muted,cursor:"pointer",fontFamily:font,fontSize:12,fontWeight:700}}>Cancel</button>
                 </div>
               </div>
             )}
@@ -524,12 +558,13 @@ function SiteInspectionsTab({ inspections, setInspections, staff, Z, font }) {
                         <div style={{display:"flex",gap:6,marginBottom:4,flexWrap:"wrap"}}>
                           <span style={{fontSize:10,fontWeight:800,color:sevCol,background:sevCol+"22",padding:"2px 8px",borderRadius:99,textTransform:"uppercase"}}>{nc.severity}</span>
                           <span style={{fontSize:11,color:Z.muted}}>{nc.section}</span>
+                          {nc.questionId && <span style={{fontSize:10,color:Z.muted}}>🔗 from checklist</span>}
                         </div>
                         <p style={{margin:0,fontSize:13,color:Z.white,lineHeight:1.4}}>{nc.finding}</p>
                         {nc.photos?.length>0 && <span style={{fontSize:11,color:Z.muted,marginTop:2,display:"block"}}>🖼 {nc.photos.length} photo{nc.photos.length!==1?"s":""}</span>}
                       </div>
                       <div style={{display:"flex",gap:6,flexShrink:0}}>
-                        <button onClick={()=>{setNcForm({...nc});setEditNcIdx(i);}} style={{background:"rgba(37,99,235,0.1)",color:Z.accentLt,border:`1px solid ${Z.accent}33`,borderRadius:7,padding:"4px 10px",cursor:"pointer",fontFamily:font,fontSize:11,fontWeight:700}}>✏</button>
+                        <button onClick={()=>{setNcForm({...nc});setEditNcIdx(i);setNcReturnSection(null);}} style={{background:"rgba(37,99,235,0.1)",color:Z.accentLt,border:`1px solid ${Z.accent}33`,borderRadius:7,padding:"4px 10px",cursor:"pointer",fontFamily:font,fontSize:11,fontWeight:700}}>✏</button>
                         <button onClick={()=>setForm(p=>({...p,nonConformances:p.nonConformances.filter((_,x)=>x!==i)}))} style={{background:"rgba(239,68,68,0.08)",color:"#f87171",border:"1px solid rgba(239,68,68,0.2)",borderRadius:7,padding:"4px 10px",cursor:"pointer",fontFamily:font,fontSize:11,fontWeight:700}}>🗑</button>
                       </div>
                     </div>
@@ -579,7 +614,7 @@ function SiteInspectionsTab({ inspections, setInspections, staff, Z, font }) {
           <h2 style={{fontSize:22,fontWeight:900,letterSpacing:-.5,margin:"0 0 4px",color:Z.white}}>Site Inspections <HelpTip dark={true} text="Record regular site inspection findings. Each inspection is scored and failing items can have corrective actions assigned with a due date and responsible person. Completed inspections are stored for audit purposes."/></h2>
           <p style={{color:Z.muted,margin:0,fontSize:13}}>{inspections.length} inspections recorded · H&S Audits, Fire Risk Assessments, Walk Arounds</p>
         </div>
-        <button onClick={()=>{setForm(BLANK_FORM);setFormSection(0);setNcForm(null);setView("new");}}
+        <button onClick={()=>{setForm(BLANK_FORM);setFormSection(0);setNcForm(null);setEditNcIdx(null);setNcReturnSection(null);setView("new");}}
           style={{background:`linear-gradient(135deg,${Z.accent},${Z.blue})`,color:"#fff",border:"none",borderRadius:10,padding:"10px 20px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:13,boxShadow:`0 4px 16px ${Z.accent}44`,display:"flex",alignItems:"center",gap:6}}>
           + New Inspection
         </button>

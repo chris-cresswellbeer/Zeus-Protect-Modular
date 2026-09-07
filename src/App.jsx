@@ -54,6 +54,7 @@ import { NotificationBell } from "./shared/NotificationBell";
 import { useWindowWidth, MobileCard, MobileCardRow } from "./shared/hooks";
 import { Pill, Avatar, Bar } from "./shared/primitives";
 import { Z, getThemeTokens } from "./theme/tokens";
+import MobileApp from "./mobile/MobileApp.jsx";
 
 // Wraps a dashboard stat card to make it draggable. Only the small handle in
 // the corner starts a drag — the rest of the card keeps its own onClick
@@ -215,6 +216,13 @@ export default function App() {
   const winW = useWindowWidth();
   const isMobile = winW <= 1024;
   const isSmall = winW <= 480;
+
+  // ── Mobile PWA ──────────────────────────────────────────────────────────────
+  // Phone-sized viewports get the dedicated mobile shell in src/mobile. This is
+  // an escape hatch, not a lock-in: "Use the full portal" in the mobile More tab
+  // sets forceDesktop and returns the user here.
+  const isPhone = winW <= 700;
+  const [forceDesktop, setForceDesktop] = useState(false);
 
   // ── Ensure correct viewport meta tag for mobile ─────────────────────────────
   useEffect(() => {
@@ -715,6 +723,24 @@ export default function App() {
     await dbWrite(sb.from("investigations").upsert({ incident_id: incidentId, data }, { onConflict: "incident_id" }), "investigation");
   }
 
+  // Marks a single corrective action complete inside its investigation and
+  // persists the whole investigation record. Used by the mobile My Actions
+  // screen; safe to call from the desktop investigation tab too.
+  async function dbCompleteAction(incidentId, actionId, completedBy) {
+    const inv = investigations[incidentId];
+    if (!inv) return;
+    const next = {
+      ...inv,
+      actions: (inv.actions || []).map(a =>
+        a.id === actionId
+          ? { ...a, status: "complete", completedDate: new Date().toISOString().slice(0,10), completedBy: completedBy || "" }
+          : a
+      ),
+    };
+    setInvestigations(p => ({ ...p, [incidentId]: next }));
+    await dbSaveInvestigation(incidentId, next);
+  }
+
   async function dbAcknowledgeDoc(userId, docId, date) {
     await dbWrite(sb.from("doc_acknowledgements").upsert({ user_id: String(userId), doc_id: String(docId), date }, { onConflict: "user_id,doc_id" }), "document acknowledgement");
   }
@@ -787,8 +813,46 @@ export default function App() {
     await dbWrite(sb.from("user_profiles").upsert({ user_id: sid, data: merged }, { onConflict: "user_id" }), "theme preference");
   }
 
-  async function dbSaveEmojiMode(userId, enabled) {
-    const sid = String(userId);
+  // ── Mobile write surface ────────────────────────────────────────────────────
+  // Everything src/mobile is allowed to do to the database, in one object.
+  // Real writes go to the existing db* functions; the optimistic* callbacks
+  // update local state first so the UI never waits on a network round-trip.
+  const mobileDb = React.useMemo(() => ({
+    saveCompletion: (userId, moduleId, rec) => dbSaveCompletion(userId, moduleId, rec),
+    acknowledgeDoc: (userId, docId, date)   => dbAcknowledgeDoc(userId, docId, date),
+    saveIncident:   (rec)                   => dbSaveIncident(rec),
+    saveTheme:      (userId, key)           => dbSaveTheme(userId, key),
+    completeAction: (incidentId, actionId)  => dbCompleteAction(incidentId, actionId, user?.name),
+
+    // dbSaveDseReport takes the whole array for a user, so append then save.
+    saveDseReport: (userId, report) => {
+      const next = [ ...(dseReports[userId] || []), report ];
+      return dbSaveDseReport(userId, next);
+    },
+
+    optimisticCompletion: (userId, r) => setComps(p => ({
+      ...p,
+      [userId]: { ...(p[userId] || {}), [r.moduleId]: { score: r.score, date: r.date, certId: r.certId } },
+    })),
+    optimisticDocAck: (userId, docId, date) => setDocAcknowledgements(p => ({
+      ...p,
+      [userId]: { ...(p[userId] || {}), [docId]: { date } },
+    })),
+    optimisticIncident: (rec) => setIncidents(p => [rec, ...p]),
+    optimisticDseReport: (userId, report) => setDseReports(p => ({
+      ...p,
+      [userId]: [ ...(p[userId] || []), report ],
+    })),
+
+    previewDoc: (d) => setPreviewDoc(d),
+    resolveIncident: (id) => {
+      setIncidents(p => p.map(i => i.id === id ? { ...i, closed: true, triaged: true } : i));
+      const inc = incidents.find(i => i.id === id);
+      if (inc) dbSaveIncident({ ...inc, closed: true, triaged: true });
+    },
+  }), [dseReports, incidents, user]);
+
+  async function dbSaveEmojiMode(userId, enabled) {    const sid = String(userId);
     const profiles = Array.isArray(window.__userProfiles) ? window.__userProfiles : [];
     const existing = profiles.find(r => String(r.user_id) === sid);
     const merged = { ...(existing?.data || {}), emojiMode: enabled };
@@ -1144,6 +1208,36 @@ export default function App() {
       <style>{`@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.85)}}`}</style>
     </div>
   );
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // MOBILE PWA
+  // ══════════════════════════════════════════════════════════════════════════
+  // Sits above every desktop view so a phone never falls through to the wide
+  // layout. MobileApp is a view over the state below — it owns no domain data
+  // and never touches Supabase directly, only the handlers passed in as `db`.
+  if (isPhone && user && !forceDesktop) {
+    return (
+      <MobileApp
+        user={user}
+        onSignOut={logout}
+        onSwitchToDesktop={() => setForceDesktop(true)}
+        allModules={allModules}
+        assigns={assigns}
+        comps={comps}
+        docs={docs}
+        docAssignments={docAssignments}
+        docAcknowledgements={docAcknowledgements}
+        dseReports={dseReports}
+        incidents={incidents}
+        investigations={investigations}
+        allUsers={allUsers}
+        theme={theme}
+        setTheme={setTheme}
+        setDarkMode={setDarkMode}
+        db={mobileDb}
+      />
+    );
+  }
 
   // ══════════════════════════════════════════════════════════════════════════
   // DSE ASSESSMENT

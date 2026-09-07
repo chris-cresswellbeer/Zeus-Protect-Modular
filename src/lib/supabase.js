@@ -1,5 +1,21 @@
 const SUPABASE_URL  = "https://aoahugfyswgcisfiosyn.supabase.co";
-const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFvYWh1Z2Z5c3dnY2lzZmlvc3luIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk5NjY1NzMsImV4cCI6MjA5NTU0MjU3M30.9mlm3pVxqwTgCdrdVF2ek1mBHro28P-MTaVjdAUvCIs"; // TODO: paste your Supabase anon/public key here
+const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFvYWh1Z2Z5c3dnY2lzZmlvc3luIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk5NjY1NzMsImV4cCI6MjA5NTU0MjU3M30.9mlm3pVxqwTgCdrdVF2ek1mBHro28P-MTaVjdAUvCIs";
+
+// A request that never resolves used to hang the whole app: loadAll() awaits
+// Promise.allSettled over 34 reads and only flips dbReady in its finally block,
+// so a single stalled fetch on a weak mobile connection left the user staring
+// at "CONNECTING TO DATABASE…" indefinitely. Every request now has a ceiling.
+const REQUEST_TIMEOUT_MS = 12000;
+
+async function fetchWithTimeout(url, options = {}, ms = REQUEST_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 const sb = (() => {
   const h = { "Content-Type": "application/json", "apikey": SUPABASE_ANON, "Authorization": `Bearer ${SUPABASE_ANON}` };
@@ -14,9 +30,27 @@ const sb = (() => {
     const headers = { ...h };
     if (method === "POST" && upsertOn) headers["Prefer"] = "resolution=merge-duplicates,return=minimal";
     else if (method === "POST") headers["Prefer"] = "return=minimal";
-    const res = await fetch(url, { method, headers, ...(body ? { body: JSON.stringify(body) } : {}) });
-    if (method === "GET") { const d = await res.json(); return { data: d, error: null }; }
-    return { data: null, error: res.ok ? null : await res.text() };
+    try {
+      const res = await fetchWithTimeout(url, { method, headers, ...(body ? { body: JSON.stringify(body) } : {}) });
+      if (method === "GET") {
+        if (!res.ok) {
+          const text = await res.text();
+          console.warn(`[sb] GET ${table} failed ${res.status}:`, text);
+          return { data: [], error: text };
+        }
+        const d = await res.json();
+        return { data: d, error: null };
+      }
+      return { data: null, error: res.ok ? null : await res.text() };
+    } catch (err) {
+      // Timeout or network failure. GETs resolve with an empty set so the app
+      // still boots on seed/cached data instead of hanging; writes surface the
+      // error so the caller can queue and retry.
+      const reason = err.name === "AbortError" ? `timed out after ${REQUEST_TIMEOUT_MS}ms` : err.message;
+      console.warn(`[sb] ${method} ${table} ${reason}`);
+      if (method === "GET") return { data: [], error: reason };
+      return { data: null, error: reason };
+    }
   };
   const from = (table) => ({
     select: (cols = "*") => {

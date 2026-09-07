@@ -9,7 +9,7 @@ import { IncidentChart } from "./IncidentChart";
 import { IncidentTracker } from "./IncidentTracker";
 import { INCIDENT_TYPES, ACCIDENT_CODES, NUMBER_CODES } from "../../data/seedIncidents";
 
-function AdminIncidentTab({ incidents, setIncidents, staff, investigations, setInvestigations, onOpenInvestigation, equipment, setEquipment, focusIncidentId, setFocusIncidentId, showAdminReportForm, setShowAdminReportForm, Z, font }) {
+function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, investigations, setInvestigations, onOpenInvestigation, equipment, setEquipment, focusIncidentId, setFocusIncidentId, showAdminReportForm, setShowAdminReportForm, Z, font }) {
   const isMobile = useWindowWidth() <= 1024;
   const [filterType, setFilterType]     = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
@@ -44,6 +44,7 @@ function AdminIncidentTab({ incidents, setIncidents, staff, investigations, setI
 
   function deleteIncident(id) {
     setIncidents(p=>p.filter(i=>i.id!==id));
+    dbDeleteIncident&&dbDeleteIncident(id);
     setConfirmDeleteId(null);
     setExpandedId(null);
   }

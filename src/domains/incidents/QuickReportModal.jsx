@@ -26,7 +26,7 @@ function QuickReportModal({ user, onSubmit, onClose, Z, font }) {
       type: urgency==="high" ? "unsafe_condition" : "near_miss",
       location,
       description: what.trim(),
-      reportedBy: user.id,
+      reportedBy: String(user.id),
       injuryType: "None / No injury",
       riddor: false,
       closed: false,

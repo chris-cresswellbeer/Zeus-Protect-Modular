@@ -122,7 +122,7 @@ function AdminIncidentTab({ incidents, setIncidents, staff, investigations, setI
       const rows = [...incidents]
         .sort((a,b)=>b.date.localeCompare(a.date))
         .map(inc=>{
-          const reporter = staff.find(u=>u.id===inc.reportedBy);
+          const reporter = staff.find(u=>String(u.id)===String(inc.reportedBy));
           const typeLabel = INCIDENT_TYPES.find(t=>t.id===inc.type)?.label||inc.type;
           const eq = inc.equipmentId ? (equipment||[]).find(e=>e.id===inc.equipmentId) : null;
           return [
@@ -236,7 +236,7 @@ function AdminIncidentTab({ incidents, setIncidents, staff, investigations, setI
   function printAccidentBook(bookIncidents) {
     const today = new Date().toLocaleDateString("en-GB");
     const rows = bookIncidents.map((inc, idx) => {
-      const reporter = staff.find(u => u.id === inc.reportedBy);
+      const reporter = staff.find(u => String(u.id) === String(inc.reportedBy));
       const typeLabel = INCIDENT_TYPES.find(t => t.id === inc.type)?.label || inc.type;
       const riddorCell = inc.riddor
         ? `<span style="color:#dc2626;font-weight:700">&#9679; RIDDOR${inc.hseReference ? ` (${inc.hseReference})` : ""}</span>`
@@ -339,7 +339,7 @@ function AdminIncidentTab({ incidents, setIncidents, staff, investigations, setI
     if (filterRiddor && !inc.riddor) return false;
     if (search) {
       const q = search.toLowerCase();
-      const reporter = staff.find(u=>u.id===inc.reportedBy);
+      const reporter = staff.find(u=>String(u.id)===String(inc.reportedBy));
       if (!inc.location.toLowerCase().includes(q) &&
           !inc.description.toLowerCase().includes(q) &&
           !(reporter?.name||"").toLowerCase().includes(q)) return false;
@@ -455,7 +455,7 @@ function AdminIncidentTab({ incidents, setIncidents, staff, investigations, setI
                   </thead>
                   <tbody>
                     {bookIncidents.map((inc, idx) => {
-                      const reporter = staff.find(u => u.id === inc.reportedBy);
+                      const reporter = staff.find(u => String(u.id) === String(inc.reportedBy));
                       const typeInfo2 = INCIDENT_TYPES.find(t => t.id === inc.type);
                       const witnesses = [inc.witness1Name, inc.witness2Name].filter(Boolean).join(", ") || "—";
                       const firstAid = inc.firstAidProvided === "No" || !inc.firstAidProvided ? "No"
@@ -546,7 +546,7 @@ function AdminIncidentTab({ incidents, setIncidents, staff, investigations, setI
             const ti = typeInfo(inc.type);
             const ac = ACCIDENT_CODES.find(c=>c.code===inc.accidentCode);
             const nc = NUMBER_CODES.find(c=>c.num===inc.numberCode);
-            const reporter = staff.find(u=>u.id===inc.reportedBy);
+            const reporter = staff.find(u=>String(u.id)===String(inc.reportedBy));
             const isOpen = expandedId===inc.id;
             return (
               <div key={inc.id} id={`incident-${inc.id}`} style={{borderRadius:14,border:`1px solid ${inc.riddor?"rgba(239,68,68,0.3)":inc.closed?"rgba(16,185,129,0.2)":Z.border}`,overflow:"hidden",transition:"border-color .2s"}}>

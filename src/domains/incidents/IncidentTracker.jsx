@@ -27,7 +27,7 @@ function IncidentTracker({ user, incidents, setIncidents, equipment, setEquipmen
   const [err, setErr]             = useState("");
   const [expandedId, setExpandedId] = useState(null);
 
-  const myIncidents = incidents.filter(i=>i.reportedBy===user.id).sort((a,b)=>b.date.localeCompare(a.date));
+  const myIncidents = incidents.filter(i=>String(i.reportedBy)===String(user.id)).sort((a,b)=>b.date.localeCompare(a.date));
 
   function setF(k,v){ setForm(p=>({...p,[k]:v})); setErr(""); setSaved(false); }
 
@@ -67,7 +67,7 @@ function IncidentTracker({ user, incidents, setIncidents, equipment, setEquipmen
 
   function submitNew() {
     if (!validate()) return;
-    const newInc = { id:"i"+Date.now(), reportedBy:user.id, closed:false, ...formToInc(form, {}) };
+    const newInc = { id:"i"+Date.now(), reportedBy:String(user.id), closed:false, ...formToInc(form, {}) };
     setIncidents(p=>[newInc,...p]);
     applyEquipmentSideEffects(form);
     setSaved(true);

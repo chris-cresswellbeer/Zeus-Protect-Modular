@@ -10,6 +10,7 @@ import { INIT_FIRE_WARDENS, INIT_FIRE_DRILLS, INIT_ALARM_TESTS, INIT_EXTINGUISHE
 import { FA_ZONES } from "./data/seedFirstAid";
 import { INIT_INCIDENTS } from "./data/seedIncidents";
 import { INIT_SITE_INSPECTIONS } from "./data/seedInspections";
+import { PERMIT_TYPES } from "./data/seedPermits";
 import { INIT_INVESTIGATIONS } from "./data/seedInvestigations";
 import { isWarehouseWorker, INIT_MACHINE_COMPS, MACHINERY_TYPES } from "./data/seedMachinery";
 import { INIT_RAS } from "./data/seedRiskAssessments";
@@ -813,6 +814,38 @@ export default function App() {
     await dbWrite(sb.from("user_profiles").upsert({ user_id: sid, data: merged }, { onConflict: "user_id" }), "theme preference");
   }
 
+  // ── Mobile permits view model ───────────────────────────────────────────────
+  // PermitsTab keeps permits in its own authoring shape; the phone wants the
+  // job in front of it, with this user's own sign-on state. Sign-ons live on
+  // the permit record as { signOns: { [userId]: { at, date } }, signOffs: {…} }.
+  const mobilePermits = React.useMemo(() => (permits || [])
+    .filter(p => p.status === "active" || p.status === "closed")
+    .map(p => {
+      const pt = PERMIT_TYPES.find(t => t.id === p.type);
+      const uid = String(user?.id);
+      const on = (p.signOns || {})[uid];
+      const off = (p.signOffs || {})[uid];
+      const hazards = Object.keys(p.hazards || {}).filter(k => p.hazards[k]);
+      const precautions = Object.keys(p.precautions || {}).filter(k => p.precautions[k]);
+      return {
+        id: p.id,
+        ref: "PTW-" + String(p.id).replace(/\D/g, "").slice(-4),
+        typeId: p.type,
+        task: (p.description || (pt ? pt.label : "Permit")).split(/[.\n]/)[0].slice(0, 60),
+        location: p.location,
+        issuedBy: p.authorisedBy,
+        issuedAt: (p.startDateTime || "").slice(11, 16),
+        validUntil: (p.endDateTime || "").slice(11, 16),
+        signedOnAt: on ? on.at : null,
+        signedOffAt: off ? off.at : null,
+        closed: p.status === "closed" || !!off,
+        // undefined, not [], so the screen falls back to the permit type's list
+        hazards: hazards.length ? hazards : undefined,
+        precautions: precautions.length ? precautions : undefined,
+        ppe: p.ppe || [],
+      };
+    }), [permits, user]);
+
   // ── Mobile write surface ────────────────────────────────────────────────────
   // Everything src/mobile is allowed to do to the database, in one object.
   // Real writes go to the existing db* functions; the optimistic* callbacks
@@ -850,7 +883,67 @@ export default function App() {
       const inc = incidents.find(i => i.id === id);
       if (inc) dbSaveIncident({ ...inc, closed: true, triaged: true });
     },
-  }), [dseReports, incidents, user]);
+
+    // ── Inspections, permits, RIDDOR (mobile-only writes) ───────────────────
+    // dbSaveSiteInspections() upserts AND prunes anything not in the array it
+    // is given, so a single record must never be passed to it. Instead we put
+    // the record into state (deduped by id, because the offline queue may
+    // replay a write we already applied optimistically) and let the existing
+    // [siteInspections] effect persist the whole array.
+    saveInspection: (record) => {
+      setSiteInspections(p => [record, ...p.filter(r => r.id !== record.id)]);
+    },
+
+    savePermitSignOn: (entry) => {
+      const p = permits.find(x => x.id === entry.permitId);
+      if (!p) return;
+      const next = {
+        ...p,
+        signOns: { ...(p.signOns || {}), [String(entry.userId)]: { at: entry.signedOnAt, date: entry.date } },
+      };
+      setPermits(list => list.map(x => x.id === next.id ? next : x));
+      return dbSavePermit(next);
+    },
+
+    savePermitSignOff: (entry) => {
+      const p = permits.find(x => x.id === entry.permitId);
+      if (!p) return;
+      const next = {
+        ...p,
+        signOffs: { ...(p.signOffs || {}), [String(entry.userId)]: { at: entry.signedOffAt } },
+      };
+      setPermits(list => list.map(x => x.id === next.id ? next : x));
+      return dbSavePermit(next);
+    },
+
+    markRiddorReported: (incidentId) => {
+      const inc = incidents.find(i => i.id === incidentId);
+      if (!inc) return;
+      const next = {
+        ...inc,
+        riddorReported: true,
+        riddorReportedDate: new Date().toISOString().slice(0, 10),
+        riddorReportedBy: user?.name || "",
+      };
+      setIncidents(list => list.map(i => i.id === next.id ? next : i));
+      return dbSaveIncident(next);
+    },
+
+    // The chase button on the incident record — no notification service yet, so
+    // this just flags the action as chased on its investigation.
+    chaseAction: (a) => {
+      const inv = investigations[a.investigationId];
+      if (!inv) return;
+      const next = {
+        ...inv,
+        actions: (inv.actions || []).map(x => x.id === a.id
+          ? { ...x, chasedOn: new Date().toISOString().slice(0, 10), chasedBy: user?.name || "" }
+          : x),
+      };
+      setInvestigations(p => ({ ...p, [a.investigationId]: next }));
+      return dbSaveInvestigation(a.investigationId, next);
+    },
+  }), [dseReports, incidents, permits, investigations, user]);
 
   async function dbSaveEmojiMode(userId, enabled) {    const sid = String(userId);
     const profiles = Array.isArray(window.__userProfiles) ? window.__userProfiles : [];
@@ -1231,6 +1324,8 @@ export default function App() {
         incidents={incidents}
         investigations={investigations}
         allUsers={allUsers}
+        siteInspections={siteInspections}
+        permits={mobilePermits}
         theme={theme}
         setTheme={setTheme}
         setDarkMode={setDarkMode}

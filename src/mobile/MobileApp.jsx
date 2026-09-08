@@ -30,6 +30,10 @@ import { Documents } from "./screens/Documents";
 import { DSEMobile } from "./screens/DSEMobile";
 import { More, Certificates, CorrectiveActions, TrainingHistory, Appearance } from "./screens/More";
 import { AdminOverview, HazardTriage } from "./screens/Admin";
+import { Inspections, InspectionRun } from "./screens/Inspection";
+import { Permits, PermitDetail } from "./screens/Permits";
+import { IncidentRecord } from "./screens/IncidentRecord";
+import { INSP_TYPES } from "../data/seedInspections";
 
 const FONT = "'Barlow','Trebuchet MS',system-ui,sans-serif";
 const PROGRESS_KEY = "zeus.mobile.progress";
@@ -64,13 +68,25 @@ const TITLES = {
   adminHome: ["Zeus Protect · Admin", "Site overview"],
   adminIncidents: ["Admin", "Incidents"],
   triage: ["Admin", ""],
+  inspections: ["Inspections", "Due & recent"],
+  inspection: ["Inspection", ""],
+  permits: ["Permits to work", ""],
+  permit: ["Permit to work", ""],
+  incidentRecord: ["Admin", ""],
 };
 
 const PARENT_TAB = {
   module: "training", documents: "more", dse: "more",
   certificates: "more", actions: "more", history: "more", appearance: "more",
   triage: "adminIncidents",
+  inspections: "more", inspection: "inspections",
+  permits: "more", permit: "permits",
+  incidentRecord: "adminIncidents",
 };
+
+// Inspection types that make sense to run from a phone — the long audits stay
+// on the desktop where the evidence and sign-off live.
+const MOBILE_INSP_TYPES = ["weekly_walk", "office_housekeeping", "warehouse_housekeeping", "fire_drill"];
 
 function MobileApp({
   // identity
@@ -78,6 +94,7 @@ function MobileApp({
   // domain state, straight from App.jsx
   allModules, assigns, comps, docs, docAssignments, docAcknowledgements,
   dseReports, incidents, investigations, allUsers = [],
+  siteInspections = [], permits = [],
   // theme
   theme, setTheme, setDarkMode,
   // writes — the existing App.jsx functions
@@ -95,6 +112,9 @@ function MobileApp({
   const [screen, setScreen] = React.useState(user.role === "admin" ? "adminHome" : "today");
   const [activeModule, setActiveModule] = React.useState(null);
   const [activeHazard, setActiveHazard] = React.useState(null);
+  const [activeInspection, setActiveInspection] = React.useState(null);
+  const [activePermit, setActivePermit] = React.useState(null);
+  const [activeIncident, setActiveIncident] = React.useState(null);
   const [queue, setQueue] = React.useState([]);
   const [canInstall, setCanInstall] = React.useState(false);
   const [progress, setProgress] = React.useState(loadProgress);
@@ -124,6 +144,10 @@ function MobileApp({
     dseReport: (p) => db.saveDseReport(p.userId, p.report),
     actionComplete: (p) => db.completeAction(p.investigationId, p.actionId),
     theme: (p) => db.saveTheme(p.userId, p.theme),
+    inspection: (p) => db.saveInspection(p.record),
+    permitSignOn: (p) => db.savePermitSignOn(p.entry),
+    permitSignOff: (p) => db.savePermitSignOff(p.entry),
+    riddorReported: (p) => db.markRiddorReported(p.incidentId),
   }), [db]);
 
   React.useEffect(() => {
@@ -270,6 +294,31 @@ function MobileApp({
       `Action complete · ${action.title}`);
   }
 
+  function submitInspection(record) {
+    write("inspection", { record }, `Inspection · ${typeLabel(record.type)}`,
+      () => db.optimisticInspection && db.optimisticInspection(record));
+  }
+
+  function signOnPermit(entry) {
+    write("permitSignOn", { entry }, `Permit sign-on · ${entry.ref}`,
+      () => db.optimisticPermitSignOn && db.optimisticPermitSignOn(entry));
+  }
+
+  function signOffPermit(entry) {
+    write("permitSignOff", { entry }, `Permit sign-off · ${entry.ref}`,
+      () => db.optimisticPermitSignOff && db.optimisticPermitSignOff(entry));
+    back();
+  }
+
+  function reportRiddor(incidentId) {
+    write("riddorReported", { incidentId }, `RIDDOR reported · ${incidentId}`);
+  }
+
+  function typeLabel(id) {
+    const t = INSP_TYPES.find((x) => x.id === id);
+    return t ? t.label : "walkround";
+  }
+
   function changeTheme(key) {
     setFollowSystem(false);
     savePrefs({ ...prefs, followSystem: false });
@@ -355,6 +404,82 @@ function MobileApp({
     return n;
   }
 
+  // ── Inspections & permits ─────────────────────────────────────────────────
+  // One "due" row per mobile-runnable inspection type, from the latest record
+  // of that type: its nextDue and the location it was last run at.
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const inspectionsDue = MOBILE_INSP_TYPES.map((typeId) => {
+    const ofType = (siteInspections || [])
+      .filter((r) => r.type === typeId)
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    const latest = ofType[ofType.length - 1];
+    if (!latest || !latest.nextDue) return null;
+    if (latest.nextDue > todayIso) return null;
+    return {
+      typeId,
+      location: latest.location,
+      dueDate: latest.nextDue,
+      overdue: latest.nextDue < todayIso,
+    };
+  }).filter(Boolean);
+
+  const recentInspections = (siteInspections || [])
+    .slice()
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+
+  const myPermits = (permits || []).filter(
+    (p) => !p.site || !user.site || p.site === user.site
+  );
+  const permitsToSign = myPermits.filter((p) => !p.closed && !p.signedOnAt);
+
+  function incidentVM(inc) {
+    if (!inc) return null;
+    const inv = (investigations || {})[inc.id];
+    const riddorDueDate = inc.riddorDueDate || addDaysIso(inc.date, 10);
+    return {
+      id: inc.id,
+      ref: inc.id.startsWith("qr_") ? inc.id.replace("qr_", "QR-").slice(0, 9) : `INC-${String(inc.numberCode || "").padStart(4, "0")}`,
+      type: inc.type,
+      title: (inc.description || "Incident").split(" — ")[0].slice(0, 60),
+      description: inc.description,
+      date: inc.date,
+      time: inc.time,
+      location: inc.location,
+      person: inc.injuredPerson ? nameFor(inc.injuredPerson) : null,
+      reporter: nameFor(inc.reportedBy),
+      injuryType: inc.injuryType,
+      accidentCode: inc.accidentCode,
+      daysLost: inc.daysLost,
+      riskScore: inc.riskScore,
+      riskBand: inc.riskScore == null ? null
+        : inc.riskScore > 16 ? "Unacceptable" : inc.riskScore >= 10 ? "High" : inc.riskScore >= 5 ? "Medium" : "Low",
+      riddor: !!inc.riddor,
+      riddorReported: !!inc.riddorReported,
+      riddorDueDate,
+      riddorReason: inc.riddorReason || "Reportable under RIDDOR 2013 — confirm the category before submitting.",
+      photos: inc.photos,
+      closed: !!inc.closed,
+      hasInvestigation: !!inv,
+    };
+  }
+
+  function investigationVM(incId) {
+    const inv = (investigations || {})[incId];
+    if (!inv) return null;
+    return {
+      rootCause: inv.rootCause || (inv.fiveWhys && inv.fiveWhys.rootCause) || null,
+      actions: (inv.actions || []).map((a) => {
+        const late = a.status !== "complete" && a.status !== "closed" && a.dueDate && a.dueDate < todayIso;
+        return {
+          ...a,
+          investigationId: incId,
+          overdue: !!late,
+          overdueDays: late ? Math.ceil((Date.now() - new Date(a.dueDate).getTime()) / 86400000) : 0,
+        };
+      }),
+    };
+  }
+
   // ── Header ────────────────────────────────────────────────────────────────
   const [kicker, fixedTitle] = TITLES[screen] || TITLES.today;
   const title =
@@ -363,6 +488,10 @@ function MobileApp({
       : screen === "module" ? (activeModule || {}).title
       : screen === "more" ? user.name
       : screen === "triage" ? (activeHazard || {}).ref
+      : screen === "inspection" ? typeLabel((activeInspection || {}).typeId)
+      : screen === "permits" ? `${myPermits.filter((p) => !p.closed).length} live on site`
+      : screen === "permit" ? `${(activePermit || {}).ref || ""} · sign on`
+      : screen === "incidentRecord" ? ((incidentVM(activeIncident) || {}).ref || "")
       : "");
 
   const tabs = user.role === "admin" && isAdminScreen(screen) ? ADMIN_TABS : STAFF_TABS;
@@ -464,6 +593,8 @@ function MobileApp({
               unreadDocs: unreadDocs.length,
               certificates: certificates.filter((c) => !c.lapsed).length,
               openActions: openActions.length,
+              inspectionsDue: inspectionsDue.length,
+              permitsToSign: permitsToSign.length,
             }}
             dseState={dseState}
             queue={queue}
@@ -472,6 +603,8 @@ function MobileApp({
             onOpenDse={() => go("dse")}
             onOpenCerts={() => go("certificates")}
             onOpenActions={() => go("actions")}
+            onOpenInspections={() => go("inspections")}
+            onOpenPermits={() => go("permits")}
             onOpenHistory={() => go("history")}
             onOpenAppearance={() => go("appearance")}
             onSignOut={onSignOut}
@@ -514,7 +647,11 @@ function MobileApp({
           <AdminOverview
             alerts={adminAlerts} stats={adminStats} inbound={inboundHazards}
             onOpenHazard={(h) => { setActiveHazard(h); go("triage"); }}
-            onOpenAlert={() => go("adminIncidents")}
+            onOpenAlert={(a) => {
+              const first = a && a.id === "riddor" ? riddorOpen[0] : null;
+              if (first) { setActiveIncident(first); go("incidentRecord"); }
+              else go("adminIncidents");
+            }}
             Z={T} font={FONT}
           />
         )}
@@ -524,6 +661,57 @@ function MobileApp({
             alerts={[]} stats={[]} inbound={inboundHazards}
             onOpenHazard={(h) => { setActiveHazard(h); go("triage"); }}
             onOpenAlert={() => {}}
+            Z={T} font={FONT}
+          />
+        )}
+
+        {screen === "inspections" && (
+          <Inspections
+            due={inspectionsDue}
+            recent={recentInspections}
+            onStart={(d) => { setActiveInspection(d); go("inspection"); }}
+            onOpenDesktop={onSwitchToDesktop}
+            Z={T} font={FONT}
+          />
+        )}
+
+        {screen === "inspection" && activeInspection && (
+          <InspectionRun
+            typeId={activeInspection.typeId}
+            location={activeInspection.location}
+            user={user}
+            onSubmit={submitInspection}
+            onExit={() => go("inspections")}
+            Z={T} font={FONT}
+          />
+        )}
+
+        {screen === "permits" && (
+          <Permits
+            permits={myPermits}
+            user={user}
+            onOpenPermit={(p) => { setActivePermit(p); go("permit"); }}
+            Z={T} font={FONT}
+          />
+        )}
+
+        {screen === "permit" && activePermit && (
+          <PermitDetail
+            permit={activePermit}
+            user={user}
+            onSignOn={signOnPermit}
+            onSignOff={signOffPermit}
+            Z={T} font={FONT}
+          />
+        )}
+
+        {screen === "incidentRecord" && activeIncident && (
+          <IncidentRecord
+            incident={incidentVM(activeIncident)}
+            investigation={investigationVM(activeIncident.id)}
+            onReportRiddor={() => reportRiddor(activeIncident.id)}
+            onChaseAction={(a) => db.chaseAction && db.chaseAction(a)}
+            onOpenDesktop={onSwitchToDesktop}
             Z={T} font={FONT}
           />
         )}
@@ -546,7 +734,14 @@ function MobileApp({
 }
 
 function isAdminScreen(screen) {
-  return screen === "adminHome" || screen === "adminIncidents" || screen === "triage";
+  return screen === "adminHome" || screen === "adminIncidents" || screen === "triage" ||
+    screen === "incidentRecord";
+}
+
+function addDaysIso(dateStr, days) {
+  const d = dateStr ? new Date(dateStr) : new Date();
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
 }
 
 function loadProgress() {

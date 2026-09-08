@@ -13,6 +13,7 @@ import { promptInstall, isStandalone } from "../registerSW";
 function More({
   user, counts, dseState, queue, canInstall,
   onOpenDocs, onOpenDse, onOpenCerts, onOpenActions, onOpenHistory, onOpenAppearance,
+  onOpenInspections, onOpenPermits,
   onSignOut, onSwitchToDesktop, Z, font,
 }) {
   return (
@@ -42,6 +43,14 @@ function More({
           right={<Chevron Z={Z} badge={counts.certificates} badgeColor={Z.green} />} />
         <Row Z={Z} font={font} icon="✅" title="My corrective actions" onClick={onOpenActions}
           right={<Chevron Z={Z} badge={counts.openActions} badgeColor={Z.gold} />} />
+        {onOpenInspections && (
+          <Row Z={Z} font={font} icon="🚶" title="Site inspections" onClick={onOpenInspections}
+            right={<Chevron Z={Z} badge={counts.inspectionsDue} badgeColor={Z.gold} />} />
+        )}
+        {onOpenPermits && (
+          <Row Z={Z} font={font} icon="🔥" title="Permits to work" onClick={onOpenPermits}
+            right={<Chevron Z={Z} badge={counts.permitsToSign} badgeColor="#ef4444" />} />
+        )}
         <Row Z={Z} font={font} icon="📋" title="Training history" onClick={onOpenHistory}
           right={<Chevron Z={Z} />} />
         <Row Z={Z} font={font} icon="⚙️" title="Appearance & theme" onClick={onOpenAppearance}

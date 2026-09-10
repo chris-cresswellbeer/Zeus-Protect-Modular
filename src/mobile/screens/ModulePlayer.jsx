@@ -29,6 +29,9 @@ function ModulePlayer({
   const [answers, setAnswers] = React.useState({});
   const [picked, setPicked] = React.useState(null);
   const [result, setResult] = React.useState(null);
+  // Hotspot slides gate the Next button until the hazards have been found,
+  // same as the desktop player. Keyed by slide number.
+  const [hotspotDone, setHotspotDone] = React.useState({});
 
   const scrollRef = React.useRef(null);
   React.useEffect(() => {
@@ -132,7 +135,10 @@ function ModulePlayer({
             <div style={{ fontSize: 11, color: Z.green, fontWeight: 700 }}>↓ saved</div>
           </div>
           <div style={{ padding: "14px 18px 0" }}>
-            <SlideCard slide={slides[slide - 1]} Z={Z} />
+            <SlideCard
+              slide={slides[slide - 1]} Z={Z} font={font}
+              onHotspotStatus={(done) => setHotspotDone((p) => (p[slide] === done ? p : { ...p, [slide]: done }))}
+            />
           </div>
           <div style={{ padding: "18px 18px 0", display: "flex", gap: 11 }}>
             <GhostButton
@@ -144,6 +150,7 @@ function ModulePlayer({
             </GhostButton>
             <PrimaryButton
               Z={Z} font={font}
+              disabled={hotspotGated(slides[slide - 1], hotspotDone[slide])}
               onClick={() => (slide === slides.length ? setStage("quiz") : setSlide(slide + 1))}
               style={{ flex: 1, minHeight: 50, padding: 15, fontSize: 15, borderRadius: 14 }}
             >
@@ -272,8 +279,32 @@ function ModulePlayer({
   );
 }
 
-function SlideCard({ slide, Z }) {
+// A hotspot slide cannot be advanced past until the hazards have been found.
+function hotspotGated(slide, done) {
+  return !!(slide && slide.hotspots && slide.hotspots.length > 0 && !done);
+}
+
+function slideImages(slide) {
+  // Matches the desktop player: a slides[].images array, with the two older
+  // single-image shapes still supported for modules authored before it.
+  const images = (slide.images || [])
+    .map((im) => im && (im.url || im.data))
+    .filter(Boolean);
+  if (images.length === 0) {
+    const legacy = (slide.image && (slide.image.data || slide.image.url)) || slide.imageData;
+    if (legacy) images.push(legacy);
+  }
+  return images;
+}
+
+function SlideCard({ slide, Z, font, onHotspotStatus }) {
+  const [zoom, setZoom] = React.useState(null);
   if (!slide) return null;
+
+  const images = slideImages(slide);
+  const isHotspot = !!(slide.hotspots && slide.hotspots.length > 0);
+  const videoSrc = slide.video && (slide.video.url || slide.video.data);
+
   return (
     <div style={{
       background: `linear-gradient(135deg,${Z.navyMd},${Z.navy})`, borderRadius: 20,
@@ -289,6 +320,159 @@ function SlideCard({ slide, Z }) {
         </h2>
       )}
       {slide.text && <SlideBody text={slide.text} Z={Z} />}
+
+      {videoSrc && (
+        <video
+          src={videoSrc} controls playsInline preload="metadata"
+          style={{
+            width: "100%", marginTop: 16, borderRadius: 14, display: "block",
+            background: "#000", border: `1px solid ${Z.borderMd}`,
+          }}
+        />
+      )}
+
+      {/* Plain images are hidden on a hotspot slide — the activity owns the image. */}
+      {!isHotspot && images.length > 0 && (
+        <div style={{ display: "grid", gap: 10, marginTop: slide.text || videoSrc ? 16 : 0 }}>
+          {images.map((src, i) => (
+            <button
+              key={i}
+              onClick={() => setZoom(src)}
+              aria-label="View full size"
+              style={{
+                padding: 0, border: `1px solid ${Z.borderMd}`, borderRadius: 14,
+                overflow: "hidden", background: Z.overlay, cursor: "zoom-in", lineHeight: 0,
+              }}
+            >
+              <img
+                src={src} alt="" loading="lazy"
+                style={{ width: "100%", maxHeight: 320, objectFit: "contain", display: "block" }}
+              />
+            </button>
+          ))}
+        </div>
+      )}
+
+      {isHotspot && images.length > 0 && (
+        <MobileHotspot
+          imageUrl={images[0]}
+          hotspots={slide.hotspots}
+          instructions={slide.hotspotInstructions || "Tap every hazard you can find in the image."}
+          onStatusChange={onHotspotStatus}
+          Z={Z} font={font}
+        />
+      )}
+
+      {zoom && (
+        <div
+          onClick={() => setZoom(null)}
+          style={{
+            position: "fixed", inset: 0, zIndex: 9999, background: "rgba(2,6,23,0.94)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            padding: 16, cursor: "zoom-out",
+          }}
+        >
+          <img src={zoom} alt="" style={{ maxWidth: "100%", maxHeight: "100%", borderRadius: 12 }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Touch version of the desktop HotspotActivity. Same data shape: hotspots are
+// { id, x, y, radius, correct, label, feedback } with x/y/radius as percentages
+// of the rendered image, so an activity authored on the portal works unchanged.
+function MobileHotspot({ imageUrl, hotspots, instructions, onStatusChange, Z, font }) {
+  const [found, setFound] = React.useState(() => []);
+  const [last, setLast] = React.useState(null);
+  const [misses, setMisses] = React.useState(0);
+
+  const correctTotal = hotspots.filter((h) => h.correct).length;
+  const correctFound = found.filter((id) => hotspots.some((h) => h.id === id && h.correct)).length;
+  const complete = correctTotal > 0 && correctFound >= correctTotal;
+
+  React.useEffect(() => { onStatusChange && onStatusChange(complete); }, [complete]);
+
+  function tap(e) {
+    if (complete) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    const x = ((e.clientX - r.left) / r.width) * 100;
+    const y = ((e.clientY - r.top) / r.height) * 100;
+    let best = null, bestDist = Infinity;
+    for (const h of hotspots) {
+      const d = Math.sqrt((h.x - x) ** 2 + (h.y - y) ** 2);
+      if (d <= (h.radius || 8) && d < bestDist) { best = h; bestDist = d; }
+    }
+    if (best) {
+      if (!found.includes(best.id)) setFound((p) => [...p, best.id]);
+      setLast({ hotspot: best, wasCorrect: true });
+    } else {
+      setMisses((m) => m + 1);
+      setLast(null);
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      <div style={{
+        fontSize: 12.5, fontWeight: 700, color: Z.gold, lineHeight: 1.5, marginBottom: 10,
+      }}>
+        🎯 {instructions}
+      </div>
+
+      <div
+        onClick={tap}
+        style={{
+          position: "relative", borderRadius: 14, overflow: "hidden",
+          border: `1px solid ${Z.borderMd}`, cursor: complete ? "default" : "crosshair",
+          touchAction: "manipulation",
+        }}
+      >
+        <img
+          src={imageUrl} alt="" draggable={false}
+          style={{ width: "100%", display: "block", pointerEvents: "none" }}
+        />
+        {hotspots.map((h) => found.includes(h.id) && (
+          <div
+            key={h.id}
+            style={{
+              position: "absolute", left: `${h.x}%`, top: `${h.y}%`,
+              width: `${(h.radius || 8) * 2}%`, aspectRatio: "1 / 1",
+              transform: "translate(-50%,-50%)", borderRadius: "50%",
+              border: `3px solid ${h.correct ? Z.green : "#f87171"}`,
+              background: h.correct ? "rgba(16,185,129,0.22)" : "rgba(239,68,68,0.22)",
+              pointerEvents: "none",
+            }}
+          />
+        ))}
+      </div>
+
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        gap: 10, marginTop: 10, flexWrap: "wrap",
+      }}>
+        <div style={{ fontSize: 12, fontWeight: 800, color: complete ? Z.green : Z.slate }}>
+          {complete ? `✓ All ${correctTotal} found` : `${correctFound} of ${correctTotal} found`}
+        </div>
+        {misses > 0 && !complete && (
+          <div style={{ fontSize: 11.5, color: Z.muted }}>{misses} miss{misses === 1 ? "" : "es"}</div>
+        )}
+      </div>
+
+      {last && last.hotspot.feedback && (
+        <div style={{
+          marginTop: 10, padding: "10px 12px", borderRadius: 11, fontSize: 12.5, lineHeight: 1.5,
+          background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.3)", color: "#6ee7b7",
+        }}>
+          <strong>{last.hotspot.label}</strong> — {last.hotspot.feedback}
+        </div>
+      )}
+
+      {!complete && (
+        <div style={{ marginTop: 8, fontSize: 11.5, color: Z.muted, fontStyle: "italic" }}>
+          Find them all to continue.
+        </div>
+      )}
     </div>
   );
 }

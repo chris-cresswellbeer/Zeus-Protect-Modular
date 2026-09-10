@@ -1,8 +1,8 @@
-const ZEUS_LOGO_SRC = "https://aoahugfyswgcisfiosyn.supabase.co/storage/v1/object/public/assets/zeus%20dark%20mode.png";
+const ZEUS_LOGO_SRC = "https://aoahugfyswgcisfiosyn.supabase.co/storage/v1/object/public/assets/zeus%20dark%20modeV2.png";
 
-const ZEUS_LOGO_LIGHT_SRC = "https://aoahugfyswgcisfiosyn.supabase.co/storage/v1/object/public/assets/zeus%20lightmode.png";
+const ZEUS_LOGO_LIGHT_SRC = "https://aoahugfyswgcisfiosyn.supabase.co/storage/v1/object/public/assets/zeus%20lightmodeV2.png";
 
-const ZEUS_PROTECT_LOGO_SRC = "https://aoahugfyswgcisfiosyn.supabase.co/storage/v1/object/public/assets/zeusprotect.png";
+const ZEUS_PROTECT_LOGO_SRC = "https://aoahugfyswgcisfiosyn.supabase.co/storage/v1/object/public/assets/zeusprotectV2.png";
 
 function ZeusLogo({ size = "sm", darkMode = true }) {
   const big = size === "lg";

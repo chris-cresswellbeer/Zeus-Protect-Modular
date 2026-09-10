@@ -49,6 +49,7 @@ import { sanitizeHtml } from "./lib/sanitizeHtml";
 import { getExpiryStatus } from "./lib/dates";
 import { EmojiCtx, E, syncEmojiMode } from "./lib/emoji";
 import { sb, hashPassword, DEFAULT_HASH, dbWrite } from "./lib/supabase";
+import { uploadPhotos, PHOTO_BUCKET } from "./lib/photos";
 import { HelpTip } from "./shared/HelpTip";
 import { ZeusLogo, ZeusProtectLogo, ZEUS_LOGO_LIGHT_SRC } from "./shared/Logo";
 import { NotificationBell } from "./shared/NotificationBell";
@@ -377,6 +378,7 @@ export default function App() {
             riddorReportedDate: r.riddor_reported_date||null,
             hseReference: r.hse_reference||null,
             riddorReportedBy: r.riddor_reported_by||null,
+            photos: Array.isArray(r.photos) ? r.photos : [],
           })));
         }
 
@@ -705,10 +707,20 @@ export default function App() {
   }
 
   async function dbSaveIncident(inc) {
+    // Photos arrive from the mobile app as data URLs. Push them to Storage and
+    // store the resulting URLs — a data URL in the row would bloat every read.
+    // Already-uploaded photos pass straight through, so this is a no-op on the
+    // repeat saves the [incidents] effect fires.
+    const photos = await uploadPhotos(PHOTO_BUCKET, `inc_${inc.id}`, inc.photos);
+    const prev = inc.photos || [];
+    if (photos.length !== prev.length || photos.some((p, i) => p !== prev[i])) {
+      setIncidents(list => list.map(i => i.id === inc.id ? { ...i, photos } : i));
+    }
     await dbWrite(sb.from("incidents").upsert({
       id: inc.id, date: inc.date, type: inc.type, accident_code: inc.accidentCode,
       number_code: inc.numberCode, location: inc.location, reported_by: inc.reportedBy,
       description: inc.description, injury_type: inc.injuryType, riddor: inc.riddor, closed: inc.closed,
+      photos,
       riddor_reported: inc.riddorReported||false,
       riddor_reported_date: inc.riddorReportedDate||null,
       hse_reference: inc.hseReference||null,
@@ -890,8 +902,15 @@ export default function App() {
     // the record into state (deduped by id, because the offline queue may
     // replay a write we already applied optimistically) and let the existing
     // [siteInspections] effect persist the whole array.
-    saveInspection: (record) => {
-      setSiteInspections(p => [record, ...p.filter(r => r.id !== record.id)]);
+    saveInspection: async (record) => {
+      // site_inspections stores the whole record as jsonb, so the photos have
+      // to become URLs before the record goes into state.
+      const ncs = await Promise.all((record.nonConformances || []).map(async (nc, i) => ({
+        ...nc,
+        photos: await uploadPhotos(PHOTO_BUCKET, `insp_${record.id}_${i}`, nc.photos),
+      })));
+      const next = { ...record, nonConformances: ncs };
+      setSiteInspections(p => [next, ...p.filter(r => r.id !== next.id)]);
     },
 
     savePermitSignOn: (entry) => {

@@ -16,6 +16,7 @@
 import React from "react";
 import { INSP_TYPES, INSP_SECTIONS } from "../../data/seedInspections";
 import { Screen, SectionLabel, Card, Row, StatusChip, PrimaryButton, GhostButton } from "../ui";
+import { compressToDataUrl } from "../../lib/photos";
 
 const PASS = "pass";
 const ISSUE = "issue";
@@ -344,11 +345,12 @@ function InspectionRun({ typeId, location, user, onSubmit, onExit, Z, font }) {
                       <input
                         type="file" accept="image/*" capture="environment" multiple
                         style={{ display: "none" }}
-                        onChange={(e) => setFinding(q.id, {
-                          photos: Array.from(e.target.files || []).map((file) => ({
-                            name: file.name, size: file.size, blob: file,
-                          })),
-                        })}
+                        onChange={(e) => {
+                          const files = Array.from(e.target.files || []);
+                          e.target.value = "";
+                          Promise.all(files.map((file) => compressToDataUrl(file)))
+                            .then((urls) => setFinding(q.id, { photos: [...(f.photos || []), ...urls] }));
+                        }}
                       />
                     </label>
                     <button

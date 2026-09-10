@@ -24,21 +24,44 @@ function isUploaded(p) {
 
 // Downscale before queueing — a full-resolution phone photo will blow the
 // IndexedDB quota after a handful of reports.
+//
+// Resolves to a data URL, or null if the file could not be read at all.
+// Always call as (file) => compressToDataUrl(file): passing this straight to
+// Array.map hands it the index as maxEdge and scales the first photo to 0x0.
 function compressToDataUrl(file, maxEdge = 1400, quality = 0.7) {
+  const edge = Number(maxEdge) > 0 ? Number(maxEdge) : 1400;
+  const q = Number(quality) > 0 && Number(quality) <= 1 ? Number(quality) : 0.7;
+
   return new Promise((resolve) => {
     const reader = new FileReader();
+    reader.onerror = () => resolve(null);
     reader.onload = () => {
+      const original = reader.result;
+      if (typeof original !== "string" || !original.startsWith("data:")) {
+        resolve(null);
+        return;
+      }
       const img = new Image();
+      // iOS cannot decode HEIC in canvas; keep the original rather than lose it.
+      img.onerror = () => resolve(original);
       img.onload = () => {
-        const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.round(img.width * scale);
-        canvas.height = Math.round(img.height * scale);
-        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL("image/jpeg", quality));
+        try {
+          const scale = Math.min(1, edge / Math.max(img.width, img.height, 1));
+          const w = Math.max(1, Math.round(img.width * scale));
+          const h = Math.max(1, Math.round(img.height * scale));
+          const canvas = document.createElement("canvas");
+          canvas.width = w;
+          canvas.height = h;
+          canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+          const out = canvas.toDataURL("image/jpeg", q);
+          // Safari returns a stub ("data:,") when the canvas is too big.
+          resolve(out && out.length > 1000 ? out : original);
+        } catch (err) {
+          console.warn("[photos] compress failed, keeping original", err);
+          resolve(original);
+        }
       };
-      img.onerror = () => resolve(reader.result);
-      img.src = reader.result;
+      img.src = original;
     };
     reader.readAsDataURL(file);
   });
@@ -62,7 +85,8 @@ async function uploadPhotos(bucket, prefix, photos) {
     if (typeof p !== "string" || !IS_DATA_IMAGE.test(p)) continue; // drop junk
     try {
       const blob = await dataUrlToBlob(p);
-      const path = `${prefix}_${i}_${Date.now()}.jpg`;
+      const ext = (blob.type.split("/")[1] || "jpg").replace("jpeg", "jpg");
+      const path = `${prefix}_${i}_${Date.now()}.${ext}`;
       const { error } = await sb.storage.upload(bucket, path, blob);
       if (error) { out.push(p); continue; }
       out.push(sb.storage.getPublicUrl(bucket, path));

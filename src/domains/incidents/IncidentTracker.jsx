@@ -5,6 +5,7 @@ import { IncidentForm } from "./IncidentForm";
 import { incToForm } from "./incToForm";
 import { formToInc } from "./formToInc";
 import { INCIDENT_TYPES, ACCIDENT_CODES, NUMBER_CODES } from "../../data/seedIncidents";
+import { IncidentPhotos } from "../../shared/IncidentPhotos";
 
 function IncidentTracker({ user, incidents, setIncidents, equipment, setEquipment, Z, font }) {
   const isMobile = useWindowWidth() <= 1024;
@@ -152,6 +153,7 @@ function IncidentTracker({ user, incidents, setIncidents, equipment, setEquipmen
                   </div>
                   {isOpen && (
                     <div style={{borderTop:`1px solid ${Z.border}`,background:Z.overlay,padding:"16px 18px"}}>
+                      <IncidentPhotos photos={inc.photos} Z={Z}/>
                       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",gap:12,marginBottom:12}}>
                         {inc.personName && <div><div style={{fontSize:10,fontWeight:700,letterSpacing:.5,color:Z.muted,marginBottom:3,textTransform:"uppercase"}}>Person Involved</div><div style={{fontSize:13,color:Z.white,fontWeight:600}}>{inc.personName}</div></div>}
                         {inc.personDob && <div><div style={{fontSize:10,fontWeight:700,letterSpacing:.5,color:Z.muted,marginBottom:3,textTransform:"uppercase"}}>Date of Birth</div><div style={{fontSize:13,color:Z.white,fontWeight:600}}>{inc.personDob}</div></div>}

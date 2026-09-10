@@ -7,6 +7,7 @@ import { incToForm } from "./incToForm";
 import { formToInc } from "./formToInc";
 import { IncidentChart } from "./IncidentChart";
 import { IncidentTracker } from "./IncidentTracker";
+import { IncidentPhotos } from "../../shared/IncidentPhotos";
 import { INCIDENT_TYPES, ACCIDENT_CODES, NUMBER_CODES } from "../../data/seedIncidents";
 
 function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, investigations, setInvestigations, onOpenInvestigation, equipment, setEquipment, focusIncidentId, setFocusIncidentId, showAdminReportForm, setShowAdminReportForm, Z, font }) {
@@ -601,6 +602,8 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
                 {/* Expanded detail */}
                 {isOpen && (
                   <div style={{borderTop:`1px solid ${Z.border}`,background:Z.overlay,padding:"18px 20px"}}>
+
+                    <IncidentPhotos photos={inc.photos} Z={Z}/>
 
                     {/* Top meta row */}
                     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(190px,1fr))",gap:12,marginBottom:16}}>

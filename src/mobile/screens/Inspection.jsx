@@ -343,13 +343,13 @@ function InspectionRun({ typeId, location, user, onSubmit, onExit, Z, font }) {
                     }}>
                       📷 {(f.photos || []).length ? `${f.photos.length} photo` : "Photo"}
                       <input
-                        type="file" accept="image/*" capture="environment" multiple
+                        type="file" accept="image/*" multiple
                         style={{ display: "none" }}
                         onChange={(e) => {
                           const files = Array.from(e.target.files || []);
                           e.target.value = "";
                           Promise.all(files.map((file) => compressToDataUrl(file)))
-                            .then((urls) => setFinding(q.id, { photos: [...(f.photos || []), ...urls] }));
+                            .then((urls) => setFinding(q.id, { photos: [...(f.photos || []), ...urls.filter(Boolean)] }));
                         }}
                       />
                     </label>

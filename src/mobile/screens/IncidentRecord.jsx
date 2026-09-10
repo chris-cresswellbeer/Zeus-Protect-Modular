@@ -10,7 +10,7 @@
 // record; `investigation` is the matching entry from the investigations map.
 
 import React from "react";
-import { Screen, SectionLabel, Card, Row, StatusChip, PrimaryButton, GhostButton, ImagePlaceholder } from "../ui";
+import { Screen, SectionLabel, Card, Row, StatusChip, PrimaryButton, GhostButton } from "../ui";
 
 const TYPE_LABEL = {
   accident: "Accident",
@@ -92,11 +92,22 @@ function IncidentRecord({
       </p>
 
       {incident.photos && incident.photos.length > 0 ? (
-        <div style={{ marginBottom: 14 }}>
-          <ImagePlaceholder
-            Z={Z} height={186}
-            label={`photo from reporter (1 of ${incident.photos.length})`}
-          />
+        <div style={{
+          display: "grid", gap: 8, marginBottom: 14,
+          gridTemplateColumns: incident.photos.length > 1 ? "1fr 1fr" : "1fr",
+        }}>
+          {incident.photos.map((src, i) => (
+            <a key={i} href={src} target="_blank" rel="noreferrer" style={{ display: "block" }}>
+              <img
+                src={src} alt={`Photo ${i + 1} from reporter`}
+                style={{
+                  width: "100%", height: incident.photos.length > 1 ? 132 : 186,
+                  objectFit: "cover", borderRadius: 14,
+                  border: `1px solid ${Z.borderMd}`, display: "block",
+                }}
+              />
+            </a>
+          ))}
         </div>
       ) : null}
 

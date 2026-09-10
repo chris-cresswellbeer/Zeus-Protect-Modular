@@ -7,6 +7,7 @@
 import React from "react";
 import { QUICK_LOCATIONS } from "../../data/seedQuickReport";
 import { Screen, SectionLabel, PrimaryButton } from "../ui";
+import { compressToDataUrl } from "../../lib/photos";
 
 const URGENCY_OPTIONS = [
   { id: "low",    label: "Safe to leave",     desc: "Not an immediate risk — log for awareness", icon: "🟡", color: "#f59e0b", bg: "rgba(245,158,11,0.12)", border: "rgba(245,158,11,0.45)" },
@@ -21,15 +22,29 @@ function ReportHazard({ user, managerName, suggestedLocation, online, onSubmit, 
   const [whereOther, setWhereOther] = React.useState("");
   const [urgency, setUrgency] = React.useState("");
   const [photos, setPhotos] = React.useState([]);
+  const [photoBusy, setPhotoBusy] = React.useState(false);
+  const [photoError, setPhotoError] = React.useState("");
   const [reference, setReference] = React.useState(null);
   const fileRef = React.useRef(null);
 
   function addPhotos(e) {
     const files = Array.from(e.target.files || []);
-    Promise.all(files.map(readAsCompressedDataUrl)).then((urls) => {
-      setPhotos((p) => [...p, ...urls]);
-    });
     e.target.value = "";
+    if (!files.length) return;
+    setPhotoBusy(true);
+    setPhotoError("");
+    // NB: (file) => ... on purpose. Passing the function straight to .map hands
+    // it the index as maxEdge, which scales the first photo to 0x0.
+    Promise.all(files.map((file) => compressToDataUrl(file)))
+      .then((urls) => {
+        const good = urls.filter(Boolean);
+        if (good.length) setPhotos((p) => [...p, ...good]);
+        if (good.length < files.length) {
+          setPhotoError("Some photos couldn't be read. Try taking them again.");
+        }
+      })
+      .catch(() => setPhotoError("Couldn't read that photo. Try again."))
+      .finally(() => setPhotoBusy(false));
   }
 
   function submit() {
@@ -97,19 +112,30 @@ function ReportHazard({ user, managerName, suggestedLocation, online, onSubmit, 
             <VoiceButton onResult={(t) => setWhat((w) => (w ? w + " " : "") + t)} Z={Z} font={font} />
             <button
               onClick={() => fileRef.current && fileRef.current.click()}
+              disabled={photoBusy}
               style={{
                 flex: 1, minHeight: 50, background: Z.overlay, border: `1px solid ${Z.borderMd}`,
                 borderRadius: 13, padding: 14, color: Z.slate, fontWeight: 700,
-                fontSize: 13.5, fontFamily: font, cursor: "pointer",
+                fontSize: 13.5, fontFamily: font, cursor: photoBusy ? "default" : "pointer",
+                opacity: photoBusy ? 0.6 : 1,
               }}
             >
-              📷 Add photo
+              {photoBusy ? "Preparing…" : "📷 Add photo"}
             </button>
             <input
-              ref={fileRef} type="file" accept="image/*" capture="environment"
+              ref={fileRef} type="file" accept="image/*"
               multiple onChange={addPhotos} style={{ display: "none" }}
             />
           </div>
+          {photoError && (
+            <div style={{
+              marginBottom: 14, padding: "10px 12px", borderRadius: 11,
+              background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.4)",
+              color: "#fca5a5", fontSize: 12.5, lineHeight: 1.45,
+            }}>
+              {photoError}
+            </div>
+          )}
           {photos.length > 0 && (
             <div style={{ display: "flex", gap: 9, flexWrap: "wrap", marginBottom: 18 }}>
               {photos.map((src, i) => (
@@ -324,28 +350,6 @@ function VoiceButton({ onResult, Z, font }) {
       {listening ? "● Listening…" : "🎙 Speak it"}
     </button>
   );
-}
-
-// Downscale before queueing — a full-resolution phone photo will blow the
-// IndexedDB quota after a handful of reports.
-function readAsCompressedDataUrl(file, maxEdge = 1400, quality = 0.7) {
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.round(img.width * scale);
-        canvas.height = Math.round(img.height * scale);
-        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL("image/jpeg", quality));
-      };
-      img.onerror = () => resolve(reader.result);
-      img.src = reader.result;
-    };
-    reader.readAsDataURL(file);
-  });
 }
 
 export { ReportHazard, URGENCY_OPTIONS };

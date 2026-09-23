@@ -9,8 +9,8 @@ import { getExpiryStatus } from "../../lib/dates";
 import { Screen, SectionLabel, Row, StatusChip, PrimaryButton } from "../ui";
 
 function Today({
-  user, myMods, myComps, unreadDocs, dseState,
-  onResume, onOpenModule, onOpenDocs, onOpenDse, onReport,
+  user, myMods, myComps, unreadDocs,
+  onResume, onOpenModule, onOpenDocs, onReport,
   Z, font,
 }) {
   const notStarted = myMods.filter((m) => !myComps[m.id]);
@@ -27,14 +27,14 @@ function Today({
   const expired = completed.filter((m) => statusOf(m).key === "expired");
   const upToDate = completed.filter((m) => statusOf(m).key === "valid");
 
-  // Same shape as App.jsx: modules + external certs + DSE as one item each.
-  const totalItems = myMods.length + 1;
-  const goodItems = upToDate.length + (dseState.completed && !dseState.expired ? 1 : 0);
+  // DSE is a desk task and lives in the portal, so mobile health is training only.
+  const totalItems = myMods.length;
+  const goodItems = upToDate.length;
   const healthPct = totalItems ? Math.round((goodItems / totalItems) * 100) : 100;
   const healthColor = healthPct === 100 ? "#10b981" : healthPct >= 70 ? "#f59e0b" : "#ef4444";
 
   const actionCount =
-    notStarted.length + expired.length + (unreadDocs.length ? 1 : 0) + (dseState.needsAction ? 1 : 0);
+    notStarted.length + expired.length + (unreadDocs.length ? 1 : 0);
 
   const inProgress = myMods.find((m) => m.progressSlide > 0 && !myComps[m.id]);
   const nextUp = inProgress || notStarted[0] || null;
@@ -156,15 +156,6 @@ function Today({
         <>
           <SectionLabel Z={Z}>Action required</SectionLabel>
           <div style={{ display: "flex", flexDirection: "column", gap: 9, marginBottom: 20 }}>
-            {dseState.needsAction && (
-              <Row
-                Z={Z} font={font} tone="warn" icon="🖥️"
-                title="DSE workstation self-assessment"
-                sub={dseState.expired ? "Annual re-assessment due" : "Not yet completed"}
-                onClick={onOpenDse}
-                right={<Cta label="Start" color="#f59e0b" />}
-              />
-            )}
             {expired.map((m) => (
               <Row
                 key={m.id} Z={Z} font={font} tone="danger" icon={m.icon}
@@ -195,14 +186,10 @@ function Today({
       )}
 
       {/* All clear */}
-      {(upToDate.length > 0 || (dseState.completed && !dseState.expired)) && (
+      {upToDate.length > 0 && (
         <>
           <SectionLabel Z={Z}>All clear</SectionLabel>
           <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-            {dseState.completed && !dseState.expired && (
-              <Row Z={Z} font={font} icon="🖥️" title="DSE workstation assessment"
-                right={<StatusChip label="Valid" color="#10b981" />} />
-            )}
             {upToDate.map((m) => (
               <Row
                 key={m.id} Z={Z} font={font} icon={m.icon} title={m.title}

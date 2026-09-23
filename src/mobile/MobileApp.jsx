@@ -27,12 +27,9 @@ import { Training } from "./screens/Training";
 import { ModulePlayer } from "./screens/ModulePlayer";
 import { ReportHazard } from "./screens/ReportHazard";
 import { Documents } from "./screens/Documents";
-import { DSEMobile } from "./screens/DSEMobile";
 import { More, Certificates, CorrectiveActions, TrainingHistory, Appearance } from "./screens/More";
-import { AdminOverview, HazardTriage } from "./screens/Admin";
 import { Inspections, InspectionRun } from "./screens/Inspection";
 import { Permits, PermitDetail } from "./screens/Permits";
-import { IncidentRecord } from "./screens/IncidentRecord";
 import { INSP_TYPES } from "../data/seedInspections";
 
 const FONT = "'Barlow','Trebuchet MS',system-ui,sans-serif";
@@ -46,46 +43,34 @@ const STAFF_TABS = [
   { id: "more", icon: "☰", label: "More" },
 ];
 
-const ADMIN_TABS = [
-  { id: "adminHome", icon: "◎", label: "Overview" },
-  { id: "adminIncidents", icon: "🚨", label: "Incidents" },
-  { id: "training", icon: "🎓", label: "Training" },
-  { id: "more", icon: "☰", label: "More" },
-];
-
 const TITLES = {
   today: ["Zeus Protect", "Today"],
   training: ["My training", ""],
   module: ["Training", ""],
   report: ["Report", "Hazard report"],
   documents: ["Documents", "Read & confirm"],
-  dse: ["DSE", "Workstation check"],
   more: ["Account", ""],
   certificates: ["Account", "My certificates"],
   actions: ["Account", "Corrective actions"],
   history: ["Account", "Training history"],
   appearance: ["Account", "Appearance & theme"],
-  adminHome: ["Zeus Protect · Admin", "Site overview"],
-  adminIncidents: ["Admin", "Incidents"],
-  triage: ["Admin", ""],
   inspections: ["Inspections", "Due & recent"],
   inspection: ["Inspection", ""],
   permits: ["Permits to work", ""],
   permit: ["Permit to work", ""],
-  incidentRecord: ["Admin", ""],
 };
 
 const PARENT_TAB = {
-  module: "training", documents: "more", dse: "more",
+  module: "training", documents: "more",
   certificates: "more", actions: "more", history: "more", appearance: "more",
-  triage: "adminIncidents",
   inspections: "more", inspection: "inspections",
   permits: "more", permit: "permits",
-  incidentRecord: "adminIncidents",
 };
 
 // Inspection types that make sense to run from a phone — the long audits stay
 // on the desktop where the evidence and sign-off live.
+// Inspections and permits are supervisor tools — shown to admins only.
+// DSE, incident triage and incident records live in the desktop portal.
 const MOBILE_INSP_TYPES = ["weekly_walk", "office_housekeeping", "warehouse_housekeeping", "fire_drill"];
 
 function MobileApp({
@@ -108,13 +93,12 @@ function MobileApp({
   const effectiveTheme = followSystem ? (systemDark ? "dark" : "light") : theme;
   const T = getThemeTokens(effectiveTheme);
 
-  const [tab, setTab] = React.useState(user.role === "admin" ? "adminHome" : "today");
-  const [screen, setScreen] = React.useState(user.role === "admin" ? "adminHome" : "today");
+  const isAdmin = user.role === "admin";
+  const [tab, setTab] = React.useState("today");
+  const [screen, setScreen] = React.useState("today");
   const [activeModule, setActiveModule] = React.useState(null);
-  const [activeHazard, setActiveHazard] = React.useState(null);
   const [activeInspection, setActiveInspection] = React.useState(null);
   const [activePermit, setActivePermit] = React.useState(null);
-  const [activeIncident, setActiveIncident] = React.useState(null);
   const [queue, setQueue] = React.useState([]);
   const [canInstall, setCanInstall] = React.useState(false);
   const [progress, setProgress] = React.useState(loadProgress);
@@ -141,6 +125,7 @@ function MobileApp({
     completion: (p) => db.saveCompletion(p.userId, p.moduleId, p.record),
     docAck: (p) => db.acknowledgeDoc(p.userId, p.docId, p.date),
     incident: (p) => db.saveIncident(p.record),
+    // dseReport / riddorReported kept only so writes queued by older builds still drain.
     dseReport: (p) => db.saveDseReport(p.userId, p.report),
     actionComplete: (p) => db.completeAction(p.investigationId, p.actionId),
     theme: (p) => db.saveTheme(p.userId, p.theme),
@@ -182,16 +167,6 @@ function MobileApp({
   const myAcks = docAcknowledgements[user.id] || {};
   const unreadDocs = requiredDocs.filter((d) => !myAcks[d.id]);
 
-  const myDse = dseReports[user.id] || [];
-  const lastDse = myDse[myDse.length - 1];
-  const dseExpiry = lastDse ? getExpiryStatus(lastDse.date, 12) : null;
-  const dseState = {
-    completed: !!lastDse,
-    expired: dseExpiry ? dseExpiry.status === "expired" : false,
-    needsAction: !lastDse || (dseExpiry && dseExpiry.status === "expired"),
-    last: lastDse,
-  };
-
   const certificates = myMods
     .filter((m) => myComps[m.id])
     .map((m) => {
@@ -232,13 +207,13 @@ function MobileApp({
   function go(next, extra) {
     setScreen(next);
     const parent = PARENT_TAB[next] || next;
-    if (STAFF_TABS.concat(ADMIN_TABS).some((t) => t.id === parent)) setTab(parent);
+    if (STAFF_TABS.some((t) => t.id === parent)) setTab(parent);
     if (extra) extra();
   }
 
   function back() {
     const parent = PARENT_TAB[screen];
-    go(parent || (user.role === "admin" ? "adminHome" : "today"));
+    go(parent || "today");
   }
 
   // Android hardware/gesture back.
@@ -284,11 +259,6 @@ function MobileApp({
       () => db.optimisticIncident && db.optimisticIncident(record));
   }
 
-  function submitDse(report) {
-    write("dseReport", { userId: user.id, report }, "DSE assessment",
-      () => db.optimisticDseReport && db.optimisticDseReport(user.id, report));
-  }
-
   function completeAction(action) {
     write("actionComplete", { investigationId: action.investigationId, actionId: action.id },
       `Action complete · ${action.title}`);
@@ -310,10 +280,6 @@ function MobileApp({
     back();
   }
 
-  function reportRiddor(incidentId) {
-    write("riddorReported", { incidentId }, `RIDDOR reported · ${incidentId}`);
-  }
-
   function typeLabel(id) {
     const t = INSP_TYPES.find((x) => x.id === id);
     return t ? t.label : "walkround";
@@ -331,77 +297,6 @@ function MobileApp({
     const next = { ...prefs, [key]: value };
     setPrefs(next);
     savePrefs(next);
-  }
-
-  // ── Admin view models ─────────────────────────────────────────────────────
-  const openIncidents = (incidents || []).filter((i) => !i.closed);
-  const inboundHazards = openIncidents
-    .filter((i) => i.quickReport)
-    .slice(0, 10)
-    .map((i) => ({
-      id: i.id,
-      ref: i.id.replace("qr_", "QR-").slice(0, 9),
-      icon: i.urgency === "high" ? "🔴" : i.urgency === "medium" ? "🟠" : "🟡",
-      title: i.description ? i.description.slice(0, 44) : "Hazard report",
-      description: i.description,
-      reporter: nameFor(i.reportedBy),
-      location: i.location,
-      when: `${i.date} ${i.time || ""}`.trim(),
-      urgency: i.urgency,
-      photos: i.photos,
-      status: i.triaged ? "triaged" : "new",
-    }));
-
-  function nameFor(id) {
-    if (String(id) === String(user.id)) return "You";
-    const u = allUsers.find((x) => String(x.id) === String(id));
-    return u ? u.name : `Staff #${id}`;
-  }
-
-  const adminAlerts = [];
-  const riddorOpen = openIncidents.filter((i) => i.riddor && !i.riddorReported);
-  if (riddorOpen.length) {
-    adminAlerts.push({
-      id: "riddor", icon: "🚨",
-      title: `${riddorOpen.length} RIDDOR report${riddorOpen.length !== 1 ? "s" : ""} outstanding`,
-      detail: "Statutory deadline applies — report via HSE",
-    });
-  }
-  const overdueAll = Object.values(investigations || {}).flatMap((inv) =>
-    (inv.actions || []).filter((a) =>
-      a.status !== "complete" && a.status !== "closed" &&
-      a.dueDate && a.dueDate < new Date().toISOString().slice(0, 10))
-  );
-  if (overdueAll.length) {
-    adminAlerts.push({
-      id: "actions", icon: "⏱",
-      title: `${overdueAll.length} corrective action${overdueAll.length !== 1 ? "s" : ""} overdue`,
-      detail: "Investigation actions past their due date",
-    });
-  }
-
-  const adminStats = [
-    { label: "Training incomplete", value: countIncompleteTraining(), sub: `of ${Object.keys(assigns).length} staff`, color: "#f59e0b" },
-    { label: "Open incidents", value: openIncidents.length, sub: `${riddorOpen.length} RIDDOR unreported`, color: "#ef4444" },
-    { label: "Docs unread", value: countUnreadDocs(), sub: "across the team", color: "#3b82f6" },
-    { label: "Overdue actions", value: overdueAll.length, sub: "corrective actions", color: overdueAll.length ? "#ef4444" : "#10b981" },
-  ];
-
-  function countIncompleteTraining() {
-    return Object.entries(assigns).filter(([uid, ids]) => {
-      const c = comps[uid] || {};
-      return (ids || []).some((id) => !c[id]);
-    }).length;
-  }
-
-  function countUnreadDocs() {
-    let n = 0;
-    Object.entries(docAssignments || {}).forEach(([docId, uids]) => {
-      (uids || []).forEach((uid) => {
-        if (!(docAcknowledgements[uid] || {})[docId]) n++;
-      });
-    });
-    return n;
   }
 
   // ── Inspections & permits ─────────────────────────────────────────────────
@@ -432,54 +327,6 @@ function MobileApp({
   );
   const permitsToSign = myPermits.filter((p) => !p.closed && !p.signedOnAt);
 
-  function incidentVM(inc) {
-    if (!inc) return null;
-    const inv = (investigations || {})[inc.id];
-    const riddorDueDate = inc.riddorDueDate || addDaysIso(inc.date, 10);
-    return {
-      id: inc.id,
-      ref: inc.id.startsWith("qr_") ? inc.id.replace("qr_", "QR-").slice(0, 9) : `INC-${String(inc.numberCode || "").padStart(4, "0")}`,
-      type: inc.type,
-      title: (inc.description || "Incident").split(" — ")[0].slice(0, 60),
-      description: inc.description,
-      date: inc.date,
-      time: inc.time,
-      location: inc.location,
-      person: inc.injuredPerson ? nameFor(inc.injuredPerson) : null,
-      reporter: nameFor(inc.reportedBy),
-      injuryType: inc.injuryType,
-      accidentCode: inc.accidentCode,
-      daysLost: inc.daysLost,
-      riskScore: inc.riskScore,
-      riskBand: inc.riskScore == null ? null
-        : inc.riskScore > 16 ? "Unacceptable" : inc.riskScore >= 10 ? "High" : inc.riskScore >= 5 ? "Medium" : "Low",
-      riddor: !!inc.riddor,
-      riddorReported: !!inc.riddorReported,
-      riddorDueDate,
-      riddorReason: inc.riddorReason || "Reportable under RIDDOR 2013 — confirm the category before submitting.",
-      photos: inc.photos,
-      closed: !!inc.closed,
-      hasInvestigation: !!inv,
-    };
-  }
-
-  function investigationVM(incId) {
-    const inv = (investigations || {})[incId];
-    if (!inv) return null;
-    return {
-      rootCause: inv.rootCause || (inv.fiveWhys && inv.fiveWhys.rootCause) || null,
-      actions: (inv.actions || []).map((a) => {
-        const late = a.status !== "complete" && a.status !== "closed" && a.dueDate && a.dueDate < todayIso;
-        return {
-          ...a,
-          investigationId: incId,
-          overdue: !!late,
-          overdueDays: late ? Math.ceil((Date.now() - new Date(a.dueDate).getTime()) / 86400000) : 0,
-        };
-      }),
-    };
-  }
-
   // ── Header ────────────────────────────────────────────────────────────────
   const [kicker, fixedTitle] = TITLES[screen] || TITLES.today;
   const title =
@@ -487,14 +334,12 @@ function MobileApp({
     (screen === "training" ? `${myMods.length} modules assigned`
       : screen === "module" ? (activeModule || {}).title
       : screen === "more" ? user.name
-      : screen === "triage" ? (activeHazard || {}).ref
       : screen === "inspection" ? typeLabel((activeInspection || {}).typeId)
       : screen === "permits" ? `${myPermits.filter((p) => !p.closed).length} live on site`
       : screen === "permit" ? `${(activePermit || {}).ref || ""} · sign on`
-      : screen === "incidentRecord" ? ((incidentVM(activeIncident) || {}).ref || "")
       : "");
 
-  const tabs = user.role === "admin" && isAdminScreen(screen) ? ADMIN_TABS : STAFF_TABS;
+  const tabs = STAFF_TABS;
   const activeTab = PARENT_TAB[screen] || screen;
 
   return (
@@ -507,22 +352,6 @@ function MobileApp({
         kicker={kicker}
         title={title}
         onBack={PARENT_TAB[screen] ? back : undefined}
-        right={user.role === "admin" ? (
-          <button
-            onClick={() => {
-              const toAdmin = !isAdminScreen(screen);
-              go(toAdmin ? "adminHome" : "today");
-            }}
-            style={{
-              flexShrink: 0, height: 34, padding: "0 12px", borderRadius: 11,
-              background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.32)",
-              color: T.gold, fontWeight: 800, fontSize: 10.5, letterSpacing: 0.6,
-              fontFamily: FONT, cursor: "pointer", textTransform: "uppercase",
-            }}
-          >
-            {isAdminScreen(screen) ? "Admin" : "Staff"}
-          </button>
-        ) : null}
         Z={T} font={FONT}
       />
 
@@ -531,11 +360,10 @@ function MobileApp({
       <main style={{ flex: 1, overflow: "auto", WebkitOverflowScrolling: "touch" }}>
         {screen === "today" && (
           <Today
-            user={user} myMods={myMods} myComps={myComps} unreadDocs={unreadDocs} dseState={dseState}
+            user={user} myMods={myMods} myComps={myComps} unreadDocs={unreadDocs}
             onResume={(m) => { setActiveModule(m); go("module"); }}
             onOpenModule={(m) => { setActiveModule(m); go("module"); }}
             onOpenDocs={() => go("documents")}
-            onOpenDse={() => go("dse")}
             onReport={() => go("report")}
             Z={T} font={FONT}
           />
@@ -554,7 +382,7 @@ function MobileApp({
             mod={activeModule} user={user}
             initialSlide={progress[activeModule.id] || 0}
             offline={!!prefs.keepOffline}
-            onExit={() => go(user.role === "admin" ? "adminHome" : "today")}
+            onExit={() => go("today")}
             onProgress={saveProgress}
             onComplete={completeModule}
             Z={T} font={FONT}
@@ -568,7 +396,7 @@ function MobileApp({
             suggestedLocation={prefs.lastLocation}
             online={online}
             onSubmit={(rec) => { updatePref("lastLocation", rec.location); submitHazard(rec); }}
-            onDone={() => go(user.role === "admin" ? "adminHome" : "today")}
+            onDone={() => go("today")}
             Z={T} font={FONT}
           />
         )}
@@ -582,10 +410,6 @@ function MobileApp({
           />
         )}
 
-        {screen === "dse" && (
-          <DSEMobile user={user} onSubmit={submitDse} onExit={() => go("today")} Z={T} font={FONT} />
-        )}
-
         {screen === "more" && (
           <More
             user={user}
@@ -596,15 +420,13 @@ function MobileApp({
               inspectionsDue: inspectionsDue.length,
               permitsToSign: permitsToSign.length,
             }}
-            dseState={dseState}
             queue={queue}
             canInstall={canInstall}
             onOpenDocs={() => go("documents")}
-            onOpenDse={() => go("dse")}
             onOpenCerts={() => go("certificates")}
             onOpenActions={() => go("actions")}
-            onOpenInspections={() => go("inspections")}
-            onOpenPermits={() => go("permits")}
+            onOpenInspections={isAdmin ? () => go("inspections") : undefined}
+            onOpenPermits={isAdmin ? () => go("permits") : undefined}
             onOpenHistory={() => go("history")}
             onOpenAppearance={() => go("appearance")}
             onSignOut={onSignOut}
@@ -643,29 +465,7 @@ function MobileApp({
           />
         )}
 
-        {screen === "adminHome" && (
-          <AdminOverview
-            alerts={adminAlerts} stats={adminStats} inbound={inboundHazards}
-            onOpenHazard={(h) => { setActiveHazard(h); go("triage"); }}
-            onOpenAlert={(a) => {
-              const first = a && a.id === "riddor" ? riddorOpen[0] : null;
-              if (first) { setActiveIncident(first); go("incidentRecord"); }
-              else go("adminIncidents");
-            }}
-            Z={T} font={FONT}
-          />
-        )}
-
-        {screen === "adminIncidents" && (
-          <AdminOverview
-            alerts={[]} stats={[]} inbound={inboundHazards}
-            onOpenHazard={(h) => { setActiveHazard(h); go("triage"); }}
-            onOpenAlert={() => {}}
-            Z={T} font={FONT}
-          />
-        )}
-
-        {screen === "inspections" && (
+        {isAdmin && screen === "inspections" && (
           <Inspections
             due={inspectionsDue}
             recent={recentInspections}
@@ -675,7 +475,7 @@ function MobileApp({
           />
         )}
 
-        {screen === "inspection" && activeInspection && (
+        {isAdmin && screen === "inspection" && activeInspection && (
           <InspectionRun
             typeId={activeInspection.typeId}
             location={activeInspection.location}
@@ -686,7 +486,7 @@ function MobileApp({
           />
         )}
 
-        {screen === "permits" && (
+        {isAdmin && screen === "permits" && (
           <Permits
             permits={myPermits}
             user={user}
@@ -695,7 +495,7 @@ function MobileApp({
           />
         )}
 
-        {screen === "permit" && activePermit && (
+        {isAdmin && screen === "permit" && activePermit && (
           <PermitDetail
             permit={activePermit}
             user={user}
@@ -705,43 +505,11 @@ function MobileApp({
           />
         )}
 
-        {screen === "incidentRecord" && activeIncident && (
-          <IncidentRecord
-            incident={incidentVM(activeIncident)}
-            investigation={investigationVM(activeIncident.id)}
-            onReportRiddor={() => reportRiddor(activeIncident.id)}
-            onChaseAction={(a) => db.chaseAction && db.chaseAction(a)}
-            onOpenDesktop={onSwitchToDesktop}
-            Z={T} font={FONT}
-          />
-        )}
-
-        {screen === "triage" && activeHazard && (
-          <HazardTriage
-            hazard={activeHazard}
-            history={[]}
-            onResolve={() => { db.resolveIncident && db.resolveIncident(activeHazard.id); back(); }}
-            onAssign={() => db.assignAction && db.assignAction(activeHazard.id)}
-            onEscalate={() => db.escalateIncident && db.escalateIncident(activeHazard.id)}
-            Z={T} font={FONT}
-          />
-        )}
       </main>
 
       <TabBar tabs={tabs} active={activeTab} onSelect={(id) => go(id)} Z={T} font={FONT} />
     </div>
   );
-}
-
-function isAdminScreen(screen) {
-  return screen === "adminHome" || screen === "adminIncidents" || screen === "triage" ||
-    screen === "incidentRecord";
-}
-
-function addDaysIso(dateStr, days) {
-  const d = dateStr ? new Date(dateStr) : new Date();
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
 }
 
 function loadProgress() {

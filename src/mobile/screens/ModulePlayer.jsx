@@ -11,6 +11,8 @@
 
 import React from "react";
 import { Screen, PrimaryButton, GhostButton } from "../ui";
+import { sanitizeHtml } from "../../lib/sanitizeHtml";
+import { isHtmlContent, ensureRteStyles } from "../../domains/training/slideTextUtils";
 
 const PASS_MARK = 70;
 
@@ -477,8 +479,22 @@ function MobileHotspot({ imageUrl, hotspots, instructions, onStatusChange, Z, fo
   );
 }
 
-// Mirrors the desktop player's numbered-step formatting.
+// Slide text is either rich HTML from the portal's RichTextEditor or legacy
+// plain text. Same branch as the desktop player — rendering HTML as plain text
+// is what put raw <li> tags on screen.
 function SlideBody({ text, Z }) {
+  React.useEffect(() => { ensureRteStyles(); }, []);
+
+  if (isHtmlContent(text)) {
+    return (
+      <div
+        className="rte-content"
+        style={{ fontSize: 14.5, lineHeight: 1.75, color: Z.slate }}
+        dangerouslySetInnerHTML={{ __html: sanitizeHtml(text) }}
+      />
+    );
+  }
+
   const parts = String(text).split(". ");
   return (
     <div style={{ fontSize: 14.5, lineHeight: 1.75, color: Z.slate }}>

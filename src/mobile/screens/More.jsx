@@ -11,8 +11,8 @@ import { promptInstall, isStandalone } from "../registerSW";
 // ─── More ────────────────────────────────────────────────────────────────────
 
 function More({
-  user, counts, dseState, queue, canInstall,
-  onOpenDocs, onOpenDse, onOpenCerts, onOpenActions, onOpenHistory, onOpenAppearance,
+  user, counts, queue, canInstall,
+  onOpenDocs, onOpenCerts, onOpenActions, onOpenHistory, onOpenAppearance,
   onOpenInspections, onOpenPermits,
   onSignOut, onSwitchToDesktop, Z, font,
 }) {
@@ -35,14 +35,11 @@ function More({
       <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 18 }}>
         <Row Z={Z} font={font} icon="📄" title="H&S documents" onClick={onOpenDocs}
           right={<Chevron Z={Z} badge={counts.unreadDocs} badgeColor={Z.gold} />} />
-        <Row Z={Z} font={font} icon="🖥️" title="DSE assessment" onClick={onOpenDse}
-          right={<Chevron Z={Z} chip={<StatusChip
-            label={dseState.needsAction ? "Due" : "Valid"}
-            color={dseState.needsAction ? "#f59e0b" : "#10b981"} />} />} />
         <Row Z={Z} font={font} icon="🎓" title="My certificates" onClick={onOpenCerts}
           right={<Chevron Z={Z} badge={counts.certificates} badgeColor={Z.green} />} />
         <Row Z={Z} font={font} icon="✅" title="My corrective actions" onClick={onOpenActions}
           right={<Chevron Z={Z} badge={counts.openActions} badgeColor={Z.gold} />} />
+        {(onOpenInspections || onOpenPermits) && <SectionLabel Z={Z}>Supervisors</SectionLabel>}
         {onOpenInspections && (
           <Row Z={Z} font={font} icon="🚶" title="Site inspections" onClick={onOpenInspections}
             right={<Chevron Z={Z} badge={counts.inspectionsDue} badgeColor={Z.gold} />} />

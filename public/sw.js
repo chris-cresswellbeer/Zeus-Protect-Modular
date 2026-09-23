@@ -11,7 +11,7 @@
  * entries dead weight otherwise.
  */
 
-const CACHE_VERSION = "v2";
+const CACHE_VERSION = "v3";
 const SHELL_CACHE = `zeus-shell-${CACHE_VERSION}`;
 const MEDIA_CACHE = `zeus-media-${CACHE_VERSION}`;
 
@@ -68,6 +68,13 @@ self.addEventListener("fetch", (event) => {
   // state layer handles offline reads from what it already has in memory.
   if (isSupabase(url) && url.pathname.startsWith("/rest/")) return;
 
+  // Video/audio: Chrome on Android streams these with Range requests. Serving a
+  // cached full 200 (or an opaque cross-origin response) to a media element
+  // makes Chrome refuse to play it, while iOS Safari mostly bypasses the worker
+  // for media — which is why modules worked on iPhone and not Android.
+  // Let the browser talk to storage directly.
+  if (req.headers.has("range") || req.destination === "video" || req.destination === "audio") return;
+
   // Supabase storage objects (module images, document files) are immutable.
   if (isMedia(url)) {
     event.respondWith(
@@ -75,11 +82,18 @@ self.addEventListener("fetch", (event) => {
         const hit = await cache.match(req);
         if (hit) return hit;
         try {
-          const res = await fetch(req);
-          if (res.ok) cache.put(req, res.clone());
+          // Fetch in CORS mode so we get a readable response we can safely
+          // cache (Supabase storage sends CORS headers). Fall back to the
+          // original request if the server doesn't allow it.
+          let res;
+          try { res = await fetch(req.url, { mode: "cors", credentials: "omit" }); }
+          catch (e) { res = await fetch(req); }
+          if (res.ok && res.status === 200 && res.type !== "opaque") {
+            cache.put(req, res.clone()).catch(() => {});
+          }
           return res;
         } catch (err) {
-          return hit || Response.error();
+          return Response.error();
         }
       })
     );

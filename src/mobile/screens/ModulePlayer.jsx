@@ -299,6 +299,56 @@ function slideImages(slide) {
   return images;
 }
 
+// No loading="lazy": inside the player's fixed, nested scroll container some
+// Android WebViews never fire the intersection that triggers the load.
+function SlideImage({ src, Z }) {
+  const [failed, setFailed] = React.useState(false);
+  React.useEffect(() => setFailed(false), [src]);
+  if (failed) return <MediaFallback kind="image" src={src} Z={Z} />;
+  return (
+    <img
+      src={src} alt="" decoding="async" onError={() => setFailed(true)}
+      style={{ width: "100%", maxHeight: 320, objectFit: "contain", display: "block" }}
+    />
+  );
+}
+
+function SlideVideo({ src, Z }) {
+  const [failed, setFailed] = React.useState(false);
+  React.useEffect(() => setFailed(false), [src]);
+  if (failed) return <div style={{ marginTop: 16 }}><MediaFallback kind="video" src={src} Z={Z} /></div>;
+  // .mov/HEVC from an iPhone plays in Safari but not Chrome on Android — the
+  // fallback makes that visible instead of an empty black box.
+  return (
+    <video
+      src={src} controls playsInline preload="metadata" onError={() => setFailed(true)}
+      style={{
+        width: "100%", marginTop: 16, borderRadius: 14, display: "block",
+        background: "#000", border: `1px solid ${Z.borderMd}`,
+      }}
+    />
+  );
+}
+
+function MediaFallback({ kind, src, Z }) {
+  const canOpen = src && !String(src).startsWith("data:");
+  return (
+    <div style={{
+      padding: 16, borderRadius: 14, lineHeight: 1.45, textAlign: "left",
+      background: Z.overlay, border: `1px dashed ${Z.borderMd}`, color: Z.muted, fontSize: 13,
+    }}>
+      This {kind} couldn't be shown on this phone.
+      {canOpen && (
+        <a href={src} target="_blank" rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          style={{ display: "block", marginTop: 6, color: "#93c5fd", fontWeight: 700 }}>
+          Open {kind} in browser
+        </a>
+      )}
+    </div>
+  );
+}
+
 function SlideCard({ slide, Z, font, onHotspotStatus }) {
   const [zoom, setZoom] = React.useState(null);
   if (!slide) return null;
@@ -324,13 +374,7 @@ function SlideCard({ slide, Z, font, onHotspotStatus }) {
       {slide.text && <SlideBody text={slide.text} Z={Z} />}
 
       {videoSrc && (
-        <video
-          src={videoSrc} controls playsInline preload="metadata"
-          style={{
-            width: "100%", marginTop: 16, borderRadius: 14, display: "block",
-            background: "#000", border: `1px solid ${Z.borderMd}`,
-          }}
-        />
+        <SlideVideo src={videoSrc} Z={Z} />
       )}
 
       {/* Plain images are hidden on a hotspot slide — the activity owns the image. */}
@@ -346,10 +390,7 @@ function SlideCard({ slide, Z, font, onHotspotStatus }) {
                 overflow: "hidden", background: Z.overlay, cursor: "zoom-in", lineHeight: 0,
               }}
             >
-              <img
-                src={src} alt="" loading="lazy"
-                style={{ width: "100%", maxHeight: 320, objectFit: "contain", display: "block" }}
-              />
+              <SlideImage src={src} Z={Z} />
             </button>
           ))}
         </div>

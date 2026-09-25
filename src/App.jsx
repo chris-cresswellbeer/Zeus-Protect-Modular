@@ -1,7 +1,68 @@
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * App.jsx — Composition root of Zeus Protect (desktop portal + mobile switch)
+ * ═══════════════════════════════════════════════════════════════════════════
+ * WHAT THIS FILE DOES
+ *   1. Holds ALL shared application state (users, training, incidents, docs,
+ *      DSE, fire safety, etc.) as React useState in the single <App/> component.
+ *   2. Loads every table from Supabase once on start-up (loadAll, below).
+ *   3. Persists changes back to Supabase via the dbSave* / dbDelete* helpers,
+ *      either called directly by handlers or via "auto-sync" useEffects.
+ *   4. Handles login/logout, inactivity timeout and login lockout.
+ *   5. Chooses which screen to render, in this order (first match wins):
+ *        !dbReady                     → "Connecting to database…" splash
+ *        view === "login"             → login form
+ *        phone-width & logged in      → <MobileApp/> (src/mobile)
+ *        dseActive (staff)            → DSE self-assessment wizard
+ *        mod (staff)                  → training module player + quiz
+ *        view === "staff"             → staff portal (tabs driven by `stab`)
+ *        view === "admin"             → admin portal (tabs driven by `atab`)
+ *   6. Passes state + setters + db helpers down to the domain tabs in
+ *      src/domains/* (most are lazy-loaded to keep the first download small).
+ *
+ * FILE MAP (search for these banners)
+ *   SortableStatCard ............ draggable dashboard tile wrapper
+ *   ── state declarations ....... top of App()
+ *   ── Load all persisted data .. loadAll() — the big Promise.allSettled
+ *   ── Auto-sync watchers ....... useEffects that save whole collections
+ *   ── Sync helpers ............. dbSave* / dbDelete* functions (one per table)
+ *   ── Mobile permits view model / Mobile write surface (mobileDb)
+ *   LOGIN / MOBILE PWA / DSE ASSESSMENT / MODULE PLAYER / CertModal
+ *   STAFF PORTAL ................ staff tabs (stab)
+ *   ADMIN PORTAL ................ admin tabs (atab) + global hover CSS
+ *
+ * DATA FLOW CONVENTIONS (please keep to these)
+ *   • user_id / ids are compared as STRINGS — always wrap with String(id)
+ *     (DB columns are TEXT; older records may have numeric ids in memory).
+ *   • New Supabase reads go INTO the Promise.allSettled batch in loadAll().
+ *   • New writes go through dbWrite() (lib/supabase.js).
+ *   • Prefer upsert-with-onConflict + prune over delete-then-insert.
+ *   • Seed data (src/data/*) is only a fallback when a table is empty.
+ *
+ * ⚠ RULES OF HOOKS: every useState/useEffect/useRef/useMemo in App() MUST sit
+ *   ABOVE the `if (!dbReady) return` early return (≈ the "Show loading screen"
+ *   banner). Adding a hook below it will crash with "Rendered more hooks than
+ *   during the previous render". Never call hooks inside .map(), IIFEs or
+ *   conditionals — extract a module-level component instead (see SortableStatCard).
+ *
+ * KNOWN TECHNICAL DEBT (documented, not yet addressed)
+ *   • Auto-sync effects re-save the ENTIRE collection on any change (e.g. every
+ *     incident is upserted when one changes). A "save only the changed record"
+ *     refactor is planned.
+ *   • No protection against two admins editing the same record at once
+ *     (last write wins).
+ *   • A few save helpers still use delete-then-insert (dbSaveAssigns,
+ *     dbSaveDocAssignments, dbSaveDseReport) — a failure between the two
+ *     calls can leave rows missing.
+ *   • This file is very large (~4,000 lines). Staff/admin tab bodies that are
+ *     still inline here are good candidates for extraction into src/domains/.
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
 import React, { useState, useEffect, useRef } from "react";
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { SortableContext, rectSortingStrategy, arrayMove, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+// ── Seed / reference data (src/data). Used as defaults until Supabase has rows. ──
 import { INIT_DSE_REPORTS } from "./data/dseReports";
 import { HS_DOCS, INIT_ASSIGN, INIT_COMPLETE } from "./data/seedDocs";
 import { INIT_EQUIPMENT } from "./data/seedEquipment";
@@ -16,6 +77,9 @@ import { isWarehouseWorker, INIT_MACHINE_COMPS, MACHINERY_TYPES } from "./data/s
 import { INIT_RAS } from "./data/seedRiskAssessments";
 import { TRAINING_MODULES } from "./data/seedTraining";
 import { USERS } from "./data/seedUsers";
+// ── Domain tabs. `React.lazy` = the tab's code is only downloaded the first time it is
+// opened (code-splitting). Each lazy tab must be rendered inside <React.Suspense>.
+// The `.then(m => ({ default: m.X }))` adapts a NAMED export to what React.lazy expects.
 const LazyContractorsTab = React.lazy(() => import("./domains/contractors/ContractorsTab").then(m => ({ default: m.ContractorsTab })));
 const LazyCoshhTab = React.lazy(() => import("./domains/coshh/CoshhTab").then(m => ({ default: m.CoshhTab })));
 import { DocCard } from "./domains/documents/DocCard";
@@ -45,6 +109,7 @@ const LazyReportsTab = React.lazy(() => import("./domains/training/ReportsTab").
 import { generateStaffPDF } from "./domains/training/generateStaffPDF";
 import { isHtmlContent, ensureRteStyles } from "./domains/training/slideTextUtils";
 import { HotspotActivity } from "./domains/training/HotspotActivity";
+// ── Core libraries, shared UI and theme ──
 import { sanitizeHtml } from "./lib/sanitizeHtml";
 import { getExpiryStatus } from "./lib/dates";
 import { EmojiCtx, E, syncEmojiMode } from "./lib/emoji";
@@ -84,6 +149,11 @@ function SortableStatCard({ id, children }) {
   );
 }
 
+/**
+ * The whole application. See the file header for the render order and conventions.
+ * State below is grouped roughly as: auth/session → training → documents → DSE →
+ * incidents/investigations → other H&S registers → admin UI form state.
+ */
 export default function App() {
   const [darkMode, setDarkMode] = useState(true); // kept for backward compat
   const [theme, setTheme] = useState("dark"); // "dark"|"light"|"slate"|"forest"|"graphite"|"arctic"|"sand"
@@ -91,12 +161,15 @@ export default function App() {
   const [user,    setUser]    = useState(null);
   const [view,    setView]    = useState("login");
   const [allUsers,setAllUsers]= useState([]); // loaded from Supabase users table; USERS constant is seed-only
+  // ── Auth & users ──
   const [passwords, setPasswords] = useState({}); // userId -> password (overrides default)
+  // ── Training: assigns = { [userId]: [moduleId,...] }, comps = { [userId]: { [moduleId]: {score,date,certId,answers} } } ──
   const [assigns, setAssigns] = useState(INIT_ASSIGN);
   const [comps,   setComps]   = useState(INIT_COMPLETE);
   const [email,   setEmail]   = useState("");
   const [pass,    setPass]    = useState("");
   const [err,     setErr]     = useState("");
+  // ── Module player (staff taking a module): mod = module being played, step = 0 intro / 1..n slides / n+1 quiz ──
   const [mod,     setMod]     = useState(null);
   const [step,    setStep]    = useState(0);
   const [qans,    setQans]    = useState({});
@@ -105,6 +178,7 @@ export default function App() {
   const [showCelebration, setShowCelebration] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState(null); // image URL to show in lightbox
   const [lightboxZoomed, setLightboxZoomed] = useState(false); // true = zoomed in past fit-to-screen
+  // ── Navigation: atab = active ADMIN tab key, stab = active STAFF tab key (see the render sections) ──
   const [atab,    setAtab]    = useState("dashboard");
   const [dashboardLayouts, setDashboardLayouts] = useState({}); // { [userId]: [cardId, ...] } — admin's saved stat-card order
   const statDragSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
@@ -119,6 +193,7 @@ export default function App() {
   const [previewDoc, setPreviewDoc] = useState(null);
   const [docAssignments, setDocAssignments] = useState({}); // { docId: [userId, ...] }
   const [docAcknowledgements, setDocAcknowledgements] = useState({}); // { userId: { docId: { date } } }
+  // ── DSE (Display Screen Equipment) self-assessment wizard state + stored reports ──
   const [dseActive, setDseActive] = useState(false);
   const [dseAnswers, setDseAnswers] = useState({});
   const [dseComments, setDseComments] = useState({});
@@ -126,6 +201,7 @@ export default function App() {
   const [dseSubmitted, setDseSubmitted] = useState(false);
   const [dseReports, setDseReports] = useState(INIT_DSE_REPORTS);
   const [adminResponses, setAdminResponses] = useState({}); // { userId: { reportIdx_issueIdx: { comment, resolved } } }
+  // ── Incidents, investigations and other H&S registers ──
   const [incidents, setIncidents] = useState(INIT_INCIDENTS);
   const [investigations, setInvestigations] = useState(INIT_INVESTIGATIONS);   // { incidentId: { ... } }
   const [investigationView, setInvestigationView] = useState(null); // incidentId to open
@@ -154,8 +230,16 @@ export default function App() {
     syncEmojiMode(emojiMode);
   }, [emojiMode]);
   useEffect(() => { ensureRteStyles(); }, []);
+  // Fire safety is ONE state object holding six lists; each list maps to its own Supabase table (see dbSaveFireSafety).
   const [fireSafety, setFireSafety] = useState({ wardens:INIT_FIRE_WARDENS, drills:INIT_FIRE_DRILLS, alarmTests:INIT_ALARM_TESTS, extinguishers:INIT_EXTINGUISHERS, emergLighting:INIT_EMERG_LIGHTING, fraReviews:INIT_FRA_REVIEWS });
   const [firstAidData, setFirstAidData] = useState({ aiders:[], kits:[], assessment:{} });
+  // ── Module merge model ─────────────────────────────────────────────────────
+  // Built-in modules live in data/seedTraining.js (TRAINING_MODULES, read-only code).
+  // Admin changes are stored in the custom_modules table as customModules:
+  //   _custom:true               → admin-created (or edited) module
+  //   _custom:true,_override:true→ replaces the built-in module with the SAME id
+  //   _hidden:true               → soft-deleted (hidden from assignment lists)
+  // Always read modules via `allModules`, never TRAINING_MODULES directly.
   // allModules: custom overrides replace built-in modules with same id
   const allModules = [
     ...TRAINING_MODULES.map(m => customModules.find(c=>c.id===m.id&&c._override) || m),
@@ -167,6 +251,7 @@ export default function App() {
     ...customMachineTypes.filter(c=>!c._override),
   ];
   const allMachineCategories = [...new Set(allMachineTypes.map(m=>m.category))];
+  // ── Admin UI form/filter state (staff management, bulk actions, CSV import, doc bulk-assign) ──
   const [showAddStaff, setShowAddStaff] = useState(false);
   const [showHiddenModules, setShowHiddenModules] = useState(false);
   const [staffFilterManager,  setStaffFilterManager]  = useState("all");
@@ -207,13 +292,17 @@ export default function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [bulkTarget, setBulkTarget] = useState("individual");
   const [bulkManager, setBulkManager] = useState("");
+  // ── Session safety ──
   const [dbReady, setDbReady] = useState(false); // true once initial Supabase load is complete
+  // NOTE: lockout counters live only in memory — a page refresh resets them. For real brute-force
+  // protection this would need to be enforced server-side.
   const [loginAttempts, setLoginAttempts] = useState({}); // { email: { count, lockedUntil } }
   const inactivityTimer = React.useRef(null);
   const INACTIVITY_MINUTES = 30;
   const MAX_LOGIN_ATTEMPTS = 5;
   const LOCKOUT_MINUTES = 15;
 
+  // Global font stack + responsive breakpoints (desktop layouts collapse at ≤1024px).
   const font = "'Barlow','Trebuchet MS',system-ui,sans-serif";
   const winW = useWindowWidth();
   const isMobile = winW <= 1024;
@@ -226,6 +315,7 @@ export default function App() {
   const isPhone = winW <= 700;
   const [forceDesktop, setForceDesktop] = useState(false);
 
+  // (maximum-scale=1 stops iOS auto-zooming into inputs, but also disables pinch-zoom — an accessibility trade-off.)
   // ── Ensure correct viewport meta tag for mobile ─────────────────────────────
   useEffect(() => {
     let meta = document.querySelector('meta[name="viewport"]');
@@ -273,6 +363,14 @@ export default function App() {
     };
   }, [user]); // eslint-disable-line
 
+  // Runs ONCE on first render. Each table is fetched in parallel, then converted
+  // from database shape (snake_case columns, one row per record) into the
+  // in-memory shape the UI uses (camelCase, often maps keyed by userId).
+  // If a table returns no rows, the matching seed data (INIT_*) is kept.
+  // ADDING A NEW TABLE: add the query to the array below, add a matching
+  // variable name (same position!) in the destructuring list, add it to the
+  // error-logging list, then add a block that converts rows → state.
+  // dbReady is set in `finally`, so the app always leaves the splash screen.
   // ── Load all persisted data from Supabase on mount ───────────────────────────
   useEffect(() => {
     async function loadAll() {
@@ -339,6 +437,7 @@ export default function App() {
         [aRes,cRes,iRes,invRes,ackRes,daRes,docRes,dseRes,resRes,llRes,pwRes,upRes,ecRes,qfRes,conRes,conIndRes,conCertRes,conVisitRes,permitRes,raRes,cmRes,mcRes,eqRes,siRes,msdsRes,ccRes,fwRes,fdRes,fatRes,fexRes,felRes,ffrRes,faRes,cmtRes,dlRes]
           .forEach(r => { if (r.status === "rejected") console.error("Supabase load error:", r.reason); });
 
+        // Pattern used below: rows(x) → null/[] means "nothing stored" → keep seed data.
         // Training assigns
         const aRows = rows(aRes);
         if (aRows && aRows.length) {
@@ -378,6 +477,8 @@ export default function App() {
             riddorReportedDate: r.riddor_reported_date||null,
             hseReference: r.hse_reference||null,
             riddorReportedBy: r.riddor_reported_by||null,
+            quickReport: !!r.quick_report,
+            urgency: r.urgency||null,
             photos: Array.isArray(r.photos) ? r.photos : [],
           })));
         }
@@ -455,6 +556,7 @@ export default function App() {
           setPasswords(map);
         }
 
+        // The users table stores the whole user object in a JSON `data` column.
         // Users — DB is source of truth; seed with USERS constant on first run
         const usersRows = rows(usersRes);
         if (usersRows && usersRows.length) {
@@ -469,6 +571,8 @@ export default function App() {
           }
         }
 
+        // Stored on `window` (a global) rather than state so login() and dbSaveTheme()
+        // can read the latest copy without a re-render. Treat as a private cache.
         // User profiles (theme, emojiMode preferences — separate from user records)
         const upRows = rows(upRes);
         // Store profile rows for theme restoration at login
@@ -505,6 +609,7 @@ export default function App() {
         const permitRows = rows(permitRes);
         if (permitRows?.length) setPermits(permitRows.map(r=>r.data));
 
+        // Same override idea as modules: DB rows are merged ON TOP of seed RAs with the same id.
         // Risk assessments (custom/edited ones override INIT_RAS)
         const raRows = rows(raRes);
         if (raRows && raRows.length) {
@@ -596,6 +701,7 @@ export default function App() {
           fraReviews:   ffrRows && ffrRows.length ? ffrRows.map(r=>r.data) : (anyFireData ? [] : INIT_FRA_REVIEWS),
         });
 
+        // The first aid register is a single JSON document stored in one row with id "singleton".
         // First Aid Register
         const faRow = rows(faRes);
         if (faRow && faRow.length) setFirstAidData(faRow[0].data);
@@ -608,6 +714,9 @@ export default function App() {
     loadAll();
   }, []);
 
+  // Each seed risk assessment is turned into an HTML "document" (base64 data URL)
+  // so it appears in the Documents library. These are generated in the browser
+  // every load and are NOT saved to the documents table.
   // Seed Documents tab with RA docs on mount (moved from RiskAssessmentTab)
   useEffect(() => {
     setDocs(prevDocs => {
@@ -633,6 +742,15 @@ export default function App() {
     });
   }, []); // eslint-disable-line
 
+  // HOW AUTO-SYNC WORKS
+  // `_ready` stays false until loadAll() has finished, so the initial setState
+  // calls from loading do NOT trigger a save-back. After that, whenever one of
+  // these collections changes (from anywhere in the app) the whole collection is
+  // written to Supabase. That's simple but chatty — see "Known technical debt"
+  // in the file header. Collections NOT listed here (e.g. permits, users,
+  // assigns, completions) are saved explicitly by the code that changes them.
+  // ⚠ dseReports/adminResponses/passwords effects convert uid with Number(uid) —
+  //   fine for numeric ids, but a non-numeric text id would become NaN.
   // ── Auto-sync watchers — fire whenever state changes after initial load ───────
   const _ready = useRef(false);
   useEffect(() => { if (dbReady) _ready.current = true; }, [dbReady]);
@@ -688,6 +806,8 @@ export default function App() {
 
   // ── Sync helpers — call these wherever state currently changes ───────────────
 
+  // Replaces the assignment list for each user in `newAssigns` ({userId:[moduleIds]}).
+  // Delete-then-insert (not atomic) — pass ONLY the users that changed.
   async function dbSaveAssigns(newAssigns) {
     for (const [uid, mids] of Object.entries(newAssigns)) {
       await dbWrite(sb.from("training_assigns").delete().eq("user_id", String(uid)), "training assignments clear");
@@ -699,6 +819,7 @@ export default function App() {
     }
   }
 
+  // One row per (user, module). Retaking a module overwrites the previous result.
   async function dbSaveCompletion(userId, moduleId, rec) {
     await dbWrite(sb.from("training_completions").upsert({
       user_id: userId, module_id: moduleId,
@@ -706,6 +827,7 @@ export default function App() {
     }, { onConflict: "user_id,module_id" }), "training completion");
   }
 
+  // Upserts one incident (and uploads any new photos first). Called for EVERY incident by the auto-sync effect.
   async function dbSaveIncident(inc) {
     // Photos arrive from the mobile app as data URLs. Push them to Storage and
     // store the resulting URLs — a data URL in the row would bloat every read.
@@ -716,6 +838,15 @@ export default function App() {
     if (photos.length !== prev.length || photos.some((p, i) => p !== prev[i])) {
       setIncidents(list => list.map(i => i.id === inc.id ? { ...i, photos } : i));
     }
+    // ⚠ ONLY THE COLUMNS LISTED BELOW ARE PERSISTED. The full incident form (formToInc.js)
+    // also sets time, injured person details (personName/Dob/Address/Postcode),
+    // witness1/2, firstAidProvided/Details/By, postIncidentOutcome, immediateMeasures,
+    // correctiveActions/By, equipmentId, plus triaged from other screens.
+    // (quickReport + urgency ARE persisted — columns quick_report / urgency,
+    //  see quick_report_columns.sql.) The others live in memory only and are LOST on reload, because
+    // neither this upsert nor loadAll() maps them. Fix: add matching columns (or a
+    // single jsonb `details` column) to the incidents table and map them here AND in
+    // the "Incidents" block of loadAll().
     await dbWrite(sb.from("incidents").upsert({
       id: inc.id, date: inc.date, type: inc.type, accident_code: inc.accidentCode,
       number_code: inc.numberCode, location: inc.location, reported_by: inc.reportedBy,
@@ -725,6 +856,8 @@ export default function App() {
       riddor_reported_date: inc.riddorReportedDate||null,
       hse_reference: inc.hseReference||null,
       riddor_reported_by: inc.riddorReportedBy||null,
+      quick_report: !!inc.quickReport,
+      urgency: inc.urgency||null,
     }, { onConflict: "id" }), "incident", { alertOnError: true });
   }
 
@@ -732,6 +865,7 @@ export default function App() {
     await dbWrite(sb.from("incidents").delete().eq("id", id), "incident delete");
   }
 
+  // Investigations are keyed by incident id; the whole investigation is one JSON `data` blob.
   async function dbSaveInvestigation(incidentId, data) {
     await dbWrite(sb.from("investigations").upsert({ incident_id: incidentId, data }, { onConflict: "incident_id" }), "investigation");
   }
@@ -758,11 +892,16 @@ export default function App() {
     await dbWrite(sb.from("doc_acknowledgements").upsert({ user_id: String(userId), doc_id: String(docId), date }, { onConflict: "user_id,doc_id" }), "document acknowledgement");
   }
 
+  // Replaces the full list of staff a document is assigned to (delete-then-insert).
   async function dbSaveDocAssignments(docId, userIds) {
     await dbWrite(sb.from("doc_assignments").delete().eq("doc_id", String(docId)), "doc assignments clear");
     if (userIds.length) await dbWrite(sb.from("doc_assignments").insert(userIds.map(uid => ({ doc_id: String(docId), user_id: String(uid) }))), "doc assignments");
   }
 
+  // Saves document metadata, uploading the file first if one is supplied.
+  // Storage path is doc_<id>_<sanitisedFileName> in the "documents" bucket —
+  // dbDeleteDoc rebuilds the same path to delete it, so keep the two in step.
+  // NOTE: mutates `doc.fileUrl` on the object passed in.
   async function dbSaveDoc(doc, file) {
     // Upload raw file to Storage bucket — flat path, no subfolders
     if (file) {
@@ -781,6 +920,7 @@ export default function App() {
     }, { onConflict: "id" }), "document", { alertOnError: true });
   }
 
+  // Removes the file, the document row, and its assignment + acknowledgement rows.
   async function dbDeleteDoc(id, fileName) {
     if (fileName) {
       const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -791,6 +931,8 @@ export default function App() {
     await dbWrite(sb.from("doc_acknowledgements").delete().eq("doc_id", id), "doc acknowledgements delete");
   }
 
+  // Rewrites ALL of a user's DSE reports; report_idx = position in the array (so order matters —
+  // admin responses reference reports by this index).
   async function dbSaveDseReport(userId, reports) {
     await dbWrite(sb.from("dse_reports").delete().eq("user_id", userId), "DSE reports clear");
     if (reports.length) {
@@ -809,6 +951,7 @@ export default function App() {
     await dbWrite(sb.from("last_logins").upsert({ user_id: String(userId), last_login: ts }, { onConflict: "user_id" }), "last login");
   }
 
+  // Accepts either a plain password or an existing 64-char SHA-256 hash and always stores the hash.
   async function dbSavePassword(userId, password) {
     // Always store hashed — hash it here if it's not already a 64-char hex hash
     const isAlreadyHashed = /^[0-9a-f]{64}$/.test(password);
@@ -816,6 +959,7 @@ export default function App() {
     await dbWrite(sb.from("user_passwords").upsert({ user_id: String(userId), password: hashed }, { onConflict: "user_id" }), "password", { alertOnError: true });
   }
 
+  // user_profiles.data holds per-user UI preferences ({theme, emojiMode}). Merge, don't overwrite.
   async function dbSaveTheme(userId, themeKey) {
     const sid = String(userId);
     const profiles = Array.isArray(window.__userProfiles) ? window.__userProfiles : [];
@@ -858,6 +1002,9 @@ export default function App() {
       };
     }), [permits, user]);
 
+  // useMemo recreates this object only when the listed dependencies change, so the
+  // closures inside always see current state. If you add a function that reads
+  // another piece of state, ADD THAT STATE TO THE DEPENDENCY LIST at the bottom.
   // ── Mobile write surface ────────────────────────────────────────────────────
   // Everything src/mobile is allowed to do to the database, in one object.
   // Real writes go to the existing db* functions; the optimistic* callbacks
@@ -964,6 +1111,7 @@ export default function App() {
     },
   }), [dseReports, incidents, permits, investigations, user]);
 
+  // Same merge pattern as dbSaveTheme, for the emoji on/off preference.
   async function dbSaveEmojiMode(userId, enabled) {    const sid = String(userId);
     const profiles = Array.isArray(window.__userProfiles) ? window.__userProfiles : [];
     const existing = profiles.find(r => String(r.user_id) === sid);
@@ -973,6 +1121,7 @@ export default function App() {
     await dbWrite(sb.from("user_profiles").upsert({ user_id: sid, data: merged }, { onConflict: "user_id" }), "emoji mode preference");
   }
 
+  // users table: { id: TEXT, data: JSON user object }. `user` here shadows the logged-in user — it's the record being saved.
   async function dbSaveUser(user) {
     await dbWrite(sb.from("users").upsert({ id: String(user.id), data: user }, { onConflict: "id" }), "user", { alertOnError: true });
   }
@@ -981,6 +1130,8 @@ export default function App() {
     await dbWrite(sb.from("users").delete().eq("id", String(userId)), "user delete", { alertOnError: true });
   }
 
+  // ⚠ Writes the WHOLE user object into user_profiles.data — this overwrites any saved
+  // theme/emojiMode for that user. Only called on create/edit of staff records.
   async function dbSaveUserProfile(user) {
     await dbWrite(sb.from("user_profiles").upsert({ user_id: String(user.id), data: user }, { onConflict: "user_id" }), "user profile");
   }
@@ -989,6 +1140,7 @@ export default function App() {
     await dbWrite(sb.from("user_profiles").delete().eq("user_id", String(userId)), "user profile delete");
   }
 
+  // Contractor data is stored as JSON blobs keyed by contractor id (company, inductions, certs, visits).
   async function dbSaveContractor(c) { await dbWrite(sb.from("contractors").upsert({id:c.id,data:c},{onConflict:"id"}), "contractor"); }
   async function dbDeleteContractor(id) { await dbWrite(sb.from("contractors").delete().eq("id",id), "contractor delete"); }
   async function dbSaveContractorInductions(cid,data) { await dbWrite(sb.from("contractor_inductions").upsert({contractor_id:cid,data},{onConflict:"contractor_id"}), "contractor inductions"); }
@@ -1006,6 +1158,7 @@ export default function App() {
     await dbWrite(sb.from("risk_assessments").upsert({ id: ra.id, data: ra }, { onConflict: "id" }), "risk assessment", { alertOnError: true });
   }
 
+  // Insert-only log of failed quiz attempts (shown to admins for follow-up).
   async function dbSaveQuizFailure(record) {
     await dbWrite(sb.from("quiz_failures").insert({ data: record }), "quiz failure record");
   }
@@ -1026,6 +1179,7 @@ export default function App() {
     await dbWrite(sb.from("custom_modules").delete().eq("id", id), "module delete");
   }
 
+  // Admin "Duplicate" action on the Modules tab.
   function duplicateModule(m) {
     // Deep clone via JSON round-trip — module data (slides, quiz, image/video URLs) is plain serializable data.
     const cloned = JSON.parse(JSON.stringify(m));
@@ -1076,6 +1230,8 @@ export default function App() {
     await dbWrite(sb.from("machine_completions").delete().match({ user_id: String(userId), machine_id: String(machineId) }), "machine competence delete", { alertOnError: true });
   }
 
+  // UPSERT-AND-PRUNE (the preferred pattern): upsert everything in state, then read the ids
+  // in the table and delete any that are no longer in state.
   async function dbSaveEquipment(items) {
     // Upsert-and-prune instead of delete-everything-then-reinsert: only
     // the items that actually changed get rewritten, and only items that
@@ -1102,10 +1258,17 @@ export default function App() {
     }
   }
 
+  // Whole first aid register saved as one JSON document (row id "singleton").
   async function dbSaveFirstAidData(data) {
     await dbWrite(sb.from("first_aid_register").upsert({ id: "singleton", data }, { onConflict: "id" }), "first aid register");
   }
 
+  // Saves the six fire-safety lists to their six tables using upsert-and-prune.
+  // Transient fields are stripped before saving: `_fileObj` (a browser File object,
+  // not serialisable) and, for FRA reviews, the base64 `fileData` (the file itself
+  // lives in the "fire-safety" storage bucket instead).
+  // NOTE: deleteRemoved() skips when a list is EMPTY, so deleting the very last
+  // item of a list will not remove it from the DB.
   async function dbSaveFireSafety(fs) {
     const upsertTable = async (table, items) => {
       if (!items || !items.length) return;
@@ -1137,6 +1300,7 @@ export default function App() {
     await sync("fire_fra_reviews",   fs.fraReviews    || []);
   }
 
+  // Fire Risk Assessment PDF upload → returns the public URL, or null on failure.
   async function dbUploadFraDocument(reviewId, file, fileName) {
     const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
     const path = `fra_${reviewId}_${safeName}`;
@@ -1150,6 +1314,8 @@ export default function App() {
     await dbWrite(sb.storage.remove("fire-safety", [`fra_${reviewId}_${safeName}`]), "FRA document delete");
   }
 
+  // ⚠⚠ EARLY RETURN — no React hooks may be declared below this line. ⚠⚠
+  // (Uses the default dark tokens `Z` because the user's theme isn't known yet.)
   // ── Show loading screen until Supabase data is ready ────────────────────────
   if (!dbReady) return (
     <div style={{minHeight:"100vh",background:Z.bg,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Barlow','Trebuchet MS',system-ui,sans-serif",flexDirection:"column",gap:20}}>
@@ -1162,6 +1328,11 @@ export default function App() {
     </div>
   );
 
+  /**
+   * Checks the email/password against allUsers + passwords (all client-side).
+   * Order: lockout check → user exists → password hash matches → not a leaver →
+   * record last login → restore saved theme/emoji prefs → route to admin/staff view.
+   */
   async function login() {
     const emailKey = email.toLowerCase().trim();
 
@@ -1187,6 +1358,10 @@ export default function App() {
 
     const storedHash = passwords[u.id] || DEFAULT_HASH;
     const enteredHash = await hashPassword(pass);
+    // Accepts the hash OR a legacy plain-text stored password.
+    // ⚠ Side effect: typing the stored hash itself also logs in. Since hashes are readable
+    // with the public anon key, removing `|| pass === storedHash` (after confirming no
+    // plain-text passwords remain in user_passwords) would close that gap.
     const isMatch = enteredHash === storedHash || pass === storedHash;
 
     if (!isMatch) {
@@ -1231,10 +1406,16 @@ export default function App() {
     setUser(u); setView(u.role==="admin"?"admin":"staff"); setErr("");
   }
 
+  // Clears the session in memory only (there is no server session to end).
   function logout() { setUser(null); setView("login"); setMod(null); }
 
+  // Opens a module in the player and resets all per-attempt state.
   function startMod(m) { setMod(m); setStep(0); setQans({}); setQsub(false); setShowCelebration(false); setHotspotComplete({}); }
 
+  // Scores the quiz. PASS MARK = 70% — this number is repeated in several places in
+  // the module player UI (and in mobile/screens/ModulePlayer.jsx). If you change it,
+  // search for "70" in both files and update them together.
+  // A pass creates a certificate id "ZSL-XXXXXXXX"; a fail is logged to quiz_failures.
   function submitQuiz() {
     let score=0;
     mod.quiz.forEach((q,i)=>{ if(qans[i]===q.answer) score++; });
@@ -1265,6 +1446,7 @@ export default function App() {
   const totalSlides = mod ? mod.content.length : 0;
   const quizStep = totalSlides+1;
 
+  // Style factory for the top-nav tab buttons (active tab gets a coloured underline).
   // ── Shared nav styles ──
   const navBtn = (active, col=T.accentLt) => ({
     padding:"16px 16px", background:"none", border:"none",
@@ -1278,6 +1460,7 @@ export default function App() {
   // ══════════════════════════════════════════════════════════════════════════
   // LOGIN
   // ══════════════════════════════════════════════════════════════════════════
+  // The login screen deliberately ignores the theme (always dark navy) because no user is known yet.
   if (view==="login") return (
     <div style={{minHeight:"100vh",background:"#060d2e",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:font,padding:20,position:"relative",overflow:"hidden"}}>
       {/* background grid — always dark navy, never themed */}
@@ -1324,6 +1507,7 @@ export default function App() {
   // ══════════════════════════════════════════════════════════════════════════
   // MOBILE PWA
   // ══════════════════════════════════════════════════════════════════════════
+  // isPhone = window ≤700px wide. `forceDesktop` is set by "Use the full portal" in the mobile More tab.
   // Sits above every desktop view so a phone never falls through to the wide
   // layout. MobileApp is a view over the state below — it owns no domain data
   // and never touches Supabase directly, only the handlers passed in as `db`.
@@ -1356,6 +1540,7 @@ export default function App() {
   // ══════════════════════════════════════════════════════════════════════════
   // DSE ASSESSMENT
   // ══════════════════════════════════════════════════════════════════════════
+  // Full-screen DSE wizard (domains/dse/DSEAssessment.jsx). Closing it resets the draft answers.
   if (dseActive && view==="staff") {
     return <DSEAssessment
       user={user}
@@ -1374,6 +1559,11 @@ export default function App() {
   // ══════════════════════════════════════════════════════════════════════════
   // MODULE PLAYER
   // ══════════════════════════════════════════════════════════════════════════
+  // Full-screen module player. Step numbering:
+  //   0 = intro card, 1..totalSlides = content slides, quizStep (= totalSlides+1) = quiz.
+  // Slides may contain: heading, images[] (or legacy single `image`), video, text
+  // (plain text or sanitised HTML), and hotspots (click-the-hazard activity).
+  // Hotspot slides block "Next" until HotspotActivity reports completion.
   if (mod && view==="staff") {
     const isIntro = step===0;
     const isQuiz  = step===quizStep;
@@ -1413,6 +1603,7 @@ export default function App() {
                 100% { background-position:  200% center; }
               }
             `}</style>
+            {/* NB: Math.random() runs on every render, so confetti re-shuffles if the component re-renders. Purely cosmetic. */}
             {/* Confetti pieces */}
             {Array.from({length:60}).map((_,i)=>{
               const colors=["#f59e0b","#ffffff","#0d1f5c","#2563eb","#10b981","#f97316","#a78bfa"];
@@ -1559,6 +1750,7 @@ export default function App() {
                     }
                   </div>
                 )}
+                {/* Rich (HTML) text is ALWAYS passed through sanitizeHtml before rendering. Plain text is split on ". " and lines like "Step 2: ..." become numbered badges. */}
                 {slide.text && (
                   isHtmlContent(slide.text) ? (
                     <div className="rte-content" style={{fontSize:15,lineHeight:1.9,color:T.slate}} dangerouslySetInnerHTML={{__html: sanitizeHtml(slide.text)}}/>
@@ -1692,6 +1884,7 @@ export default function App() {
           )}
         </div>
       </div>
+      {/* Click the backdrop to close; click the image to toggle 1:1 zoom (scrollable). */}
       {/* Lightbox overlay */}
       {lightboxSrc && (
         <div
@@ -1722,6 +1915,15 @@ export default function App() {
       </>
     );
   }
+  // Certificate viewer / print. Opened by setting `cert` = {module, score, date, certId}.
+  // Printing opens a new window with the certificate's HTML and calls window.print()
+  // (the app-wide pattern for PDF output — the user chooses "Save as PDF").
+  // ⚠ This is a component defined INSIDE App, and it calls useRef inside an IIFE.
+  //   It works only because a new CertModal function is created every render (so
+  //   React remounts it each time). If you touch this, move it to its own
+  //   module-level component (e.g. domains/training/CertificateModal.jsx) and
+  //   pass `cert`, `user` and `onClose` as props.
+  // If certId is missing a random one is shown — it is NOT saved anywhere.
   const CertModal = () => cert && (() => {
     const certRef = React.useRef(null);
     const certId = cert.certId || "ZSL-"+Math.random().toString(36).slice(2,8).toUpperCase();
@@ -1903,6 +2105,8 @@ export default function App() {
   // ══════════════════════════════════════════════════════════════════════════
   // STAFF PORTAL
   // ══════════════════════════════════════════════════════════════════════════
+  // Everything computed here is derived from state on each render (no extra state).
+  // `stab` selects the tab. Admins can also reach this view via "My Training".
   if (view==="staff" && user) {
     const myIds = assigns[String(user.id)]||[];
     const myMods = allModules.filter(m=>myIds.includes(m.id));
@@ -1943,6 +2147,8 @@ export default function App() {
     // Documents needing acknowledgement
     const myDocAssigns = Object.entries(docAssignments||{}).filter(([,uids])=>uids.includes(String(user.id))).map(([did])=>did);
     const unreadDocs = myDocAssigns.filter(did=>!(docAcknowledgements[String(user.id)]||{})[did]);
+    // Compliance % = good items / all items (assigned modules + uploaded ext. certs + 1 for DSE).
+    // Bands: 100% green, ≥70% amber, otherwise red.
     // Overall health score — includes DSE as one item
     const totalItems = myMods.length + myCertTypes.length + 1; // +1 for DSE
     const goodItems  = upToDate.length + myCertTypes.filter(ct=>!expiredCerts.find(e=>e.id===ct.id)&&!expiringCerts.find(e=>e.id===ct.id)).length + (dseCompleted&&!dseExpired?1:0);
@@ -1972,6 +2178,7 @@ export default function App() {
             {mobileMenuOpen?"✕":"☰"}
           </button>
           <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:isMobile?6:10}}>
+            {/* Staff notification list — rebuilt every render from current state. `nav.tab` is a staff tab key. */}
             {(()=>{
               const notifications = [];
               const myIds = assigns[user.id]||[];
@@ -1997,6 +2204,7 @@ export default function App() {
                 const openIssues=latestDse.issues.filter((_,ii)=>!(adminResponses[user.id]||{})[`${ri}_${ii}`]?.resolved&&latestDse.issueCount>0);
                 if(openIssues.length) notifications.push({type:"dse",urgent:false,title:`${openIssues.length} open DSE issue${openIssues.length!==1?"s":""}`,detail:"Check My DSE for manager responses",nav:{tab:"dse"}});
               }
+              // NB: action owners are matched by NAME (a.owner===user.name), not id — renaming a user orphans their actions.
               // Investigation corrective actions assigned to this user
               const myActions = Object.values(investigations).flatMap(inv=>
                 (inv.actions||[]).filter(a=>a.owner===user.name&&a.status!=="complete"&&a.status!=="closed")
@@ -2579,6 +2787,10 @@ export default function App() {
             </React.Suspense>
           )}
         </div>
+        {/* Global hover/focus CSS for this portal (same block in the staff and admin views — keep in sync).
+            ⚠ Attribute selectors like [style*="cursor:pointer"] / [style*="borderBottom"] rely on
+            the text of the inline style attribute. React writes styles as "cursor: pointer;" and
+            "border-bottom: ...", so those particular rules probably never match. Test before relying on them. */}
         <style>{`
           @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.8)}}
 
@@ -2775,11 +2987,16 @@ export default function App() {
   // ══════════════════════════════════════════════════════════════════════════
   // ADMIN PORTAL
   // ══════════════════════════════════════════════════════════════════════════
+  // Admin portal. `atab` selects the tab. Top nav groups several tabs into dropdowns
+  // (Training: assign/modules/create/reports, M&E: machinery/equipment,
+  // Contractors: contractors/permits, Documents: documents/coshh).
   if (view==="admin") {
+    // ⚠ Strict !== 1: if the primary admin's id is stored as the STRING "1" it will not be excluded.
     const staff = allUsers.filter(u=>u.id!==1); // show all users except the primary admin account
     const tUser = allUsers.find(u=>String(u.id)===String(target));
     const tAssigned = assigns[String(target)]||[];
 
+    // Assign/unassign one module for one user (saves just that user's list).
     const toggleAssign = (uid, mid) => {
       const suid = String(uid);
       setAssigns(p=>{
@@ -2791,6 +3008,8 @@ export default function App() {
       });
     };
 
+    // Manual "Add staff" form. id = Date.now() (a large number; the users table stores it as TEXT).
+    // New users log in with the default password (pass123) until changed.
     const addStaff = () => {
       if (!newName.trim()) { setAddErr("Name is required."); return; }
       if (!newEmail.trim() || !newEmail.includes("@")) { setAddErr("Valid email is required."); return; }
@@ -2803,6 +3022,8 @@ export default function App() {
       setNewName(""); setNewEmail(""); setNewJobTitle(""); setNewManager(""); setNewRole("staff"); setNewIsWarehouse(false); setNewDepartment(""); setNewStatus("active"); setAddErr(""); setShowAddStaff(false);
     };
 
+    // Deletes the user + profile rows. NOTE: training/doc/DSE rows for that user are
+    // removed from local state only and remain in their Supabase tables.
     const removeStaff = (uid) => {
       const u = allUsers.find(x=>x.id===uid);
       if (!window.confirm(`Are you sure you want to remove ${u?.name||"this staff member"}?\n\nThis will permanently delete their account, training assignments, and all associated records. This cannot be undone.`)) return;
@@ -2880,6 +3101,9 @@ export default function App() {
           <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:isMobile?6:10}}>
             {isMobile && (<button onClick={()=>setMobileMenuOpen(m=>!m)} style={{background:"none",border:`1px solid ${T.borderMd}`,borderRadius:8,color:T.white,fontSize:20,cursor:"pointer",padding:"4px 10px",lineHeight:1,fontFamily:font,flexShrink:0}}>{mobileMenuOpen?"✕":"☰"}</button>)}
             {(()=>{
+              // Admin notification list (same shape as the staff one; nav.tab = admin tab key).
+              // Thresholds used: training expiring ≤60d, RA/doc review ≤30d, drill >365d,
+              // fire warden cert default 36 months.
               const notifications = [];
               // Staff with overdue mandatory modules
               const overdueStaff = staff.filter(u=>{
@@ -3030,6 +3254,7 @@ export default function App() {
 
         <div style={{maxWidth:1100,margin:"0 auto",padding:isMobile?"16px 12px":"36px 28px"}}>
 
+          {/* ── ADMIN DASHBOARD: KPI cards (drag-reorderable, saved per admin in dashboard_layout) + summary lists ── */}
           {atab==="dashboard" && (() => {
             const today = new Date().toISOString().slice(0,10);
 
@@ -3189,6 +3414,8 @@ export default function App() {
                       const allFaAiders = [...faAiders, ...faCertAiders.filter(c=>!manualIds.has(String(c.staffId||c.id.replace("cert_",""))))];
                       const validAiders = allFaAiders.filter(a=>{ if(!a.expiryDate) return false; return Math.ceil((new Date(a.expiryDate)-new Date())/86400000)>=0; });
                       const expiredCount = allFaAiders.length - validAiders.length;
+                      // A "gap" = a zone/shift combination with fewer valid first aiders than minPerShift.
+                      // Keep in step with the equivalent logic in FirstAidRegisterTab.jsx.
                       // Count coverage gaps
                       const SHIFTS3 = ["Day Shift (08:30–16:00)","Late Shift (16:00–02:00)","Office Hours (08:30–17:30)"];
                       let gapCount = 0;
@@ -3211,6 +3438,8 @@ export default function App() {
                     })() },
                   ];
 
+                  // Saved order is filtered against current card ids, and any NEW cards are appended — so
+                  // adding/removing a card in statCardDefs never breaks a saved layout.
                   const defaultOrder = statCardDefs.map(c => c.id);
                   const savedOrder = (dashboardLayouts[String(user.id)] || []).filter(id => defaultOrder.includes(id));
                   const order = [...savedOrder, ...defaultOrder.filter(id => !savedOrder.includes(id))];
@@ -3317,6 +3546,7 @@ export default function App() {
             );
           })()}
 
+          {/* ── STAFF MANAGEMENT: bulk password reset, CSV import, add-staff form, filterable staff table ── */}
           {atab==="users" && (<div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
             <div>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
@@ -3427,6 +3657,8 @@ export default function App() {
                     <input type="file" accept=".csv,text/csv" style={{display:"none"}} onChange={e=>{
                       const file=e.target.files[0]; if(!file) return;
                       setCsvError(""); setCsvPreview([]);
+                      // Simple CSV parser: splits on commas, so a quoted value containing a comma
+                      // (e.g. "Smith, John") will be mis-split. Use a CSV library if that's needed.
                       const reader=new FileReader();
                       reader.onload=ev=>{
                         const lines=ev.target.result.replace(/\r/g,"").split("\n").filter(l=>l.trim());
@@ -3469,6 +3701,7 @@ export default function App() {
                         const skipped=csvPreview.length-toAdd.length;
                         if(toAdd.length===0){setCsvError("All emails already exist in the system.");return;}
                         const hashed=await hashPassword("pass123");
+                        // Imported users get sequential numeric ids after the current max id.
                         const maxId=Math.max(0,...allUsers.map(u=>u.id));
                         const newUsers=toAdd.map((r,i)=>({id:maxId+i+1,name:r.name.trim(),email:r.email.trim().toLowerCase(),jobTitle:r.jobTitle,manager:r.manager,department:r.department,role:r.role==="admin"?"admin":"staff",isWarehouseWorker:false,status:"active",password:hashed}));
                         newUsers.forEach(u=>{
@@ -3701,6 +3934,7 @@ export default function App() {
             </div>
           </div>)}
 
+          {/* ── ASSIGN TRAINING: pick individual / team / warehouse / all, then toggle modules on/off ── */}
           {atab==="assign" && (
             <div>
               <h2 style={{fontSize:22,fontWeight:900,letterSpacing:-.5,marginBottom:6}}>Assign Training <HelpTip dark={false} text="Tick modules to assign them to staff. Assigned modules appear on the staff member's dashboard as required training. Use bulk assignment to push modules to an entire team at once."/></h2>
@@ -3897,6 +4131,7 @@ export default function App() {
             </React.Suspense>
           )}
 
+          {/* ── CREATE/EDIT MODULE: editing a built-in module saves it as an _override in custom_modules ── */}
           {atab==="create" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
             <LazyCreateModuleTab
@@ -3926,6 +4161,7 @@ export default function App() {
             </React.Suspense>
           )}
 
+          {/* ── MODULE LIBRARY: preview, edit, duplicate, hide/unhide, delete (custom) or reset (override) ── */}
           {atab==="modules" && (
             <div>
               <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",flexWrap:"wrap",gap:12,marginBottom:24}}>
@@ -4012,6 +4248,7 @@ export default function App() {
             </div>
           )}
 
+          {/* ── DOCUMENT LIBRARY: upload (drag-drop or picker), folder filter, bulk assign, read-tracking ── */}
           {atab==="documents" && (
             <div>
               <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",flexWrap:"wrap",gap:12,marginBottom:6}}>
@@ -4189,6 +4426,7 @@ export default function App() {
             </div>
           )}
 
+          {/* ── Remaining admin tabs are thin wrappers around lazy-loaded domain components ── */}
           {atab==="coshh" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
             <LazyCoshhTab Z={T} font={font} msdsFiles={msdsFiles} setMsdsFiles={setMsdsFiles} customChemicals={customChemicals} setCustomChemicals={setCustomChemicals}/>
@@ -4277,6 +4515,10 @@ export default function App() {
             </React.Suspense>
           )}
         </div>
+        {/* Global hover/focus CSS for this portal (same block in the staff and admin views — keep in sync).
+            ⚠ Attribute selectors like [style*="cursor:pointer"] / [style*="borderBottom"] rely on
+            the text of the inline style attribute. React writes styles as "cursor: pointer;" and
+            "border-bottom: ...", so those particular rules probably never match. Test before relying on them. */}
         <style>{`
           @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.8)}}
 

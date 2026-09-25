@@ -10,6 +10,25 @@ import { IncidentTracker } from "./IncidentTracker";
 import { IncidentPhotos } from "../../shared/IncidentPhotos";
 import { INCIDENT_TYPES, ACCIDENT_CODES, NUMBER_CODES } from "../../data/seedIncidents";
 
+/**
+ * AdminIncidentTab — admin incident register.
+ *
+ * Features: filter/search list, stacked monthly chart (IncidentChart), expandable
+ * detail per incident, inline edit (IncidentForm), open/close, delete with
+ * confirmation, RIDDOR "reported to HSE" tracking (date / HSE ref / by whom),
+ * link to the investigation, Excel export, and a printable "Accident Book" view.
+ *
+ * Props (all from App.jsx): incidents/setIncidents, dbDeleteIncident, staff,
+ * investigations/setInvestigations, onOpenInvestigation, equipment/setEquipment,
+ * focusIncidentId/setFocusIncidentId (deep-link from the dashboard),
+ * showAdminReportForm/setShowAdminReportForm (open the "new report" form), Z, font.
+ *
+ * Saving: changes go into `incidents` state and are persisted by App.jsx's
+ * auto-sync effect (see the dbSaveIncident warning about unsaved fields).
+ */
+// Urgency chosen on a quick hazard report (QuickReportModal / mobile ReportHazard).
+const QUICK_URGENCY_LABEL = { low:"Safe to leave", medium:"Needs attention", high:"STOP WORK" };
+
 function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, investigations, setInvestigations, onOpenInvestigation, equipment, setEquipment, focusIncidentId, setFocusIncidentId, showAdminReportForm, setShowAdminReportForm, Z, font }) {
   const isMobile = useWindowWidth() <= 1024;
   const [filterType, setFilterType]     = useState("all");
@@ -17,6 +36,8 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
   const [filterRiddor, setFilterRiddor] = useState(false);
   const [search, setSearch]             = useState("");
   const [expandedId, setExpandedId] = useState(focusIncidentId||null);
+  // Deep-link: expand the requested incident and scroll it into view (retried a few
+  // times because the lazy tab may still be rendering), then clear the focus id.
   // Handle focus from dashboard — runs on mount AND on prop change
   React.useEffect(()=>{
     const fid = focusIncidentId;
@@ -43,6 +64,7 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
   const showReportForm = showAdminReportForm;
   const setShowReportForm = setShowAdminReportForm;
 
+  // Hard delete from state + DB. Any linked investigation record is not removed.
   function deleteIncident(id) {
     setIncidents(p=>p.filter(i=>i.id!==id));
     dbDeleteIncident&&dbDeleteIncident(id);
@@ -66,6 +88,7 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
 
   function setEF(k,v){ setEditForm(p=>({...p,[k]:v})); setEditErr(""); setEditSaved(false); }
 
+  // Same behaviour as IncidentTracker.applyEquipmentSideEffects — keep the two copies in step.
   function applyEquipmentSideEffects(f) {
     if (!f.equipmentInvolved || !f.equipmentId) return;
     const today = new Date().toISOString().slice(0,10);
@@ -99,6 +122,10 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
     setTimeout(()=>{ setEditingId(null); setEditForm(null); setEditSaved(false); }, 1200);
   }
 
+  // Excel export (2 sheets: Incident Log + Monthly Summary for the last 3 years).
+  // ⚠ SheetJS is loaded on demand from cdnjs.cloudflare.com, so this needs internet
+  // access to that CDN; if it's blocked nothing happens (no onerror handler).
+  // Installing the `xlsx` npm package and importing it would remove that dependency.
   function exportIncidentReport() {
     const today = new Date().toISOString().slice(0,10);
 
@@ -235,6 +262,8 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
     document.head.appendChild(script);
   }
 
+  // Printable Accident Book (landscape) for the chosen date range — mirrors the
+  // information of the HSE BI 510 accident book. Uses the window.print() pattern.
   function printAccidentBook(bookIncidents) {
     const today = new Date().toLocaleDateString("en-GB");
     const rows = bookIncidents.map((inc, idx) => {
@@ -334,6 +363,8 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
 
   const typeInfo = (id) => INCIDENT_TYPES.find(t=>t.id===id)||INCIDENT_TYPES[0];
 
+  // Applies the type / open-closed / RIDDOR-only / free-text filters (search covers
+  // description, location and reporter name).
   const filtered = incidents.filter(inc=>{
     if (filterType!=="all" && inc.type!==filterType) return false;
     if (filterStatus==="open" && inc.closed) return false;
@@ -562,6 +593,10 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
                     <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:4,flexWrap:"wrap"}}>
                       <span style={{fontSize:12,fontWeight:800,color:ti.color,background:ti.bg,padding:"2px 9px",borderRadius:99}}>{ti.label}</span>
                       {inc.riddor && <span style={{fontSize:10,fontWeight:700,color:"#f87171",background:"rgba(239,68,68,0.12)",padding:"2px 8px",borderRadius:6,border:"1px solid rgba(239,68,68,0.3)"}}>RIDDOR</span>}
+                      {inc.quickReport && (() => { const qc = inc.urgency==="high" ? Z.red : Z.amber; return (
+                        <span style={{fontSize:10,fontWeight:700,color:qc,background:`${qc}1f`,padding:"2px 8px",borderRadius:6,border:`1px solid ${qc}55`}}>
+                          ⚡ Quick{QUICK_URGENCY_LABEL[inc.urgency] ? ` · ${QUICK_URGENCY_LABEL[inc.urgency]}` : ""}
+                        </span>); })()}
                       <span style={{fontSize:11,color:Z.muted}}>📍 {inc.location}</span>
                     </div>
                     <p style={{margin:0,fontSize:13,color:Z.slate,lineHeight:1.4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:isOpen?"normal":"nowrap"}}>{inc.description}</p>
@@ -719,6 +754,8 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
                       );
                     })()}
 
+                    {/* RIDDOR 2013: reportable incidents must be notified to HSE (most within 10 days; over-7-day injuries within 15).
+                        Marking as reported stores date, HSE reference and reporter on the incident. */}
                     {/* RIDDOR notice */}
                     {inc.riddor && (
                       <div style={{marginBottom:12,padding:"12px 16px",background:inc.riddorReported?"rgba(16,185,129,0.08)":"rgba(239,68,68,0.08)",borderRadius:10,border:`1px solid ${inc.riddorReported?"rgba(16,185,129,0.25)":"rgba(239,68,68,0.25)"}`}}>

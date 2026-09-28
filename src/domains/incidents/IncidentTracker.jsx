@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useWindowWidth } from "../../shared/hooks";
 import { HelpTip } from "../../shared/HelpTip";
 import { IncidentForm } from "./IncidentForm";
@@ -6,8 +6,18 @@ import { incToForm } from "./incToForm";
 import { formToInc } from "./formToInc";
 import { INCIDENT_TYPES, ACCIDENT_CODES, NUMBER_CODES } from "../../data/seedIncidents";
 import { IncidentPhotos } from "../../shared/IncidentPhotos";
+import { isIncompleteQuickReport, myIncompleteQuickReports, isQuickReportOverdue, quickReportDueLabel } from "./quickReportStatus";
 
-function IncidentTracker({ user, incidents, setIncidents, equipment, setEquipment, Z, font }) {
+/**
+ * IncidentTracker — the STAFF "Report Incident" tab.
+ * Lists incidents the logged-in user reported (matched on reportedBy === user id),
+ * and opens IncidentForm to create or edit one. Saving updates App.jsx state;
+ * persistence happens via App.jsx's [incidents] auto-sync effect (dbSaveIncident).
+ *
+ * Props: user, incidents/setIncidents, equipment/setEquipment (for the
+ *        "equipment involved" section), Z, font.
+ */
+function IncidentTracker({ user, incidents, setIncidents, equipment, setEquipment, autoEditId, onAutoEditDone, Z, font }) {
   const isMobile = useWindowWidth() <= 1024;
   const BLANK_FORM = {
     type:"near_miss", date:new Date().toISOString().slice(0,10), time:"",
@@ -29,6 +39,9 @@ function IncidentTracker({ user, incidents, setIncidents, equipment, setEquipmen
   const [expandedId, setExpandedId] = useState(null);
 
   const myIncidents = incidents.filter(i=>String(i.reportedBy)===String(user.id)).sort((a,b)=>b.date.localeCompare(a.date));
+  // Quick hazard reports this user still needs to complete (see quickReportStatus.js).
+  const toComplete = myIncompleteQuickReports(incidents, user.id);
+  const editingQuick = editingId ? isIncompleteQuickReport(incidents.find(i=>i.id===editingId)) : false;
 
   function setF(k,v){ setForm(p=>({...p,[k]:v})); setErr(""); setSaved(false); }
 
@@ -36,6 +49,17 @@ function IncidentTracker({ user, incidents, setIncidents, equipment, setEquipmen
   function openEdit(inc) { setForm(incToForm(inc, equipment||[])); setEditingId(inc.id); setSaved(false); setErr(""); setShowForm(true); setExpandedId(null); }
   function cancelForm() { setShowForm(false); setEditingId(null); setErr(""); setSaved(false); }
 
+  // Deep link from a reminder (dashboard, bell, My Actions, mobile): open that report's form.
+  useEffect(() => {
+    if (!autoEditId) return;
+    const inc = incidents.find(i=>String(i.id)===String(autoEditId));
+    if (inc) openEdit(inc);
+    if (onAutoEditDone) onAutoEditDone();
+  }, [autoEditId]); // eslint-disable-line
+
+  // If the report says equipment was involved: optionally mark it out of service
+  // (status "inactive") and/or add a defect entry tagged incidentLinked:true to that
+  // equipment's defect log. Saved via App.jsx's [equipment] auto-sync effect.
   function applyEquipmentSideEffects(f) {
     if (!f.equipmentInvolved || !f.equipmentId) return;
     const today = new Date().toISOString().slice(0,10);
@@ -58,6 +82,7 @@ function IncidentTracker({ user, incidents, setIncidents, equipment, setEquipmen
     }));
   }
 
+  // Minimum required fields for a report. Everything else is optional.
   function validate() {
     if (!form.location.trim()) { setErr("Location is required."); return false; }
     if (!form.description.trim()) { setErr("Description is required."); return false; }
@@ -66,6 +91,7 @@ function IncidentTracker({ user, incidents, setIncidents, equipment, setEquipmen
     return true;
   }
 
+  // New incident ids are "i<timestamp>". The success banner shows briefly, then the form closes.
   function submitNew() {
     if (!validate()) return;
     const newInc = { id:"i"+Date.now(), reportedBy:String(user.id), closed:false, ...formToInc(form, {}) };
@@ -101,6 +127,31 @@ function IncidentTracker({ user, incidents, setIncidents, equipment, setEquipmen
         )}
       </div>
 
+      {/* Reminder: quick hazard reports still needing the full form */}
+      {!showForm && toComplete.length>0 && (
+        <div style={{background:`${Z.amber}14`,border:`1px solid ${Z.amber}55`,borderRadius:14,padding:"16px 20px",marginBottom:20}}>
+          <div style={{fontWeight:800,fontSize:14,color:Z.amber,marginBottom:4}}>⚡ Finish your hazard report{toComplete.length!==1?"s":""}</div>
+          <div style={{fontSize:12,color:Z.muted,marginBottom:12}}>You raised {toComplete.length===1?"this":"these"} with the quick <b>Report a Hazard</b> button. Please add the incident codes and any other details so the H&S team has the full picture.</div>
+          <div style={{display:"grid",gap:8}}>
+            {toComplete.map(inc=>{ const late=isQuickReportOverdue(inc); return (
+              <div key={inc.id} style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",background:Z.overlay,border:`1px solid ${late?Z.red+"66":Z.borderMd}`,borderRadius:10,padding:"10px 14px"}}>
+                <div style={{flex:1,minWidth:200}}>
+                  <div style={{fontSize:13,fontWeight:700,color:Z.white,marginBottom:2}}>{inc.description}</div>
+                  <div style={{fontSize:11,color:Z.muted}}>📍 {inc.location} · reported {inc.date} · <span style={{color:late?Z.red:Z.amber,fontWeight:700}}>{quickReportDueLabel(inc)}</span></div>
+                </div>
+                <button onClick={()=>openEdit(inc)} style={{background:late?Z.red:Z.amber,color:"#fff",border:"none",borderRadius:8,padding:"7px 16px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font,whiteSpace:"nowrap"}}>Complete report →</button>
+              </div>
+            ); })}
+          </div>
+        </div>
+      )}
+
+      {showForm && editingQuick && (
+        <div style={{background:`${Z.amber}14`,border:`1px solid ${Z.amber}55`,borderRadius:10,padding:"10px 14px",marginBottom:12,fontSize:12,color:Z.slate}}>
+          ⚡ <b>Completing your quick hazard report.</b> Select the <b>Accident Code</b> and <b>Number Code</b>, add any other details you can, then save. The reminder clears once it's saved.
+        </div>
+      )}
+
       {showForm && (
         <IncidentForm form={form} setF={setF} err={err} saved={saved}
           onSubmit={editingId ? saveEdit : submitNew}
@@ -134,6 +185,7 @@ function IncidentTracker({ user, incidents, setIncidents, equipment, setEquipmen
                         <span style={{fontSize:11,color:Z.muted}}>📍 {inc.location}</span>
                         {inc.riddor && <span style={{fontSize:11,fontWeight:700,color:"#f87171",background:"rgba(239,68,68,0.1)",padding:"2px 8px",borderRadius:6,border:"1px solid rgba(239,68,68,0.3)"}}>RIDDOR</span>}
                         {inc.closed ? <span style={{fontSize:11,color:"#10b981",fontWeight:700}}>✓ Closed</span> : <span style={{fontSize:11,color:"#f59e0b",fontWeight:700}}>⏳ Open</span>}
+                        {isIncompleteQuickReport(inc) && <span style={{fontSize:11,fontWeight:700,color:Z.amber,background:`${Z.amber}1f`,padding:"2px 8px",borderRadius:6,border:`1px solid ${Z.amber}55`}}>⚡ Needs full details</span>}
                       </div>
                       <p style={{margin:"0 0 8px",fontSize:13,color:Z.slate,lineHeight:1.5}}>{inc.description}</p>
                       <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>

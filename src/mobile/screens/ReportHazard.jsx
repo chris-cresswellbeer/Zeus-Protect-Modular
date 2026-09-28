@@ -15,6 +15,10 @@ const URGENCY_OPTIONS = [
   { id: "high",   label: "STOP WORK — urgent", desc: "Immediate risk — escalate now",            icon: "🔴", color: "#ef4444", bg: "rgba(239,68,68,0.12)", border: "rgba(239,68,68,0.45)" },
 ];
 
+// Props: user, managerName (shown on the confirmation), suggestedLocation, online
+// (changes the confirmation wording), onSubmit(record), onDone, Z, font.
+// Photos are compressed on the phone (lib/photos.js) and uploaded when the incident is
+// saved (App.jsx dbSaveIncident → uploadPhotos).
 function ReportHazard({ user, managerName, suggestedLocation, online, onSubmit, onDone, Z, font }) {
   const [step, setStep] = React.useState(1);
   const [what, setWhat] = React.useState("");
@@ -278,6 +282,12 @@ function ReportHazard({ user, managerName, suggestedLocation, online, onSubmit, 
               : `It's stored on your phone and will reach ${managerName || "your H&S manager"} as soon as you have signal.`}
           </p>
           <div style={{
+            background: `${Z.amber}14`, border: `1px solid ${Z.amber}55`, borderRadius: 14,
+            padding: "11px 14px", marginBottom: 18, fontSize: 12.5, color: Z.slate, textAlign: "left", lineHeight: 1.5,
+          }}>
+            <b style={{ color: Z.amber }}>Next step:</b> finish the full incident report on a computer by the end of tomorrow. It stays on your Today screen until it&rsquo;s done.
+          </div>
+          <div style={{
             background: Z.overlay, border: `1px solid ${Z.borderMd}`, borderRadius: 15,
             padding: 15, textAlign: "left", marginBottom: 20,
           }}>
@@ -314,6 +324,8 @@ function SummaryRow({ label, value, color, Z }) {
 
 // Web Speech API where available; degrades to a disabled button rather than
 // pretending. Frontline staff use this with gloves on.
+// Dictation via the Web Speech API (Chrome/Android, Safari 14.1+). Greys out when
+// the browser doesn't support it. Audio is processed by the browser vendor's service.
 function VoiceButton({ onResult, Z, font }) {
   const Rec = typeof window !== "undefined"
     ? window.SpeechRecognition || window.webkitSpeechRecognition

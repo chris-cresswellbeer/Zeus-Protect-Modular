@@ -94,6 +94,7 @@ const LazyAdminIncidentTab = React.lazy(() => import("./domains/incidents/AdminI
 const LazyIncidentTracker = React.lazy(() => import("./domains/incidents/IncidentTracker").then(m => ({ default: m.IncidentTracker })));
 const LazyInvestigationTab = React.lazy(() => import("./domains/incidents/InvestigationTab").then(m => ({ default: m.InvestigationTab })));
 import { QuickReportModal } from "./domains/incidents/QuickReportModal";
+import { isIncompleteQuickReport, myIncompleteQuickReports, isQuickReportOverdue, quickReportDueLabel } from "./domains/incidents/quickReportStatus";
 const LazySiteInspectionsTab = React.lazy(() => import("./domains/inspections/SiteInspectionsTab").then(m => ({ default: m.SiteInspectionsTab })));
 const LazyAdminMachineryTab = React.lazy(() => import("./domains/machinery/AdminMachineryTab").then(m => ({ default: m.AdminMachineryTab })));
 const LazyMachineryCompetenceTab = React.lazy(() => import("./domains/machinery/MachineryCompetenceTab").then(m => ({ default: m.MachineryCompetenceTab })));
@@ -186,6 +187,7 @@ export default function App() {
   const [focusIncidentId, setFocusIncidentId] = useState(null);
   const [showAdminReportForm, setShowAdminReportForm] = useState(false);
   const [stab,    setStab]    = useState("dashboard");
+  const [quickEditId, setQuickEditId] = useState(null); // quick report to open in the full form (reminder deep link)
   const [cert,    setCert]    = useState(null);
   const [target,  setTarget]  = useState("1");
   const [docs,    setDocs]    = useState(HS_DOCS);
@@ -1517,6 +1519,7 @@ export default function App() {
         user={user}
         onSignOut={logout}
         onSwitchToDesktop={() => setForceDesktop(true)}
+        onCompleteQuickReport={(inc) => { setForceDesktop(true); setStab("incidents"); setQuickEditId(inc.id); }}
         allModules={allModules}
         assigns={assigns}
         comps={comps}
@@ -2147,6 +2150,9 @@ export default function App() {
     // Documents needing acknowledgement
     const myDocAssigns = Object.entries(docAssignments||{}).filter(([,uids])=>uids.includes(String(user.id))).map(([did])=>did);
     const unreadDocs = myDocAssigns.filter(did=>!(docAcknowledgements[String(user.id)]||{})[did]);
+    // Quick hazard reports this user still has to complete in the full form
+    const myQuickToComplete = myIncompleteQuickReports(incidents, user.id);
+    const openQuickReport = (inc) => { setStab("incidents"); setQuickEditId(inc.id); };
     // Compliance % = good items / all items (assigned modules + uploaded ext. certs + 1 for DSE).
     // Bands: 100% green, ≥70% amber, otherwise red.
     // Overall health score — includes DSE as one item
@@ -2181,6 +2187,8 @@ export default function App() {
             {/* Staff notification list — rebuilt every render from current state. `nav.tab` is a staff tab key. */}
             {(()=>{
               const notifications = [];
+              // Quick hazard reports awaiting the full form (urgent once overdue)
+              myIncompleteQuickReports(incidents, user.id).forEach(inc=>notifications.push({type:"report",urgent:isQuickReportOverdue(inc),title:`Finish your hazard report — ${inc.location}`,detail:`Add the full incident details · ${quickReportDueLabel(inc)}`,nav:{tab:"incidents",editId:inc.id}}));
               const myIds = assigns[user.id]||[];
               const myC   = comps[user.id]||{};
               // Incomplete modules
@@ -2212,7 +2220,7 @@ export default function App() {
               const overdueActions = myActions.filter(a=>a.dueDate&&a.dueDate<new Date().toISOString().slice(0,10));
               if(overdueActions.length) notifications.push({type:"report",urgent:true,title:`${overdueActions.length} overdue corrective action${overdueActions.length!==1?"s":""}`,detail:"Investigation actions past due date — action required",nav:{tab:"actions"}});
               else if(myActions.length) notifications.push({type:"report",urgent:false,title:`${myActions.length} open corrective action${myActions.length!==1?"s":""}`,detail:`You have been assigned action${myActions.length!==1?"s":""} from an investigation`,nav:{tab:"actions"}});
-              return <NotificationBell notifications={notifications} onNavigate={n=>setStab(n.tab)} Z={T} font={font}/>;
+              return <NotificationBell notifications={notifications} onNavigate={n=>{ setStab(n.tab); if(n.editId) setQuickEditId(n.editId); }} Z={T} font={font}/>;
             })()}
             <div style={{width:1,height:20,background:T.headerBgMd,margin:"0 4px"}}/>
             <button title={`Theme: ${theme} — click to cycle`} onClick={()=>{
@@ -2318,10 +2326,20 @@ export default function App() {
               </div>
 
               {/* Alerts — expired / expiring */}
-              {(expired.length>0||expiring.length>0||expiredCerts.length>0||expiringCerts.length>0||unreadDocs.length>0||dseNeedsAction||dseExpiring) && (
+              {(myQuickToComplete.length>0||expired.length>0||expiring.length>0||expiredCerts.length>0||expiringCerts.length>0||unreadDocs.length>0||dseNeedsAction||dseExpiring) && (
                 <div style={{background:"rgba(239,68,68,0.06)",border:"1px solid rgba(239,68,68,0.2)",borderRadius:14,padding:"16px 20px",marginBottom:20}}>
                   <div style={{fontWeight:800,fontSize:13,color:"#f87171",marginBottom:10}}>⚠ Action Required</div>
                   <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                    {myQuickToComplete.map(inc=>{ const late=isQuickReportOverdue(inc); const qc=late?T.red:T.amber; return (
+                      <div key={inc.id} style={{display:"flex",alignItems:"center",gap:12,background:`${qc}14`,borderRadius:8,padding:"8px 12px",cursor:"pointer"}} onClick={()=>openQuickReport(inc)}>
+                        <span style={{fontSize:20}}>⚡</span>
+                        <div style={{flex:1}}>
+                          <div style={{fontSize:13,fontWeight:700,color:T.white}}>Finish your hazard report — {inc.location}</div>
+                          <div style={{fontSize:11,color:qc}}>Quick report from {inc.date} needs full details · {quickReportDueLabel(inc)}</div>
+                        </div>
+                        <button style={{background:qc,border:"none",borderRadius:8,padding:"5px 14px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font}}>Complete →</button>
+                      </div>
+                    ); })}
                     {!dseCompleted && (
                       <div style={{display:"flex",alignItems:"center",gap:12,background:"rgba(139,92,246,0.1)",borderRadius:8,padding:"8px 12px",cursor:"pointer"}} onClick={()=>{ setDseAnswers({}); setDseComments({}); setDseSection(0); setDseSubmitted(false); setDseActive(true); }}>
                         <span style={{fontSize:20}}>🖥️</span>
@@ -2747,7 +2765,7 @@ export default function App() {
 
           {stab==="incidents" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
-            <LazyIncidentTracker user={user} incidents={incidents} setIncidents={setIncidents} equipment={equipment} setEquipment={setEquipment} Z={T} font={font}/>
+            <LazyIncidentTracker user={user} incidents={incidents} setIncidents={setIncidents} equipment={equipment} setEquipment={setEquipment} autoEditId={quickEditId} onAutoEditDone={()=>setQuickEditId(null)} Z={T} font={font}/>
             </React.Suspense>
           )}
 
@@ -2770,6 +2788,7 @@ export default function App() {
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
             <LazyStaffActionsTab
               user={user}
+              onCompleteQuickReport={inc=>{ setStab("incidents"); setQuickEditId(inc.id); }}
               incidents={incidents}
               investigations={investigations}
               setInvestigations={setInvestigations}
@@ -3146,6 +3165,10 @@ export default function App() {
               // Open incidents
               const openIncidents = incidents.filter(i=>!i.closed);
               const riddorIncidents = incidents.filter(i=>i.riddor&&!i.closed);
+              // Quick hazard reports whose reporter hasn't completed the full form yet
+              const pendingQuick = incidents.filter(isIncompleteQuickReport);
+              if(pendingQuick.length){ const lateQuick = pendingQuick.filter(i=>isQuickReportOverdue(i)).length;
+                notifications.push({type:"report",urgent:lateQuick>0,title:`${pendingQuick.length} quick hazard report${pendingQuick.length!==1?"s":""} awaiting full details`,detail:lateQuick?`${lateQuick} overdue — reporters are reminded until complete`:"Reporters are reminded until they complete the full form",nav:{tab:"incidents"}}); }
               if(riddorIncidents.length) notifications.push({type:"report",urgent:true,title:`${riddorIncidents.length} open RIDDOR reportable incident${riddorIncidents.length!==1?"s":""}`,detail:"Check Incidents tab — HSE reporting may be required",nav:{tab:"incidents"}});
               else if(openIncidents.length) notifications.push({type:"report",urgent:false,title:`${openIncidents.length} open incident${openIncidents.length!==1?"s":""}`,detail:"Check Incidents tab to review and close",nav:{tab:"incidents"}});
               // Quiz failures in last 7 days

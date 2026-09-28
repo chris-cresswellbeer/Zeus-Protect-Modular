@@ -1,8 +1,22 @@
 import React, { useState, useRef } from "react";
 import { getExpiryStatus } from "../../lib/dates";
 import { ACCEPT_IMG_DOCS } from "../../lib/constants";
+import { myIncompleteQuickReports, isQuickReportOverdue, quickReportDueLabel } from "../incidents/quickReportStatus";
 
-function StaffActionsTab({ user, incidents, investigations, setInvestigations, assigns, comps, allModules, docs, docAssignments, docAcknowledgements, dseReports, adminResponses, setStab, setMod, Z, font }) {
+/**
+ * StaffActionsTab — the staff member's "My Actions" to-do list, gathered from:
+ *   • assigned training not yet done, or expiring/expired
+ *   • assigned documents not yet acknowledged
+ *   • open issues on their latest DSE assessment
+ *   • investigation corrective actions where action.owner === user.name
+ * For corrective actions the user can mark complete, add progress notes and attach
+ * evidence (base64). Changes go into `investigations` state and are saved by App.jsx's
+ * [investigations] auto-sync effect.
+ *
+ * NB: this sets completedAt on completion, whereas the mobile app (dbCompleteAction)
+ * sets completedDate. Reports that show a completion date should check both.
+ */
+function StaffActionsTab({ user, onCompleteQuickReport, incidents, investigations, setInvestigations, assigns, comps, allModules, docs, docAssignments, docAcknowledgements, dseReports, adminResponses, setStab, setMod, Z, font }) {
   const today = new Date().toISOString().slice(0,10);
 
   // ── Outstanding training modules ──────────────────────────────────────────
@@ -40,13 +54,17 @@ function StaffActionsTab({ user, incidents, investigations, setInvestigations, a
   const overdue  = open.filter(a=>a.dueDate&&a.dueDate<today);
   const complete = myActions.filter(a=>a.status==="complete"||a.status==="closed");
 
-  const totalOutstanding = pendingModules.length + expiringModules.length + pendingDocs.length + openDseIssues.length + open.length;
+  // ── Quick hazard reports still needing the full form ─────────────────────
+  const quickToComplete = myIncompleteQuickReports(incidents, user.id);
+
+  const totalOutstanding = quickToComplete.length + pendingModules.length + expiringModules.length + pendingDocs.length + openDseIssues.length + open.length;
 
   const [expandedId, setExpandedId] = useState(null);
   const [noteInputs, setNoteInputs]  = useState({});
   const [uploading, setUploading]    = useState({});
   const fileRefs = useRef({});
 
+  // Actions are addressed by incident id + array index (they may lack a stable id in older data).
   function getKey(a) { return `${a.incidentId}_${a.actionIdx}`; }
 
   function markComplete(a) {
@@ -213,6 +231,24 @@ function StaffActionsTab({ user, incidents, investigations, setInvestigations, a
         </div>
       ) : (
         <div>
+
+          {/* ── Hazard reports to complete ── */}
+          {quickToComplete.length>0 && (
+            <div style={{marginBottom:8}}>
+              <SectionHeader icon="⚡" title="Hazard Reports to Complete" count={quickToComplete.length} color={quickToComplete.some(i=>isQuickReportOverdue(i))?Z.red:Z.amber}/>
+              {quickToComplete.map(inc=>{ const late=isQuickReportOverdue(inc); return (
+                <div key={inc.id} style={{padding:"12px 16px",borderRadius:12,background:`linear-gradient(135deg,${Z.navyMd},${Z.navy})`,border:`1px solid ${late?Z.red:Z.amber}55`,marginBottom:8,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+                  <span style={{fontSize:24,flexShrink:0}}>⚡</span>
+                  <div style={{flex:1,minWidth:180}}>
+                    <div style={{fontWeight:700,fontSize:13,color:Z.white,marginBottom:3}}>{inc.description}</div>
+                    <div style={{fontSize:11,color:Z.muted}}>📍 {inc.location} · reported {inc.date}</div>
+                  </div>
+                  <span style={{fontSize:11,fontWeight:700,color:late?Z.red:Z.amber,background:`${late?Z.red:Z.amber}1a`,border:`1px solid ${late?Z.red:Z.amber}44`,borderRadius:8,padding:"4px 10px",whiteSpace:"nowrap"}}>{late?"⚠ ":"⏳ "}{quickReportDueLabel(inc)}</span>
+                  <button onClick={()=>onCompleteQuickReport && onCompleteQuickReport(inc)} style={{background:late?Z.red:Z.amber,color:"#fff",border:"none",borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font,whiteSpace:"nowrap"}}>Complete →</button>
+                </div>
+              ); })}
+            </div>
+          )}
 
           {/* ── Outstanding Training ── */}
           {(pendingModules.length>0||expiringModules.length>0) && (

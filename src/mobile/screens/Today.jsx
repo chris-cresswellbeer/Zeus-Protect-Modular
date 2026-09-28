@@ -7,9 +7,16 @@
 import React from "react";
 import { getExpiryStatus } from "../../lib/dates";
 import { Screen, SectionLabel, Row, StatusChip, PrimaryButton } from "../ui";
+import { isQuickReportOverdue, quickReportDueLabel } from "../../domains/incidents/quickReportStatus";
 
+// ⚠ One deliberate difference from desktop: the compliance % here counts TRAINING only;
+// the desktop staff dashboard also counts external certificates and the DSE assessment,
+// so the two figures can differ for the same person.
+//
+// Props: user, myMods (assigned modules, with progressSlide from local progress),
+// myComps, unreadDocs, and navigation callbacks (onResume, onOpenModule, onOpenDocs, onReport).
 function Today({
-  user, myMods, myComps, unreadDocs,
+  user, myMods, myComps, unreadDocs, quickToComplete = [], onCompleteQuickReport,
   onResume, onOpenModule, onOpenDocs, onReport,
   Z, font,
 }) {
@@ -34,7 +41,7 @@ function Today({
   const healthColor = healthPct === 100 ? "#10b981" : healthPct >= 70 ? "#f59e0b" : "#ef4444";
 
   const actionCount =
-    notStarted.length + expired.length + (unreadDocs.length ? 1 : 0);
+    quickToComplete.length + notStarted.length + expired.length + (unreadDocs.length ? 1 : 0);
 
   const inProgress = myMods.find((m) => m.progressSlide > 0 && !myComps[m.id]);
   const nextUp = inProgress || notStarted[0] || null;
@@ -156,6 +163,18 @@ function Today({
         <>
           <SectionLabel Z={Z}>Action required</SectionLabel>
           <div style={{ display: "flex", flexDirection: "column", gap: 9, marginBottom: 20 }}>
+            {quickToComplete.map((inc) => {
+              const late = isQuickReportOverdue(inc);
+              return (
+                <Row
+                  key={inc.id} Z={Z} font={font} tone={late ? "danger" : "warn"} icon="⚡"
+                  title={`Finish your hazard report — ${inc.location}`}
+                  sub={`Needs full details on a computer · ${quickReportDueLabel(inc)}`}
+                  onClick={onCompleteQuickReport ? () => onCompleteQuickReport(inc) : undefined}
+                  right={<Cta label="Finish" color={late ? Z.red : Z.amber} solid={late} />}
+                />
+              );
+            })}
             {expired.map((m) => (
               <Row
                 key={m.id} Z={Z} font={font} tone="danger" icon={m.icon}

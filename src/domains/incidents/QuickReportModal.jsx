@@ -2,6 +2,16 @@ import React from "react";
 import { E } from "../../lib/emoji";
 import { QUICK_LOCATIONS } from "../../data/seedQuickReport";
 
+/**
+ * QuickReportModal — 30-second "Report a Hazard" pop-up for staff (desktop).
+ * Three questions: what, where (QUICK_LOCATIONS list or "Other"), urgency.
+ * Produces a minimal incident record (id "qr_<timestamp>", quickReport:true) and
+ * hands it to onSubmit — App.jsx adds it to incidents and saves it.
+ * Urgency "high" is filed as type "unsafe_condition", anything else as "near_miss".
+ * (The mobile equivalent is mobile/screens/ReportHazard.jsx.)
+ * NB: the success message says the H&S manager "has been notified" — there is no
+ * email/push notification; it appears in the admin Incidents tab and notification bell.
+ */
 function QuickReportModal({ user, onSubmit, onClose, Z, font }) {
   const [what, setWhat] = React.useState("");
   const [where, setWhere] = React.useState("");
@@ -46,6 +56,9 @@ function QuickReportModal({ user, onSubmit, onClose, Z, font }) {
             <div style={{fontSize:48,marginBottom:12}}>✅</div>
             <h3 style={{fontSize:20,fontWeight:800,color:"#fff",marginBottom:8}}>Hazard Reported</h3>
             <p style={{color:Z.muted,fontSize:13,marginBottom:24}}>Your report has been logged and your H&S manager has been notified. Thank you for keeping the site safe.</p>
+            <div style={{background:`${Z.amber}14`,border:`1px solid ${Z.amber}55`,borderRadius:10,padding:"10px 14px",marginBottom:20,fontSize:12,color:Z.slate,textAlign:"left",lineHeight:1.5}}>
+              <b style={{color:Z.amber}}>Next step:</b> complete the full report under <b>Report Incident</b> by the end of tomorrow. You'll see a reminder on your dashboard until it's done.
+            </div>
             <button onClick={onClose} style={{background:`linear-gradient(135deg,${Z.accent},${Z.blue})`,color:"#fff",border:"none",borderRadius:10,padding:"11px 32px",cursor:"pointer",fontFamily:font,fontWeight:700,fontSize:14}}>Done</button>
           </div>
         ) : (

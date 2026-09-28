@@ -31,11 +31,13 @@ import { More, Certificates, CorrectiveActions, TrainingHistory, Appearance } fr
 import { Inspections, InspectionRun } from "./screens/Inspection";
 import { Permits, PermitDetail } from "./screens/Permits";
 import { INSP_TYPES } from "../data/seedInspections";
+import { myIncompleteQuickReports } from "../domains/incidents/quickReportStatus";
 
 const FONT = "'Barlow','Trebuchet MS',system-ui,sans-serif";
 const PROGRESS_KEY = "zeus.mobile.progress";
 const PREFS_KEY = "zeus.mobile.prefs";
 
+// Bottom tab bar for everyone; admins get extra entries (see where TABS is built below).
 const STAFF_TABS = [
   { id: "today", icon: "◎", label: "Today" },
   { id: "training", icon: "🎓", label: "Training" },
@@ -60,6 +62,7 @@ const TITLES = {
   permit: ["Permit to work", ""],
 };
 
+// Sub-screen → owning tab, used by back() and to highlight the right tab.
 const PARENT_TAB = {
   module: "training", documents: "more",
   certificates: "more", actions: "more", history: "more", appearance: "more",
@@ -73,9 +76,19 @@ const PARENT_TAB = {
 // DSE, incident triage and incident records live in the desktop portal.
 const MOBILE_INSP_TYPES = ["weekly_walk", "office_housekeeping", "warehouse_housekeeping", "fire_drill"];
 
+// PROPS: user, onSignOut, onSwitchToDesktop, the domain maps from App.jsx (allModules,
+// assigns, comps, docs, docAssignments, docAcknowledgements, dseReports, incidents,
+// investigations, allUsers, siteInspections, permits = mobilePermits view model),
+// theme/setTheme/setDarkMode, and `db` = App.jsx's mobileDb object.
+// Optional db functions (optimistic*, previewDoc, addActionProof…) are always called
+// as `db.x && db.x(...)`, so a missing one is simply skipped. Currently mobileDb does
+// not provide optimisticInspection, optimisticPermitSignOn/Off or addActionProof.
+//
+// LOCAL-ONLY STATE (localStorage, per device): module slide progress (PROGRESS_KEY)
+// and display prefs (PREFS_KEY: followSystem, keepOffline, mobileData, textScale).
 function MobileApp({
   // identity
-  user, onSignOut, onSwitchToDesktop,
+  user, onSignOut, onSwitchToDesktop, onCompleteQuickReport,
   // domain state, straight from App.jsx
   allModules, assigns, comps, docs, docAssignments, docAcknowledgements,
   dseReports, incidents, investigations, allUsers = [],
@@ -121,6 +134,9 @@ function MobileApp({
   const refreshQueue = React.useCallback(() => { listQueue().then(setQueue); }, []);
   React.useEffect(refreshQueue, [refreshQueue]);
 
+  // Queue item `type` → the App.jsx write that performs it. Adding a new offline-capable
+  // write = add a handler here + call write("<type>", payload, label, optimistic).
+  // Never rename an existing type: items already queued on phones would be dropped.
   const handlers = React.useMemo(() => ({
     completion: (p) => db.saveCompletion(p.userId, p.moduleId, p.record),
     docAck: (p) => db.acknowledgeDoc(p.userId, p.docId, p.date),
@@ -135,11 +151,16 @@ function MobileApp({
     riddorReported: (p) => db.markRiddorReported(p.incidentId),
   }), [db]);
 
+  // Whenever we come back online, replay queued writes in order.
   React.useEffect(() => {
     if (!online) return;
     drainQueue(handlers).then((n) => { if (n) refreshQueue(); });
   }, [online, handlers, refreshQueue]);
 
+  // Central write path: apply the optimistic UI update, then try the write directly
+  // when online, otherwise (or if it THROWS) put it in the IndexedDB queue.
+  // ⚠ See drainQueue: App.jsx writes resolve (rather than throw) on server errors, so
+  // an online write that fails is not queued for retry.
   async function write(type, payload, label, optimistic) {
     if (optimistic) optimistic();
     if (online) {
@@ -166,6 +187,8 @@ function MobileApp({
   );
   const myAcks = docAcknowledgements[user.id] || {};
   const unreadDocs = requiredDocs.filter((d) => !myAcks[d.id]);
+  // Quick hazard reports this user still has to complete in the full (desktop) form.
+  const quickToComplete = myIncompleteQuickReports(incidents, user.id);
 
   const certificates = myMods
     .filter((m) => myComps[m.id])
@@ -233,6 +256,7 @@ function MobileApp({
     });
   }
 
+  // Only PASSED attempts are recorded from mobile (failures are not logged to quiz_failures here).
   function completeModule(record) {
     if (!record.passed) return;
     write(
@@ -361,6 +385,7 @@ function MobileApp({
         {screen === "today" && (
           <Today
             user={user} myMods={myMods} myComps={myComps} unreadDocs={unreadDocs}
+            quickToComplete={quickToComplete} onCompleteQuickReport={onCompleteQuickReport}
             onResume={(m) => { setActiveModule(m); go("module"); }}
             onOpenModule={(m) => { setActiveModule(m); go("module"); }}
             onOpenDocs={() => go("documents")}
@@ -512,6 +537,7 @@ function MobileApp({
   );
 }
 
+// localStorage helpers — wrapped in try/catch because private browsing / full storage can throw.
 function loadProgress() {
   try { return JSON.parse(localStorage.getItem(PROGRESS_KEY)) || {}; }
   catch { return {}; }

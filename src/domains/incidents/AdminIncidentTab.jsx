@@ -26,6 +26,8 @@ import { INCIDENT_TYPES, ACCIDENT_CODES, NUMBER_CODES } from "../../data/seedInc
  * Saving: changes go into `incidents` state and are persisted by App.jsx's
  * auto-sync effect (see the dbSaveIncident warning about unsaved fields).
  */
+import { isIncompleteQuickReport } from "./quickReportStatus";
+
 // Urgency chosen on a quick hazard report (QuickReportModal / mobile ReportHazard).
 const QUICK_URGENCY_LABEL = { low:"Safe to leave", medium:"Needs attention", high:"STOP WORK" };
 
@@ -595,7 +597,7 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
                       {inc.riddor && <span style={{fontSize:10,fontWeight:700,color:"#f87171",background:"rgba(239,68,68,0.12)",padding:"2px 8px",borderRadius:6,border:"1px solid rgba(239,68,68,0.3)"}}>RIDDOR</span>}
                       {inc.quickReport && (() => { const qc = inc.urgency==="high" ? Z.red : Z.amber; return (
                         <span style={{fontSize:10,fontWeight:700,color:qc,background:`${qc}1f`,padding:"2px 8px",borderRadius:6,border:`1px solid ${qc}55`}}>
-                          ⚡ Quick{QUICK_URGENCY_LABEL[inc.urgency] ? ` · ${QUICK_URGENCY_LABEL[inc.urgency]}` : ""}
+                          ⚡ Quick{QUICK_URGENCY_LABEL[inc.urgency] ? ` · ${QUICK_URGENCY_LABEL[inc.urgency]}` : ""}{isIncompleteQuickReport(inc) ? " · awaiting full report" : ""}
                         </span>); })()}
                       <span style={{fontSize:11,color:Z.muted}}>📍 {inc.location}</span>
                     </div>

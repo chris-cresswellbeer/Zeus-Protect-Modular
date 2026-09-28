@@ -1,3 +1,11 @@
+/**
+ * data/seedFireSafety.js — demo fire safety log entries (wardens, drills, alarm tests,
+ * extinguishers, emergency lighting, FRA reviews).
+ * SEED / DEMO DATA — only used as a fallback when the matching Supabase table is empty
+ * (e.g. a brand-new install). Once real rows exist, edits here have NO effect.
+ * Note App.jsx only falls back to these when ALL six fire tables are empty.
+ * The record shapes here document the fields FireSafetyTab uses.
+ */
 const INIT_FIRE_WARDENS = [
   { id:"fw001", staffId:3,  name:"Sarah Mitchell",    zone:"Office Block A",          qualDate:"2023-09-12", renewalMonths:36 },
   { id:"fw002", staffId:7,  name:"Daniel Okonkwo",    zone:"Warehouse & Loading Dock", qualDate:"2022-11-05", renewalMonths:36 },

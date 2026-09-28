@@ -65,7 +65,7 @@ function DocCard({ d, staff, assignedIds, assignedStaff, readCount, unreadCount,
     const prevVer = d.version||1, newVer = prevVer+1, today = new Date().toISOString().slice(0,10);
     const ext2=file.name.split(".").pop().toUpperCase();
     const path2=`doc_${d.id}_v${newVer}_${file.name.replace(/[^a-zA-Z0-9._-]/g,"_")}`;
-    const prevEntry={version:prevVer,date:d.date,fileName:d.fileName||"",fileUrl:d.fileUrl||d.fileData||null,size:d.size||"",ext:d.ext||"",replacedOn:today,replacedBy:change,note:note||""};
+    const prevEntry={version:prevVer,date:d.date,fileName:d.fileName||"",fileUrl:d.fileUrl||d.fileData||null,size:d.size||"",ext:d.ext||"",replacedOn:today,replacedBy:change,note:d.versionNote||""}; // note = what changed IN that version
     const newDoc={...d,version:newVer,date:today,size:`${(file.size/1024).toFixed(0)} KB`,fileName:file.name,ext:ext2,
       history:[...(d.history||[]),prevEntry],versionNote:note||"",versionChange:change};
     let cleared=0;
@@ -117,7 +117,8 @@ function DocCard({ d, staff, assignedIds, assignedStaff, readCount, unreadCount,
     <div style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:16,border:`1px solid ${reviewOverdue?"rgba(239,68,68,0.4)":reviewSoon?"rgba(245,158,11,0.35)":T.border}`,overflow:"hidden"}}>
       <div style={{padding:"14px 20px",display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
         <span style={{fontSize:26,flexShrink:0}}>{docIcon}</span>
-        <div style={{flex:1,minWidth:0}}>
+        {/* flex-basis keeps the title readable; the buttons wrap onto a second line when space runs out */}
+        <div style={{flex:"1 1 260px",minWidth:0}}>
           <div style={{fontWeight:700,fontSize:14,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{d.title}</div>
           {!editingDesc ? (
             <div onClick={()=>{setDescInput(d.description||"");setEditingDesc(true);}}

@@ -1,3 +1,12 @@
+/**
+ * data/seedCoshh.js — the built-in COSHH substance register (from supplier SDSs).
+ * REFERENCE DATA — used by the live app on every load. Editing it changes the app for
+ * everyone on the next deploy (it is code, not database data).
+ * Always shown in the COSHH tab, merged with admin-added substances (custom_chemicals).
+ * `code` is the unique key that SDS uploads and assessments are stored against — never
+ * change an existing code. `classification` feeds coshhHazardLevel(); `un` = transport class.
+ * To retire a substance, consider keeping the row (history) rather than deleting it.
+ */
 const COSHH_DATA = [
   { code:"CHEM000113", name:"Caf-Machine-Detergent-GB-en",                             supplier:"Anglian Chemicals",  msdsDate:"10/02/2025", un:"1760 — Corrosive liquid n.o.s",                                    classification:"Skin Corr. 1; H314 · Eye Dam. 1; H318" },
   { code:"CHEM000114", name:"SUPER-CONCENTRATED-4-in-1-Washroom-Cleaner-GB-en",        supplier:"Anglian Chemicals",  msdsDate:"10/02/2025", un:"1760 — Corrosive liquid n.o.s",                                    classification:"Skin Corr. 1; H314 · Eye Dam. 1; H318" },

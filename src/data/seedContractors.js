@@ -1,3 +1,10 @@
+/**
+ * data/seedContractors.js — contractor site-induction checklist and certificate types.
+ * REFERENCE DATA — used by the live app on every load. Editing it changes the app for
+ * everyone on the next deploy (it is code, not database data).
+ * ⚠ Induction progress and certificates are stored against these `id` values —
+ *   renaming or removing an id orphans existing records. Add new items with new ids.
+ */
 const INDUCTION_ITEMS = [
   {id:"site_rules", label:"Site rules & access procedures"},
   {id:"emergency",  label:"Emergency procedures & muster points"},

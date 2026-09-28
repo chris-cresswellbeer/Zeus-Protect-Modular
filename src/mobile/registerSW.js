@@ -3,6 +3,8 @@
 // Call once from main.jsx. Safe to call in dev — it no-ops unless the build is
 // served over https or localhost.
 
+// ⚠ Currently NOT called from main.jsx — see the note there. Without it the service
+// worker (public/sw.js) is never installed.
 function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
   if (!import.meta.env.PROD) return;
@@ -38,6 +40,8 @@ async function promptInstall() {
   return outcome;
 }
 
+// True when running as an installed app (Android/desktop display-mode, or iOS
+// home-screen `navigator.standalone`). Used to hide the Install button.
 function isStandalone() {
   return (
     window.matchMedia("(display-mode: standalone)").matches ||

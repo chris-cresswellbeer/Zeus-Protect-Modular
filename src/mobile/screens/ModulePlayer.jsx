@@ -14,6 +14,7 @@ import { Screen, PrimaryButton, GhostButton } from "../ui";
 import { sanitizeHtml } from "../../lib/sanitizeHtml";
 import { isHtmlContent, ensureRteStyles } from "../../domains/training/slideTextUtils";
 
+// Must match the desktop pass mark in App.jsx submitQuiz (also 70).
 const PASS_MARK = 70;
 
 function ModulePlayer({
@@ -44,6 +45,8 @@ function ModulePlayer({
     if (stage === "slide") onProgress(mod.id, slide);
   }, [stage, slide, mod.id]);
 
+  // Records the picked option; on the last question scores the quiz and reports the
+  // result via onComplete (MobileApp only saves PASSED results).
   function submitAnswer() {
     if (picked === null) return;
     const next = { ...answers, [qIdx]: picked };
@@ -282,6 +285,7 @@ function ModulePlayer({
 }
 
 // A hotspot slide cannot be advanced past until the hazards have been found.
+// True when the slide has a hotspot activity that hasn't been completed yet (blocks Next).
 function hotspotGated(slide, done) {
   return !!(slide && slide.hotspots && slide.hotspots.length > 0 && !done);
 }
@@ -425,6 +429,8 @@ function SlideCard({ slide, Z, font, onHotspotStatus }) {
 // Touch version of the desktop HotspotActivity. Same data shape: hotspots are
 // { id, x, y, radius, correct, label, feedback } with x/y/radius as percentages
 // of the rendered image, so an activity authored on the portal works unchanged.
+// Touch version of domains/training/HotspotActivity.jsx — same % coordinate model and
+// nearest-hotspot-within-radius hit test. Keep behaviour in step with the desktop one.
 function MobileHotspot({ imageUrl, hotspots, instructions, onStatusChange, Z, font }) {
   const [found, setFound] = React.useState(() => []);
   const [last, setLast] = React.useState(null);
@@ -523,6 +529,8 @@ function MobileHotspot({ imageUrl, hotspots, instructions, onStatusChange, Z, fo
 // Slide text is either rich HTML from the portal's RichTextEditor or legacy
 // plain text. Same branch as the desktop player — rendering HTML as plain text
 // is what put raw <li> tags on screen.
+// Slide text: sanitised HTML when it contains tags, otherwise plain-text formatting
+// like the desktop player.
 function SlideBody({ text, Z }) {
   React.useEffect(() => { ensureRteStyles(); }, []);
 
@@ -644,6 +652,8 @@ function AnswerReview({ quiz, answers, Z }) {
 // Matches the ZSL-<user><module><random> shape already in the seed data.
 // Generated client-side so the certificate can be shown before it syncs; the
 // server should still enforce uniqueness.
+// NB: differs from the desktop format (App.jsx builds ZSL- + last 8 chars of a base-36
+// string). Both start with "ZSL-"; nothing parses them, they're reference numbers only.
 function makeCertId(userId, moduleId) {
   const rand = Math.random().toString(36).toUpperCase().slice(2, 8);
   return `ZSL-${userId}${String(moduleId).toUpperCase()}${rand}`;

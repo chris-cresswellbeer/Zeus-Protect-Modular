@@ -192,6 +192,8 @@ function Certificates({ certificates, Z, font }) {
 
 // ─── Corrective actions ──────────────────────────────────────────────────────
 
+// The user's investigation actions (matched by owner name). "Mark complete" goes through
+// the offline queue → App.jsx dbCompleteAction.
 function CorrectiveActions({ open, closed, onComplete, onAddProof, Z, font }) {
   return (
     <Screen Z={Z}>
@@ -329,6 +331,8 @@ const THEME_PREVIEWS = {
   rose:     ["#fce7ed", "#fff0f3", "#e11d48"],
 };
 
+// Theme picker (same theme keys as desktop), follow-system-dark toggle and text size.
+// Theme is saved to the user's profile; the other prefs are per-device (localStorage).
 function Appearance({
   theme, followSystem, onSelectTheme, onFollowSystem,
   textScale, onTextScale, prefs, onPrefChange, storageUsed,

@@ -3,6 +3,8 @@ import React from "react";
 import { getExpiryStatus } from "../../lib/dates";
 import { Screen, SectionLabel, Row, StatusChip } from "../ui";
 
+// Status for one assigned module from its completion record + renewal period
+// (same rules as the desktop staff dashboard).
 function statusOf(m, comp) {
   if (!comp) return { key: "notStarted", color: "#f59e0b", label: "Not started" };
   const ex = m.renewalMonths ? getExpiryStatus(comp.date, m.renewalMonths) : null;

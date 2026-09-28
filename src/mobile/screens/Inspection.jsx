@@ -3,6 +3,12 @@
 // Site inspections on the phone: the list of what is due, and the walkround
 // runner itself — one section per screen, three-way answer per question.
 //
+// ⚠ MAINTAINER NOTE: scoring is NOT identical to the desktop tab. Desktop stores
+// 2 / 1 (partial) / 0 per question and counts unanswered questions in the maximum;
+// mobile has no "partial", stores only answered questions, and excludes N/A. Mobile
+// records also carry `nextDue` (not set by desktop) and ids prefixed
+// si_local_/nc_local_ (desktop uses si<ts>/nc_<ts>). Keep this in mind when reporting across both.
+//
 // Scoring follows the desktop convention in src/domains/inspections: each
 // question scores 2 (compliant) or 0 (non-conformance); N/A questions are
 // excluded from both overallScore and maxScore so a skipped item cannot drag
@@ -53,6 +59,7 @@ function addDays(days) {
 // `due` — [{ typeId, location, dueDate, overdue }]
 // `recent` — submitted records in the seedInspections shape.
 
+// List screen: one "due" row per mobile-runnable type + recent inspections.
 function Inspections({ due, recent, onStart, onOpenDesktop, Z, font }) {
   return (
     <Screen Z={Z}>
@@ -110,6 +117,9 @@ function Inspections({ due, recent, onStart, onOpenDesktop, Z, font }) {
 
 // ─── Runner ──────────────────────────────────────────────────────────────────
 
+// The walkround runner: one checklist section per screen; "Issue" answers open a
+// finding panel (text, severity, photos, owner). Major findings are due in 2 days,
+// others in 7. The next inspection of this type is set as due in 7 days.
 function InspectionRun({ typeId, location, user, onSubmit, onExit, Z, font }) {
   const type = typeFor(typeId);
   const sections = INSP_SECTIONS[typeId] || [];
@@ -140,6 +150,7 @@ function InspectionRun({ typeId, location, user, onSubmit, onExit, Z, font }) {
     setFindings((f) => ({ ...f, [qid]: { finding: "", severity: "minor", ...(f[qid] || {}), ...patch } }));
   }
 
+  // Converts the in-progress answers into the site_inspections record shape.
   function buildRecord() {
     const sectionScores = {};
     let overallScore = 0;

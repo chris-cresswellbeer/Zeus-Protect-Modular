@@ -1,3 +1,11 @@
+/**
+ * data/seedDse.js — the DSE self-assessment questionnaire (sections → questions).
+ * REFERENCE DATA — used by the live app on every load. Editing it changes the app for
+ * everyone on the next deploy (it is code, not database data).
+ * Question: { id, text, risk, flagOnYes? }. By default a "No" answer is an issue;
+ * set flagOnYes:true for questions where "Yes" is the problem (e.g. discomfort).
+ * Answers are stored by question `id`, so keep ids stable when rewording questions.
+ */
 const DSE_SECTIONS = [
   {
     id:"chair", title:"Chair & Seating", icon:"🪑",

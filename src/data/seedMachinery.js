@@ -1,3 +1,12 @@
+/**
+ * data/seedMachinery.js — machine types, competence statuses, helpers + demo records.
+ * isWarehouseWorker(user) — the single rule deciding who gets machinery/"My Machinery".
+ * MACHINERY_TYPES / MACHINE_CATEGORIES / COMP_STATUS are REFERENCE DATA (admins can add
+ *   more types in-app → custom_machine_types). Competence records store the machine `id`.
+ * machineExpiryStatus(comp, types) — expiry = assessmentDate + type.renewalMonths.
+ * INIT_MACHINE_COMPS is SEED / DEMO DATA — only used as a fallback when the matching Supabase table is empty
+ * (e.g. a brand-new install). Once real rows exist, edits here have NO effect.
+ */
 import { getExpiryStatus } from "../lib/dates";
 
 function isWarehouseWorker(user) {

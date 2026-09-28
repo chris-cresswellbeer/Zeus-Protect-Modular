@@ -13,6 +13,7 @@ const TOUCH = 44;
 
 // ─── Layout ──────────────────────────────────────────────────────────────────
 
+/** Scrollable page body with standard padding. */
 function Screen({ children, Z, pad = 18 }) {
   return (
     <div style={{ padding: `${pad}px ${pad}px 28px`, background: Z.bg, minHeight: "100%" }}>
@@ -21,6 +22,7 @@ function Screen({ children, Z, pad = 18 }) {
   );
 }
 
+/** Small uppercase heading above a group of rows/cards. */
 function SectionLabel({ children, Z, color }) {
   return (
     <div style={{
@@ -32,6 +34,7 @@ function SectionLabel({ children, Z, color }) {
   );
 }
 
+/** Rounded panel. `tone` picks the background/border treatment (e.g. "flat", or a status tone). */
 function Card({ children, Z, tone = "flat", style }) {
   const tones = {
     flat:   { background: Z.overlay, border: `1px solid ${Z.borderMd}` },
@@ -50,6 +53,7 @@ function Card({ children, Z, tone = "flat", style }) {
 
 // ─── Rows ────────────────────────────────────────────────────────────────────
 
+/** Tappable list row: icon · title/subtitle · right-hand slot (chip, chevron…). Min height = TOUCH. */
 function Row({ icon, title, sub, right, onClick, Z, font, tone = "flat" }) {
   const tones = {
     flat:   { background: Z.overlay, border: `1px solid ${Z.borderMd}` },
@@ -93,6 +97,7 @@ function StatusChip({ label, color }) {
 
 // ─── Buttons ─────────────────────────────────────────────────────────────────
 
+/** Full-width main action button. `tone` selects the accent colour. */
 function PrimaryButton({ children, onClick, disabled, Z, font, tone = "accent", style }) {
   const tones = {
     accent: { background: `linear-gradient(135deg,${Z.accent},${Z.blue})`, color: "#fff", shadow: `0 4px 16px ${Z.accent}44` },
@@ -122,6 +127,7 @@ function PrimaryButton({ children, onClick, disabled, Z, font, tone = "accent", 
   );
 }
 
+/** Secondary, outlined button. */
 function GhostButton({ children, onClick, Z, font, style }) {
   return (
     <button
@@ -140,6 +146,7 @@ function GhostButton({ children, onClick, Z, font, style }) {
 
 // ─── Chrome ──────────────────────────────────────────────────────────────────
 
+/** Top bar: optional back arrow, small kicker text above the title, optional right-hand action. */
 function MobileHeader({ kicker, title, onBack, right, Z, font }) {
   return (
     <div style={{
@@ -181,6 +188,7 @@ function MobileHeader({ kicker, title, onBack, right, Z, font }) {
   );
 }
 
+/** Shown while offline; tells the user how many changes are waiting to sync. */
 function OfflineBanner({ queueCount, Z }) {
   return (
     <div style={{
@@ -204,6 +212,7 @@ function OfflineBanner({ queueCount, Z }) {
   );
 }
 
+/** Fixed bottom navigation. tabs = [{id, label, icon}]. Respects the iPhone home-indicator safe area. */
 function TabBar({ tabs, active, onSelect, Z, font }) {
   return (
     <nav style={{

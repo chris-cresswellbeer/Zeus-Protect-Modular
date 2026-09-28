@@ -1,3 +1,11 @@
+/**
+ * data/seedUsers.js — initial staff list.
+ * On the very first run (empty users table) App.jsx INSERTS these into Supabase; after
+ * that the users table is the source of truth and this file is ignored.
+ * { id, name, email, role: admin|staff, jobTitle, manager (display name), isWarehouseWorker,
+ *   department?, status? }. id 1 is treated as the primary admin in the admin portal.
+ * Contains real staff names/emails — keep the repository private.
+ */
 const USERS = [
   { id:1,  name:"Admin User",       email:"admin@zeus.com",    role:"admin", jobTitle:"Health & Safety Manager",   manager:"",             isWarehouseWorker:false },
   { id:2,  name:"Craig Purdy", email:"craig.purdy@zeus.com", role:"staff", jobTitle:"Key Account Co-Ordinator", manager:"Adam Murphy", isWarehouseWorker:false },

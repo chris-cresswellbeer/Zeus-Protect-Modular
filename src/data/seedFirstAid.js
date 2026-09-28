@@ -1,3 +1,10 @@
+/**
+ * data/seedFirstAid.js — first aid shifts, site zones, certificate and kit types.
+ * REFERENCE DATA — used by the live app on every load. Editing it changes the app for
+ * everyone on the next deploy (it is code, not database data).
+ * Aiders/certs store the exact shift and zone STRINGS — renaming one here disconnects
+ * existing records from it. Admins can add extra zones in the app (customZones).
+ */
 const FA_SHIFTS = ["Day Shift (08:30–16:00)", "Late Shift (16:00–02:00)", "Office Hours (08:30–17:30)", "All Shifts"];
 const FA_ZONES  = [
   // Warehouse / Operations

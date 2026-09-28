@@ -1,3 +1,11 @@
+/**
+ * data/seedInspections.js — inspection types, their checklists, and demo inspections.
+ * INSP_TYPES / INSP_SECTIONS are REFERENCE DATA: INSP_SECTIONS[typeId] = [{ id, label,
+ *   questions:[{ id, text }] }]. Answers are stored by section id + question id, so keep
+ *   ids stable; add new questions with new ids. Used by desktop AND mobile inspections.
+ * INIT_SITE_INSPECTIONS is SEED / DEMO DATA — only used as a fallback when the matching Supabase table is empty
+ * (e.g. a brand-new install). Once real rows exist, edits here have NO effect.
+ */
 const INSP_TYPES = [
   { id:"annual_hs",             label:"Annual H&S Audit",                    icon:"📋", color:"#6366f1", bg:"rgba(99,102,241,0.12)",  maxScore:100, freq:"12 months" },
   { id:"fire_risk",             label:"Fire Risk Assessment",                icon:"🔥", color:"#ef4444", bg:"rgba(239,68,68,0.12)",   maxScore:100, freq:"12 months" },

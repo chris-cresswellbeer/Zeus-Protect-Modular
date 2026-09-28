@@ -1,3 +1,12 @@
+/**
+ * data/seedDocs.js — demo documents and demo training assignments/completions.
+ * HS_DOCS: example library entries (no files attached). ⚠ These are the INITIAL docs state
+ *   and App.jsx only replaces entries whose id also exists in the documents table, so
+ *   these demo entries stay visible alongside real uploads. Empty the array to hide them.
+ * INIT_ASSIGN  { [userId]: [moduleId] }  and  INIT_COMPLETE { [userId]: { [moduleId]: {score,date,certId?} } }:
+ *   SEED / DEMO DATA — only used as a fallback when the matching Supabase table is empty
+ * (e.g. a brand-new install). Once real rows exist, edits here have NO effect.
+ */
 const HS_DOCS = [
   { id:"d1", title:"Zeus Health & Safety Policy Statement",      date:"2024-01-15", size:"245 KB", type:"Policy"         },
   { id:"d2", title:"Risk Assessment — Warehouse Operations",     date:"2024-03-02", size:"512 KB", type:"Risk Assessment" },

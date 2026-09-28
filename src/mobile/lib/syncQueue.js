@@ -11,12 +11,16 @@
 // The handlers are the app's existing dbSave*/dbAcknowledge* functions from
 // App.jsx, so nothing about the server contract changes.
 
+// IndexedDB names. Changing DB_NAME/STORE orphans any queued items on devices; bump
+// DB_VERSION (and handle it in onupgradeneeded) if the store shape ever changes.
 const DB_NAME = "zeus-protect-sync";
 const STORE = "queue";
 const DB_VERSION = 1;
 
 let _dbPromise = null;
 
+// Opens (and on first use creates) the IndexedDB database. The promise is cached so
+// every call shares one connection.
 function openDb() {
   if (_dbPromise) return _dbPromise;
   _dbPromise = new Promise((resolve, reject) => {
@@ -41,6 +45,8 @@ function newId() {
   return "q_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
 }
 
+// Append a write to the queue and, where supported (Chrome/Android), register a
+// Background Sync so the service worker can prompt a drain later.
 async function enqueue(type, payload, label) {
   const db = await openDb();
   const item = {
@@ -99,6 +105,10 @@ async function bumpAttempts(item) {
 // handlers: { [type]: async (payload) => void }
 // Drains in insertion order and stops at the first failure so writes that
 // depend on earlier ones (a completion before its certificate) stay ordered.
+// ⚠ A handler only counts as FAILED if it throws/rejects. The App.jsx db* functions
+// wrap writes in dbWrite(), which logs errors and resolves false instead of throwing —
+// so a server-side failure is treated as success and the item is removed. To make the
+// queue truly durable, have the handlers throw when dbWrite returns false.
 async function drainQueue(handlers) {
   const items = await listQueue();
   let drained = 0;

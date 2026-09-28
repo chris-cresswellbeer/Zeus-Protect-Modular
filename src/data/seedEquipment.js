@@ -1,3 +1,10 @@
+/**
+ * data/seedEquipment.js — equipment categories + demo asset register.
+ * EQ_CATEGORIES is REFERENCE DATA (category id, label, icon, colour, and
+ *   scheduleMonths = normal inspection/service interval). Assets store the category id.
+ * INIT_EQUIPMENT is SEED / DEMO DATA — only used as a fallback when the matching Supabase table is empty
+ * (e.g. a brand-new install). Once real rows exist, edits here have NO effect.
+ */
 const EQ_CATEGORIES = [
   { id:"flt",       label:"Forklift Trucks",     icon:"🚜", color:"#f59e0b", scheduleMonths:3  },
   { id:"racking",   label:"Racking Inspection",  icon:"🏗",  color:"#8b5cf6", scheduleMonths:12 },

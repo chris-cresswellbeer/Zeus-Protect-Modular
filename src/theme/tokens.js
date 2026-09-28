@@ -1,3 +1,44 @@
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * theme/tokens.js — Colour palettes ("design tokens") for every theme
+ * ═══════════════════════════════════════════════════════════════════════════
+ * The app has no CSS framework. Components use inline styles that read colours
+ * from a token object, conventionally named `Z` (or `T`) in each file, e.g.
+ *     style={{ background: Z.bgCard, color: Z.white, border: `1px solid ${Z.border}` }}
+ *
+ * HOW THE ACTIVE THEME REACHES COMPONENTS:
+ *   App.jsx (and mobile/MobileApp.jsx) do `const T = getThemeTokens(theme)` and pass
+ *   `T` down as a PROP, usually called `Z` (e.g. <CoshhTab Z={T} .../>).
+ *   ⚠ A component that instead does `import { Z } from "../theme/tokens"` ALWAYS
+ *   gets the default DARK palette and will not follow the user's theme choice
+ *   (shared/primitives.jsx does this for Pill/Bar). Prefer the prop.
+ *
+ * RULE: never hard-code a hex colour in a component — use a token, otherwise
+ * that element won't change when the user switches theme.
+ *
+ * ⚠ TOKEN NAMES ARE HISTORICAL, NOT LITERAL. They were named when only the dark
+ *   navy theme existed. Read them by ROLE, not by colour name:
+ *     navy / bgCard   → card & panel background
+ *     navyDk / bgDeep → darker/recessed background (inputs, table headers)
+ *     navyMd          → slightly raised background (hover states)
+ *     bg              → page background
+ *     white           → PRIMARY TEXT colour (it's near-black in light themes!)
+ *     offWhite        → secondary heading text
+ *     slate           → body text
+ *     muted / mutedDk → de-emphasised text, labels, placeholders
+ *     accent / accentLt / blue → buttons, links, active tabs
+ *     gold / amber    → warnings, highlights
+ *     green / red     → success / danger status colours
+ *     border, borderMd, overlay, overlaySm, headerBg, headerBgMd → translucent layers
+ *
+ * ADDING A THEME:
+ *   1. Copy an existing palette below (it must define EVERY key above).
+ *   2. Add an entry to ALL_THEMES (the key is saved as the user's preference).
+ *   3. Add a `case` to getThemeTokens().
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+
+/** Default theme: dark navy (Zeus brand). Also the fallback for unknown theme keys. */
 const Z = {
   navy:    "#0d1f5c",
   navyDk:  "#091548",
@@ -27,6 +68,7 @@ const Z = {
   headerBgMd:"rgba(255,255,255,0.06)",
 };
 
+/** Light theme. Note the inversions: `navy` is WHITE (card bg) and `white` is near-BLACK (text). */
 const Z_LIGHT = {
   navy:    "#ffffff",
   navyDk:  "#f1f5f9",
@@ -129,6 +171,12 @@ const Z_ROSE = { // Rose — blush/pink backgrounds + deep rose accents
   headerBg:"rgba(225,29,72,0.06)", headerBgMd:"rgba(225,29,72,0.09)",
 };
 
+/**
+ * Theme picker metadata (label/description shown in the theme menu).
+ * `tokens` is always null here — the actual palette is resolved via getThemeTokens(key).
+ * NOTE: the "arctic" entry is described as "Icy white & blue" but Z_ARCTIC is
+ * actually the purple "Aurora" palette. Update the label/desc if that confuses users.
+ */
 const ALL_THEMES = {
   dark:     { key:"dark",     label:"🌙 Dark Mode",       desc:"Default navy",         tokens:null },
   light:    { key:"light",    label:"☀️ Light Mode",      desc:"Clean & bright",       tokens:null },
@@ -140,6 +188,12 @@ const ALL_THEMES = {
   rose:     { key:"rose",     label:"🌸 Rose",             desc:"Blush & deep rose",    tokens:null },
 };
 
+/**
+ * Resolve a saved theme key (e.g. "forest") to its colour palette.
+ * Unknown/missing keys fall back to the default dark theme `Z`.
+ * @param {string} themeKey
+ * @returns {typeof Z}
+ */
 function getThemeTokens(themeKey) {
   switch(themeKey) {
     case "light":    return Z_LIGHT;

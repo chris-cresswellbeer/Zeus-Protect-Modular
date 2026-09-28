@@ -6,11 +6,16 @@
 import React from "react";
 import { Screen, SectionLabel, PrimaryButton } from "../ui";
 
+// Same icon mapping as the desktop Documents tab.
 const EXT_ICONS = {
   PDF: "📕", DOCX: "📘", DOC: "📘", XLSX: "📗", XLS: "📗",
   PPTX: "📙", PPT: "📙", PNG: "🖼️", JPG: "🖼️", JPEG: "🖼️", TXT: "📄", CSV: "📊",
 };
 
+// Props: docs (all documents), required (docs assigned to this user), acknowledgements
+// ({[docId]:{date}} for THIS user), onAcknowledge(doc) → queued write, onPreview(doc)
+// → opens the shared PreviewModal via App.jsx. The file-type icon comes from the file
+// name's extension, falling back to doc.ext.
 function Documents({ docs, required, acknowledgements, onAcknowledge, onPreview, Z, font }) {
   const unread = required.filter((d) => !acknowledgements[d.id]);
   const others = docs.filter((d) => !required.find((r) => r.id === d.id));

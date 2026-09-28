@@ -1,3 +1,11 @@
+/**
+ * data/seedPermits.js — Permit to Work types (with their default hazards, precautions)
+ * and the PPE option list.
+ * REFERENCE DATA — used by the live app on every load. Editing it changes the app for
+ * everyone on the next deploy (it is code, not database data).
+ * Used by the desktop PermitForm AND the mobile Permits screen, so the wording is
+ * identical on both. Permits store the type `id` and ticked hazard/precaution text.
+ */
 const PERMIT_TYPES = [
   { id:"hot_works",    label:"Hot Works",            icon:"🔥", color:"#ef4444",
     hazards:["Fire risk from sparks","Flammable materials nearby","Gas/fume ignition risk","Oxygen enrichment"],

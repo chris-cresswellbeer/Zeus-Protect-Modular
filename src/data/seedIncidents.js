@@ -1,3 +1,10 @@
+/**
+ * data/seedIncidents.js — incident classification lists + demo incidents.
+ * INCIDENT_TYPES, ACCIDENT_CODES, NUMBER_CODES, INJURY_TYPES are REFERENCE DATA used by
+ *   the incident forms, filters, charts and exports; incidents store the id/code values.
+ * INIT_INCIDENTS is SEED / DEMO DATA — only used as a fallback when the matching Supabase table is empty
+ * (e.g. a brand-new install). Once real rows exist, edits here have NO effect.
+ */
 const INCIDENT_TYPES = [
   { id:"accident",         label:"Accident",          color:"#ef4444", bg:"rgba(239,68,68,0.12)",  icon:"🚨" },
   { id:"near_miss",        label:"Near Miss",          color:"#f59e0b", bg:"rgba(245,158,11,0.12)", icon:"⚠️" },

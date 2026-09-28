@@ -1,3 +1,14 @@
+/**
+ * data/seedTraining.js — the built-in training modules.
+ * REFERENCE DATA — used by the live app on every load. Editing it changes the app for
+ * everyone on the next deploy (it is code, not database data).
+ * Always loaded; admin edits are stored separately as `_override` copies in custom_modules
+ * (see App.jsx "Module merge model"). Module shape:
+ *   { id, title, category, duration, level: Mandatory|Recommended|Optional, icon,
+ *     renewalMonths, renewalLabel, content:[{heading, text, images?, video?, hotspots?}],
+ *     quiz:[{ q, options:[...], answer:<index> }] }
+ * ⚠ Completions/assignments reference module `id` — never change an existing id.
+ */
 const TRAINING_MODULES = [
   {
     id:"m1", title:"Fire Safety Fundamentals", category:"Fire Safety",

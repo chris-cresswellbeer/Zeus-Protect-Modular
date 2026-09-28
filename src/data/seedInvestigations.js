@@ -1,3 +1,9 @@
+/**
+ * data/seedInvestigations.js — demo investigations keyed by incident id (matches INIT_INCIDENTS).
+ * SEED / DEMO DATA — only used as a fallback when the matching Supabase table is empty
+ * (e.g. a brand-new install). Once real rows exist, edits here have NO effect.
+ * Shape documented in domains/incidents/InvestigationTab.jsx.
+ */
 const INIT_INVESTIGATIONS = {
   i2401: {
     investigator:"Linda Osei", investigationDate:"2024-01-11", status:"closed",

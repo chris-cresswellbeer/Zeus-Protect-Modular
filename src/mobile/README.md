@@ -23,9 +23,9 @@ src/mobile/
     ModulePlayer.jsx     Intro → slides → one-question quiz → certificate
     ReportHazard.jsx     Three-step hazard report with camera and dictation
     Documents.jsx        Required reading + acknowledgement
-    DSEMobile.jsx        DSE self-assessment, one question per screen
+    DSEMobile.jsx        (planned — not in the codebase; DSE stays on desktop)
     More.jsx             More tab + certificates, actions, history, appearance
-    Admin.jsx            Admin overview + hazard triage
+    Admin.jsx            (planned — not in the codebase)
 public/
   manifest.webmanifest
   sw.js

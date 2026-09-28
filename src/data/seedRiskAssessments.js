@@ -1,3 +1,9 @@
+/**
+ * data/seedRiskAssessments.js — the site's baseline risk assessments + blank hazard template.
+ * INIT_RAS: ⚠ unlike most seed data these are ALWAYS loaded; saved edits (risk_assessments
+ *   table, same id) are merged on top in App.jsx. They also generate Documents-library entries.
+ * EMPTY_HAZARD(): factory for a new hazard row (call it — it returns a fresh object with a new id).
+ */
 const INIT_RAS = [
   {
     id:"ra001", title:"Manual Handling of Warehouse Goods", location:"Warehouse — Goods-In & Despatch",

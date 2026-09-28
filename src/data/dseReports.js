@@ -1,3 +1,11 @@
+/**
+ * data/dseReports.js — demo DSE reports + a helper that builds a report.
+ * SEED / DEMO DATA — only used as a fallback when the matching Supabase table is empty
+ * (e.g. a brand-new install). Once real rows exist, edits here have NO effect.
+ * makeDseReport(userId, userName, answers, comments, date) produces the same report
+ * shape DSEAssessment.submit() creates (see domains/dse for the data model).
+ * INIT_DSE_REPORTS = { [userId]: [report, ...] }.
+ */
 import { DSE_SECTIONS } from "./seedDse";
 
 function makeDseReport(userId, userName, answers, comments, date) {

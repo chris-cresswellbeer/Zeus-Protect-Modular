@@ -3,9 +3,28 @@ import { Pill } from "../../shared/primitives";
 import { sb, dbWrite } from "../../lib/supabase";
 import { ACCEPT_IMG_DOCS } from "../../lib/constants";
 import { DocAssignPanel } from "./DocAssignPanel";
+import { NewVersionModal } from "../../shared/NewVersionModal";
+import { auditEvent } from "../../lib/audit";
 
-function DocCard({ d, staff, assignedIds, assignedStaff, readCount, unreadCount, icon, docAcknowledgements, setDocAcknowledgements, setDocAssignments, dbSaveDocAssignments, setDocs, dbDeleteDoc, dbSaveDoc, setPreviewDoc, T, font }) {
+/**
+ * DocCard — one document in the admin Documents library.
+ *
+ * Shows title/type/version, read-count vs. assigned staff, review-date status
+ * (overdue / due within 30 days), an editable description, and actions:
+ * Preview, Assign (expands DocAssignPanel), "New Version" upload, Versions, Delete.
+ *
+ * VERSIONING: "New Version" asks minor/major (NewVersionModal). The previous file is
+ * kept (each version is uploaded to its own path, doc_<id>_v<n>_<name>) and listed in
+ * d.history; everyone's earlier read confirmations stay in doc_ack_history.
+ *
+ * Props are mostly pass-throughs of App.jsx state + db helpers
+ * (setDocs, dbSaveDoc, dbDeleteDoc, setDocAssignments, dbSaveDocAssignments,
+ *  setDocAcknowledgements, setPreviewDoc…), plus pre-computed counts from the parent.
+ */
+function DocCard({ d, staff, assignedIds, assignedStaff, readCount, unreadCount, icon, docAcknowledgements, setDocAcknowledgements, setDocAssignments, dbSaveDocAssignments, setDocs, dbDeleteDoc, dbSaveDoc, setPreviewDoc, docAckHistory = [], T, font }) {
   const [expanded, setExpanded] = React.useState(false);
+  const [pendingFile, setPendingFile] = React.useState(null); // new-version file awaiting the minor/major choice
+  const [showVersions, setShowVersions] = React.useState(false);
   const [editingReview, setEditingReview] = React.useState(false);
   const [reviewInput, setReviewInput] = React.useState(d.reviewDate||"");
   const [editingDesc, setEditingDesc] = React.useState(false);
@@ -23,6 +42,7 @@ function DocCard({ d, staff, assignedIds, assignedStaff, readCount, unreadCount,
     : reviewDate ? {label:`Review: ${reviewDate}`, color:T.muted, bg:"transparent", border:"transparent"}
     : null;
 
+  // Review date and description edits save metadata only (file = null → no re-upload).
   function saveReviewDate(val) {
     const updated = {...d, reviewDate: val||null};
     setDocs(p=>p.map(x=>x.id===d.id?updated:x));
@@ -36,6 +56,62 @@ function DocCard({ d, staff, assignedIds, assignedStaff, readCount, unreadCount,
     dbSaveDoc(updated, null);
     setEditingDesc(false);
   }
+
+  // Upload `file` as version n+1. The old version's details go into d.history (its file
+  // stays in storage under its own path). "major" clears every current read confirmation
+  // so everyone assigned must read it again — the earlier confirmations remain in
+  // doc_ack_history. "minor" keeps them (each records the version that was read).
+  function uploadNewVersion(file, change, note) {
+    const prevVer = d.version||1, newVer = prevVer+1, today = new Date().toISOString().slice(0,10);
+    const ext2=file.name.split(".").pop().toUpperCase();
+    const path2=`doc_${d.id}_v${newVer}_${file.name.replace(/[^a-zA-Z0-9._-]/g,"_")}`;
+    const prevEntry={version:prevVer,date:d.date,fileName:d.fileName||"",fileUrl:d.fileUrl||d.fileData||null,size:d.size||"",ext:d.ext||"",replacedOn:today,replacedBy:change,note:note||""};
+    const newDoc={...d,version:newVer,date:today,size:`${(file.size/1024).toFixed(0)} KB`,fileName:file.name,ext:ext2,
+      history:[...(d.history||[]),prevEntry],versionNote:note||"",versionChange:change};
+    let cleared=0;
+    if (change==="major") {
+      cleared=Object.keys(docAcknowledgements).filter(uid=>docAcknowledgements[uid]&&docAcknowledgements[uid][d.id]).length;
+      setDocAcknowledgements(p=>{
+        const n={};
+        Object.keys(p).forEach(uid=>{ n[uid]={...p[uid]}; if(n[uid][d.id]) delete n[uid][d.id]; });
+        return n;
+      });
+      Object.keys(docAcknowledgements).forEach(uid=>{
+        if(docAcknowledgements[uid]&&docAcknowledgements[uid][d.id]) dbWrite(sb.from("doc_acknowledgements").delete().match({user_id:String(uid),doc_id:String(d.id)}), "doc acknowledgement delete");
+      });
+    }
+    sb.storage.upload("documents",path2,file).then(({error})=>{
+      if (error) { console.error("New version upload failed:", error); alert("Upload failed: " + error); return; }
+      newDoc.fileUrl=sb.storage.getPublicUrl("documents",path2);
+      newDoc.fileData=newDoc.fileUrl;
+      setDocs(p=>p.map(x=>x.id===d.id?newDoc:x));
+      dbSaveDoc(newDoc,null);
+      auditEvent("document", d.id, "new_version",
+        `Version ${newVer} (${change==="major"?`major — ${cleared} ${cleared===1?"person":"people"} must re-read`:"minor — read confirmations kept"})${note?`: ${note}`:""}`,
+        { version:{from:prevVer,to:newVer}, fileName:{from:d.fileName||"",to:file.name} }, d.title);
+    });
+  }
+
+  function confirmDelete() {
+    if (d.raId) {
+      window.alert(`"${d.title}" is created from a risk assessment, so it can't be removed here.\n\nTo remove it, delete or change the risk assessment under Risk Assessments.`);
+      return;
+    }
+    const lines = [`Delete "${d.title}"?`, ""];
+    if (assignedStaff.length) lines.push(`It is assigned to ${assignedStaff.length} staff member${assignedStaff.length!==1?"s":""} (${readCount} ha${readCount!==1?"ve":"s"} confirmed reading it). Their assignments and read confirmations will be removed too.`, "");
+    lines.push("The file will be deleted. This cannot be undone.");
+    if (!window.confirm(lines.join("\n"))) return;
+    setDocs(p=>p.filter(x=>x.id!==d.id));
+    dbDeleteDoc(d.id,d.fileName);
+    auditEvent("document", d.id, "delete", `Deleted document "${d.title}" (v${d.version||1})`,
+      { title:{from:d.title,to:null}, fileName:{from:d.fileName||"",to:null}, assignedTo:{from:assignedStaff.length,to:0}, confirmedReading:{from:readCount,to:0} }, d.title);
+  }
+
+  const myHistory = docAckHistory.filter(h=>String(h.doc_id)===String(d.id));
+  const versionRows = [
+    { version:d.version||1, date:d.date, fileName:d.fileName, fileUrl:d.fileUrl||d.fileData, current:true, note:d.versionNote||"" },
+    ...[...(d.history||[])].reverse(),
+  ];
 
   return (
     <div style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:16,border:`1px solid ${reviewOverdue?"rgba(239,68,68,0.4)":reviewSoon?"rgba(245,158,11,0.35)":T.border}`,overflow:"hidden"}}>
@@ -105,37 +181,51 @@ function DocCard({ d, staff, assignedIds, assignedStaff, readCount, unreadCount,
         <label style={{background:"rgba(37,99,235,0.1)",color:"#93c5fd",border:"1px solid rgba(37,99,235,0.25)",borderRadius:8,padding:"7px 12px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font,whiteSpace:"nowrap"}}>
           ↑ New Version
           <input type="file" accept={ACCEPT_IMG_DOCS} style={{display:"none"}}
+            // NEW VERSION FLOW: pick file → NewVersionModal (minor/major + note) → uploadNewVersion().
             onChange={e=>{
-              const file=e.target.files[0]; if(!file) return;
-              if(!window.confirm(`Upload "${file.name}" as a new version of "${d.title}"?\n\nThis will clear all existing staff acknowledgements.`)) return;
-              const ext2=file.name.split(".").pop().toUpperCase();
-              const path2=`doc_${d.id}_${file.name.replace(/[^a-zA-Z0-9._-]/g,"_")}`;
-              const fileUrl2=sb.storage.getPublicUrl("documents",path2);
-              const newDoc={...d,version:(d.version||1)+1,date:new Date().toISOString().slice(0,10),size:`${(file.size/1024).toFixed(0)} KB`,fileName:file.name,ext:ext2,fileData:fileUrl2,fileUrl:fileUrl2};
-              setDocAcknowledgements(p=>{
-                const n={};
-                Object.keys(p).forEach(uid=>{
-                  n[uid]={...p[uid]};
-                  if(n[uid][d.id]) { delete n[uid][d.id]; dbWrite(sb.from("doc_acknowledgements").delete().match({user_id:String(uid),doc_id:String(d.id)}), "doc acknowledgement delete"); }
-                });
-                return n;
-              });
-              setDocs(p=>p.map(x=>x.id===d.id?newDoc:x));
-              sb.storage.upload("documents",path2,file).then(({error})=>{
-                if (error) { console.error("New version upload failed:", error); alert("Upload failed: " + error); return; }
-                newDoc.fileUrl=sb.storage.getPublicUrl("documents",path2);
-                newDoc.fileData=newDoc.fileUrl;
-                setDocs(p=>p.map(x=>x.id===d.id?newDoc:x));
-                dbSaveDoc(newDoc,null);
-              });
-              e.target.value="";
+              const file=e.target.files[0]; e.target.value=""; if(!file) return;
+              setPendingFile(file);
             }}/>
         </label>
-        <button onClick={()=>{setDocs(p=>p.filter(x=>x.id!==d.id));dbDeleteDoc(d.id,d.fileName);}}
+        <button onClick={()=>setShowVersions(v=>!v)}
+          style={{background:showVersions?"rgba(37,99,235,0.2)":T.headerBgMd,color:showVersions?T.accentLt:T.muted,border:`1px solid ${showVersions?T.accent+"55":T.borderMd}`,borderRadius:8,padding:"7px 12px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font,whiteSpace:"nowrap"}}>
+          v{d.version||1} · Versions
+        </button>
+        {/* Delete asks for confirmation first (it removes the file, assignments and read records).
+            Risk-assessment documents are rebuilt from their RA on every load, so they can't be
+            deleted here — the admin is told to delete or edit the risk assessment instead. */}
+        <button onClick={confirmDelete}
           style={{background:"rgba(239,68,68,0.1)",color:"#f87171",border:"1px solid rgba(239,68,68,0.25)",borderRadius:8,padding:"7px 12px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font,whiteSpace:"nowrap"}}>
           Remove
         </button>
       </div>
+      {pendingFile && (
+        <NewVersionModal kind="document" title={`${d.title} — ${pendingFile.name}`} fromVersion={d.version||1}
+          affectedCount={Object.keys(docAcknowledgements).filter(uid=>docAcknowledgements[uid]&&docAcknowledgements[uid][d.id]).length}
+          onConfirm={(change,note)=>{ const f=pendingFile; setPendingFile(null); uploadNewVersion(f,change,note); }}
+          onCancel={()=>setPendingFile(null)} Z={T} font={font}/>
+      )}
+      {showVersions && (
+        <div style={{borderTop:`1px solid ${T.border}`,padding:"12px 20px 16px"}}>
+          <div style={{fontSize:11,fontWeight:700,color:T.muted,letterSpacing:.5,textTransform:"uppercase",marginBottom:8}}>Version history</div>
+          {versionRows.map(v=>{
+            const reads = myHistory.filter(h=>(h.version||1)===v.version);
+            const readers = Array.from(new Set(reads.map(h=>String(h.user_id))));
+            return (
+              <div key={v.version} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:`1px solid ${T.border}`,flexWrap:"wrap"}}>
+                <span style={{fontWeight:800,fontSize:13,color:v.current?T.gold:T.white,minWidth:36}}>v{v.version}</span>
+                <span style={{fontSize:12,color:T.muted,flex:1,minWidth:160}}>
+                  {v.current?"Current · ":""}{v.date||""}{v.fileName?` · ${v.fileName}`:""}{v.replacedOn?` · replaced ${v.replacedOn} (${v.replacedBy==="major"?"major":"minor"} change)`:""}
+                  {v.note?<span style={{display:"block",color:T.slate}}>{v.note}</span>:null}
+                </span>
+                <span title={readers.map(uid=>(staff.find(u=>String(u.id)===uid)||{}).name||uid).join(", ")} style={{fontSize:12,color:T.green,fontWeight:700}}>{readers.length} read</span>
+                {v.fileUrl && <a href={v.fileUrl} target="_blank" rel="noreferrer" style={{fontSize:12,color:T.accentLt,fontWeight:700,textDecoration:"none"}}>Open ↗</a>}
+              </div>
+            );
+          })}
+          <div style={{fontSize:11,color:T.muted,marginTop:8}}>Hover a "read" count to see who confirmed that version.</div>
+        </div>
+      )}
       {expanded && (
         <DocAssignPanel d={d} staff={staff} assignedIds={assignedIds} docAcknowledgements={docAcknowledgements} setDocAssignments={setDocAssignments} dbSaveDocAssignments={dbSaveDocAssignments} T={T} font={font}/>
       )}

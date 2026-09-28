@@ -1,6 +1,17 @@
 import React from "react";
 import { Avatar } from "../../shared/primitives";
 
+/**
+ * DocAssignPanel — inline "who must read this?" picker shown under a document
+ * card in the admin Documents library (rendered by DocCard).
+ *
+ * Lists all staff (searchable by name/job title) with a tick for those assigned
+ * and a Read/Pending badge from docAcknowledgements. "Clear all" unassigns everyone.
+ *
+ * Props: d (document), staff, assignedIds (string user ids), docAcknowledgements,
+ *        setDocAssignments (App state setter), dbSaveDocAssignments(docId, ids), T (theme), font.
+ * All ids are compared as strings.
+ */
 function DocAssignPanel({ d, staff, assignedIds, docAcknowledgements, setDocAssignments, dbSaveDocAssignments, T, font }) {
   const [docSearch, setDocSearch] = React.useState("");
   const filteredForDoc = staff.filter(u=>
@@ -42,7 +53,7 @@ function DocAssignPanel({ d, staff, assignedIds, docAcknowledgements, setDocAssi
                 <div style={{fontSize:13,fontWeight:isAssigned?700:400,color:isAssigned?"#fff":T.muted,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{u.name}</div>
                 {u.jobTitle && <div style={{fontSize:10,color:T.muted,marginTop:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{u.jobTitle}{u.manager?` · ${u.manager}`:""}</div>}
               </div>
-              {isAssigned && <span style={{fontSize:10,fontWeight:700,flexShrink:0,color:ack?T.green:"#f87171"}}>{ack?`✓ Read ${ack.date}`:"⏳ Pending"}</span>}
+              {isAssigned && <span style={{fontSize:10,fontWeight:700,flexShrink:0,color:ack?T.green:"#f87171"}}>{ack?`✓ Read v${ack.version||1} ${ack.date}`:"⏳ Pending"}</span>}
             </div>
           );
         })}

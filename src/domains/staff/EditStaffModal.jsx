@@ -3,7 +3,17 @@ import { useWindowWidth } from "../../shared/hooks";
 import { Avatar } from "../../shared/primitives";
 import { hashPassword } from "../../lib/supabase";
 
-function EditStaffModal({ staffUser, allUsers, setAllUsers, passwords, setPasswords, onClose, onSaveProfile, Z, font }) {
+/**
+ * EditStaffModal — admin edit of one staff record: name, email (must be unique),
+ * job title, manager, department, role (staff/manager/admin), warehouse-worker flag,
+ * status (active / inactive / leaver — leavers cannot log in), and an optional
+ * password reset.
+ * onSaveProfile(updated) → App.jsx saves to users + user_profiles.
+ * A reset password is hashed and saved for this one user via onSetPassword (App.jsx savePasswordFor → user_passwords).
+ * NB: renaming someone does not update investigation actions assigned to their old
+ * name (actions store the owner's NAME).
+ */
+function EditStaffModal({ staffUser, allUsers, setAllUsers, passwords, onSetPassword, onClose, onSaveProfile, Z, font }) {
   const isMobile = useWindowWidth() <= 1024;
   const [name,              setName]             = useState(staffUser.name);
   const [email,             setEmail]            = useState(staffUser.email);
@@ -29,7 +39,8 @@ function EditStaffModal({ staffUser, allUsers, setAllUsers, passwords, setPasswo
     if (onSaveProfile) onSaveProfile(updated);
     if (resetPw && newPw) {
       hashPassword(newPw).then(hashed => {
-        setPasswords(p=>({...p,[staffUser.id]:hashed}));
+        // Saves this staff member's password only (App.jsx savePasswordFor).
+        onSetPassword(staffUser.id, hashed);
       });
     }
     setSaved(true); setErr("");
@@ -81,7 +92,9 @@ function EditStaffModal({ staffUser, allUsers, setAllUsers, passwords, setPasswo
           </div>
           <div>
             <label style={labelStyle}>LINE MANAGER</label>
-            <input value={manager} onChange={e=>{setManager(e.target.value);setSaved(false);}} style={inputStyle} placeholder="e.g. John Smith"/>
+            <input value={manager} onChange={e=>{setManager(e.target.value);setSaved(false);}} style={inputStyle} placeholder="e.g. John Smith" list="zp-edit-manager-names"/>
+            {/* Suggest the names of line-manager accounts, so the My Team match is exact. */}
+            <datalist id="zp-edit-manager-names">{allUsers.filter(u=>u.role==="manager").map(u=><option key={u.id} value={u.name}/>)}</datalist>
           </div>
           <div>
             <label style={labelStyle}>DEPARTMENT</label>
@@ -92,6 +105,7 @@ function EditStaffModal({ staffUser, allUsers, setAllUsers, passwords, setPasswo
             <select value={role} onChange={e=>{setRole(e.target.value);setSaved(false);}}
               style={{...inputStyle,cursor:"pointer"}}>
               <option value="staff">Staff</option>
+              <option value="manager">Line manager</option>
               <option value="admin">Admin</option>
             </select>
           </div>

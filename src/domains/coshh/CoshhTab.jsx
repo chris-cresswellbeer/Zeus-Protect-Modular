@@ -5,15 +5,34 @@ import { sb, dbWrite } from "../../lib/supabase";
 import { coshhHazardLevel } from "./coshhHazardLevel";
 import { COSHH_DATA } from "../../data/seedCoshh";
 import { CoshhAssessmentForm } from "./CoshhAssessmentForm";
+import { auditRecord } from "../../lib/audit";
 
-function CoshhTab({ Z, font, msdsFiles, setMsdsFiles, customChemicals, setCustomChemicals }) {
+/**
+ * CoshhTab — admin COSHH register (Control of Substances Hazardous to Health).
+ *
+ * Lists every substance = built-in COSHH_DATA (data/seedCoshh.js) + admin-added
+ * customChemicals, with search / supplier / hazard-level filters. Each row expands to:
+ *   • hazard info (CLP classification, UN number, hazard band from coshhHazardLevel)
+ *   • the Safety Data Sheet (MSDS/SDS) upload, preview and removal
+ *   • a COSHH assessment form (CoshhAssessmentForm) and its saved summary
+ *   • delete (custom substances only)
+ *
+ * STORAGE
+ *   custom_chemicals   { code (unique), data }          ← loaded by App.jsx
+ *   msds_files         { code, file_name, file_url, uploaded_at } ← loaded by App.jsx
+ *   coshh_assessments  { code, data }                   ← loaded by App.jsx
+ *   SDS files: "documents" bucket, path msds_<code>_<sanitisedFileName>
+ *
+ * Assessments are held in App state (loaded by loadAll) and passed in as
+ * `assessments` / `setAssessments`, so they survive a reload.
+ */
+function CoshhTab({ Z, font, msdsFiles, setMsdsFiles, customChemicals, setCustomChemicals, assessments, setAssessments }) {
   const isMobile = useWindowWidth() <= 1024;
   const [search, setSearch] = useState("");
   const [supplierFilter, setSupplierFilter] = useState("all");
   const [hazardFilter, setHazardFilter] = useState("all");
   const [expandedCode, setExpandedCode] = useState(null);
   const [previewMsds, setPreviewMsds] = useState(null);
-  const [assessments, setAssessments] = useState({}); // { chemCode: assessmentData }
   const [editingAssessment, setEditingAssessment] = useState(null); // chemCode being edited
 
   const [showAddForm, setShowAddForm] = useState(false);
@@ -46,6 +65,7 @@ function CoshhTab({ Z, font, msdsFiles, setMsdsFiles, customChemicals, setCustom
 
   const inp = {width:"100%",background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:10,padding:"9px 13px",color:Z.white,fontSize:13,outline:"none",fontFamily:font,boxSizing:"border-box"};
 
+  // Add a custom substance. `code` is the unique key (product code) — duplicates are rejected.
   function saveChemical() {
     if (!addForm.code.trim()) { setAddErr("Zeus Code is required."); return; }
     if (!addForm.name.trim()) { setAddErr("Product name is required."); return; }
@@ -61,9 +81,14 @@ function CoshhTab({ Z, font, msdsFiles, setMsdsFiles, customChemicals, setCustom
 
   async function saveAssessment(code, data) {
     setAssessments(p=>({...p,[code]:data}));
+    const chem = allChemicals.find(c=>c.code===code);
+    auditRecord("coshh_assessment", code, data, [code, chem && chem.name].filter(Boolean).join(" · "));
     await dbWrite(sb.from("coshh_assessments").upsert({ code, data }, { onConflict: "code" }), "COSHH assessment", { alertOnError: true });
   }
 
+  // ⚠ Removes the SDS file at msds/<code>/<fileName>, but uploads use the flat path
+  // msds_<code>_<safeName> (see handleMsdsUpload/removeMsds), so the file itself is
+  // left behind in storage. Use the same path as removeMsds to fix.
   async function deleteChemical(code) {
     setCustomChemicals(prev=>prev.filter(c=>c.code!==code));
     const msds = msdsFiles[code];
@@ -74,6 +99,7 @@ function CoshhTab({ Z, font, msdsFiles, setMsdsFiles, customChemicals, setCustom
     if(expandedCode===code) setExpandedCode(null);
   }
 
+  // Upload an SDS for a substance, replacing any previous one for the same code.
   async function handleMsdsUpload(code, file) {
     // Use a flat path with no subfolders to avoid encoding issues
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -100,6 +126,7 @@ function CoshhTab({ Z, font, msdsFiles, setMsdsFiles, customChemicals, setCustom
     await dbWrite(sb.from("msds_files").delete().eq("code", code), "MSDS record delete");
   }
 
+  // (Early return: while previewMsds is set, only the preview modal renders. All hooks are above.)
   // MSDS full-screen preview modal
   if (previewMsds) {
     const isPdf = previewMsds.fileName.toLowerCase().endsWith(".pdf");

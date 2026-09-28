@@ -1,6 +1,20 @@
 import { useState } from "react";
 import { Pill, Avatar, StatCard } from "../../shared/primitives";
 
+/**
+ * AdminDSETab — admin review of staff DSE (Display Screen Equipment) self-assessments.
+ * Shown inside Reports → "DSE". Lists every staff member's LATEST report; expanding one
+ * shows each flagged issue with the staff comment, and lets the admin write a response
+ * and mark it resolved (saved via App.jsx's adminResponses auto-sync effect).
+ *
+ * DSE DATA MODEL (shared by all three DSE components)
+ *   dseReports     = { [userId]: [ report, report, ... ] }   ← oldest first; the LAST one is current
+ *   report         = { userId, userName, date, answers:{[qid]:bool}, issues:[{section, sectionIcon,
+ *                      question, risk, comment}], totalQuestions, issueCount }
+ *   adminResponses = { [userId]: { "<reportIndex>_<issueIndex>": { comment, resolved } } }
+ *   Responses are keyed by array POSITION, so reports must never be reordered or
+ *   deleted from the middle of a user's list. Questions come from data/seedDse.js (DSE_SECTIONS).
+ */
 function AdminDSETab({ staff, dseReports, adminResponses, setAdminResponses, darkMode, Z, font }) {
   const [expandedUser, setExpandedUser] = useState(null);
 
@@ -12,6 +26,7 @@ function AdminDSETab({ staff, dseReports, adminResponses, setAdminResponses, dar
     return s+reports[ri].issues.filter((_,ii)=>resp[`${ri}_${ii}`]?.resolved).length;
   },0);
 
+  // Read / patch one admin response. setResp merges `patch` into the existing entry.
   function getResp(uid,ri,ii){ return (adminResponses[uid]||{})[`${ri}_${ii}`]||{comment:"",resolved:false}; }
   function setResp(uid,ri,ii,patch){
     setAdminResponses(prev=>{
@@ -107,7 +122,7 @@ function AdminDSETab({ staff, dseReports, adminResponses, setAdminResponses, dar
                                     <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
                                       <span style={{fontSize:15}}>{issue.sectionIcon}</span>
                                       <span style={{fontSize:10,fontWeight:700,letterSpacing:1,color:resolved?Z.green:"#f87171",textTransform:"uppercase"}}>{issue.section}</span>
-                                      {resolved && <span style={{fontSize:11,color:Z.green,fontWeight:700}}>✓ RESOLVED</span>}
+                                      {resolved && <span style={{fontSize:11,color:Z.green,fontWeight:700}}>✓ RESOLVED{resp.signedOffBy?` · signed off by ${resp.signedOffBy}${resp.signedOffAt?` ${resp.signedOffAt}`:""} (line manager)`:""}</span>}
                                     </div>
                                     <p style={{fontWeight:600,fontSize:13,margin:"0 0 4px",color:Z.white,lineHeight:1.5}}>{issue.question}</p>
                                     <p style={{fontSize:11,color:Z.muted,margin:0,lineHeight:1.5}}>⚠ {issue.risk}</p>

@@ -27,6 +27,7 @@ import { INCIDENT_TYPES, ACCIDENT_CODES, NUMBER_CODES } from "../../data/seedInc
  * auto-sync effect (see the dbSaveIncident warning about unsaved fields).
  */
 import { isIncompleteQuickReport } from "./quickReportStatus";
+import { AuditHistoryModal } from "../audit/AuditTrailTab";
 
 // Urgency chosen on a quick hazard report (QuickReportModal / mobile ReportHazard).
 const QUICK_URGENCY_LABEL = { low:"Safe to leave", medium:"Needs attention", high:"STOP WORK" };
@@ -60,6 +61,7 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
   const [editErr, setEditErr]           = useState("");
   const [editSaved, setEditSaved]       = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [historyForId, setHistoryForId] = useState(null); // incident whose audit history pop-up is open
   const [showAccidentBook, setShowAccidentBook] = useState(false);
   const [abDateFrom, setAbDateFrom] = useState(() => { const d = new Date(); d.setFullYear(d.getFullYear()-1); return d.toISOString().slice(0,10); });
   const [abDateTo, setAbDateTo] = useState(new Date().toISOString().slice(0,10));
@@ -809,6 +811,13 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
                         style={{background:"rgba(139,92,246,0.12)",color:"#c4b5fd",border:"1px solid rgba(139,92,246,0.3)",borderRadius:10,padding:"9px 20px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:13}}>
                         🔍 {investigations[inc.id] ? "View Investigation" : "Start Investigation"}
                       </button>
+                      <button onClick={()=>setHistoryForId(inc.id)}
+                        style={{background:Z.overlay,color:Z.slate,border:`1px solid ${Z.borderMd}`,borderRadius:10,padding:"9px 20px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:13}}>
+                        🕘 History
+                      </button>
+                      {historyForId===inc.id && (
+                        <AuditHistoryModal title={[inc.date, inc.location].filter(Boolean).join(" · ")} entityIds={[String(inc.id)]} onClose={()=>setHistoryForId(null)} Z={Z} font={font}/>
+                      )}
                       <button onClick={()=>toggleClose(inc.id)}
                         style={{background:inc.closed?`linear-gradient(135deg,${Z.amber},#d97706)`:`linear-gradient(135deg,${Z.green},#059669)`,
                           color:"#fff",border:"none",borderRadius:10,padding:"9px 20px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:13,

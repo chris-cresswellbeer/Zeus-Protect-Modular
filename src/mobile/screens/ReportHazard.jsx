@@ -15,6 +15,8 @@ const URGENCY_OPTIONS = [
   { id: "high",   label: "STOP WORK — urgent", desc: "Immediate risk — escalate now",            icon: "🔴", color: "#ef4444", bg: "rgba(239,68,68,0.12)", border: "rgba(239,68,68,0.45)" },
 ];
 
+// NB: no alert/text/email is sent for a hazard report — the confirmation says so,
+// and tells staff to escalate STOP WORK hazards in person.
 // Props: user, managerName (shown on the confirmation), suggestedLocation, online
 // (changes the confirmation wording), onSubmit(record), onDone, Z, font.
 // Photos are compressed on the phone (lib/photos.js) and uploaded when the incident is
@@ -278,9 +280,20 @@ function ReportHazard({ user, managerName, suggestedLocation, online, onSubmit, 
           </h2>
           <p style={{ color: Z.muted, fontSize: 13.5, lineHeight: 1.6, margin: "0 0 20px" }}>
             You&rsquo;ve done the important bit. {online
-              ? `${managerName || "Your H&S manager"} has been notified.`
-              : `It's stored on your phone and will reach ${managerName || "your H&S manager"} as soon as you have signal.`}
+              ? `It's logged in the portal for ${managerName || "your H&S manager"} to review.`
+              : `It's stored on your phone and will reach the portal as soon as you have signal.`}
           </p>
+          {/* No alert, text or email is sent for any report — so for STOP WORK,
+              tell the person to escalate in person rather than implying someone knows. */}
+          <div style={{
+            background: urgency === "high" ? `${Z.red}1A` : Z.overlay,
+            border: `1px solid ${urgency === "high" ? `${Z.red}66` : Z.borderMd}`, borderRadius: 14,
+            padding: "11px 14px", marginBottom: 12, fontSize: 12.5, color: Z.slate, textAlign: "left", lineHeight: 1.5,
+          }}>
+            {urgency === "high"
+              ? <><b style={{ color: Z.red }}>STOP WORK — tell someone now.</b> This report doesn&rsquo;t send an alarm, text or email. Make the area safe if you can do so without risk, and tell your supervisor or manager in person straight away.</>
+              : <>This report doesn&rsquo;t send an alarm, text or email. If it needs sorting quickly, tell your supervisor too.</>}
+          </div>
           <div style={{
             background: `${Z.amber}14`, border: `1px solid ${Z.amber}55`, borderRadius: 14,
             padding: "11px 14px", marginBottom: 18, fontSize: 12.5, color: Z.slate, textAlign: "left", lineHeight: 1.5,

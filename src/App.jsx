@@ -70,7 +70,7 @@ import { EXT_CERT_TYPES } from "./data/seedExtCerts";
 import { INIT_FIRE_WARDENS, INIT_FIRE_DRILLS, INIT_ALARM_TESTS, INIT_EXTINGUISHERS, INIT_EMERG_LIGHTING, INIT_FRA_REVIEWS } from "./data/seedFireSafety";
 import { FA_ZONES } from "./data/seedFirstAid";
 import { INIT_INCIDENTS } from "./data/seedIncidents";
-import { INIT_SITE_INSPECTIONS } from "./data/seedInspections";
+import { INIT_SITE_INSPECTIONS, INSP_TYPES } from "./data/seedInspections";
 import { PERMIT_TYPES } from "./data/seedPermits";
 import { INIT_INVESTIGATIONS } from "./data/seedInvestigations";
 import { isWarehouseWorker, INIT_MACHINE_COMPS, MACHINERY_TYPES } from "./data/seedMachinery";
@@ -81,6 +81,8 @@ import { USERS } from "./data/seedUsers";
 // opened (code-splitting). Each lazy tab must be rendered inside <React.Suspense>.
 // The `.then(m => ({ default: m.X }))` adapts a NAMED export to what React.lazy expects.
 const LazyContractorsTab = React.lazy(() => import("./domains/contractors/ContractorsTab").then(m => ({ default: m.ContractorsTab })));
+const LazyMyTeamTab = React.lazy(() => import("./domains/manager/MyTeamTab").then(m => ({ default: m.MyTeamTab })));
+const LazyAuditTrailTab = React.lazy(() => import("./domains/audit/AuditTrailTab").then(m => ({ default: m.AuditTrailTab })));
 const LazyCoshhTab = React.lazy(() => import("./domains/coshh/CoshhTab").then(m => ({ default: m.CoshhTab })));
 import { DocCard } from "./domains/documents/DocCard";
 import { ExternalCertsSection } from "./domains/documents/ExternalCertsSection";
@@ -123,6 +125,9 @@ import { useWindowWidth, MobileCard, MobileCardRow } from "./shared/hooks";
 import { Pill, Avatar, Bar } from "./shared/primitives";
 import { Z, getThemeTokens } from "./theme/tokens";
 import MobileApp from "./mobile/MobileApp.jsx";
+import { NewVersionModal } from "./shared/NewVersionModal";
+import { teamOf } from "./domains/manager/team";
+import { setAuditUser, primeAudit, primeAuditList, primeAuditMap, auditRecord, auditList, auditDelete, auditEvent } from "./lib/audit";
 
 // Wraps a dashboard stat card to make it draggable. Only the small handle in
 // the corner starts a drag — the rest of the card keeps its own onClick
@@ -155,6 +160,19 @@ function SortableStatCard({ id, children }) {
  * State below is grouped roughly as: auth/session → training → documents → DSE →
  * incidents/investigations → other H&S registers → admin UI form state.
  */
+// Short human-readable labels for audit-trail entries.
+const INCIDENT_TYPE_LABELS = { accident:"Accident", near_miss:"Near miss", unsafe_condition:"Unsafe condition", unsafe_act:"Unsafe act" };
+const incidentAuditLabel = (inc) => inc ? [inc.date, INCIDENT_TYPE_LABELS[inc.type] || inc.type, inc.location].filter(Boolean).join(" · ") : "";
+
+// Incident fields that have their own column in the `incidents` table.
+// Everything else on an incident record is stored in the jsonb `details` column.
+const INCIDENT_CORE_KEYS = new Set([
+  "id","date","type","accidentCode","numberCode","location","reportedBy",
+  "description","injuryType","riddor","closed","photos",
+  "riddorReported","riddorReportedDate","hseReference","riddorReportedBy",
+  "quickReport","urgency",
+]);
+
 export default function App() {
   const [darkMode, setDarkMode] = useState(true); // kept for backward compat
   const [theme, setTheme] = useState("dark"); // "dark"|"light"|"slate"|"forest"|"graphite"|"arctic"|"sand"
@@ -194,7 +212,12 @@ export default function App() {
   const [docName, setDocName] = useState("");
   const [previewDoc, setPreviewDoc] = useState(null);
   const [docAssignments, setDocAssignments] = useState({}); // { docId: [userId, ...] }
-  const [docAcknowledgements, setDocAcknowledgements] = useState({}); // { userId: { docId: { date } } }
+  const [docAcknowledgements, setDocAcknowledgements] = useState({}); // { userId: { docId: { date, version } } }
+  // ── Versioning history (append-only tables, see audit_manager_versioning.sql) ──
+  const [docAckHistory, setDocAckHistory] = useState([]);   // every "I've read this": { user_id, doc_id, version, date }
+  const [compHistory, setCompHistory]     = useState([]);   // every quiz result: { user_id, module_id, module_version, score, date, cert_id }
+  const [moduleVersions, setModuleVersions] = useState([]); // snapshots of superseded module versions: { module_id, version, data, saved_at, saved_by, change, note }
+  const [pendingModuleSave, setPendingModuleSave] = useState(null); // { m, prev } while the admin chooses minor/major
   // ── DSE (Display Screen Equipment) self-assessment wizard state + stored reports ──
   const [dseActive, setDseActive] = useState(false);
   const [dseAnswers, setDseAnswers] = useState({});
@@ -223,6 +246,7 @@ export default function App() {
   const [extCerts, setExtCerts] = useState({}); // { userId: { certType: { fileName, fileUrl, issuedDate, expiryDate, uploadedAt } } }
   const [msdsFiles, setMsdsFiles] = useState({}); // { [chemCode]: { fileName, fileData, fileUrl, uploadedAt } }
   const [customChemicals, setCustomChemicals] = useState([]);
+  const [coshhAssessments, setCoshhAssessments] = useState({}); // { chemCode: assessmentData } — coshh_assessments table
   const [emojiMode, setEmojiMode] = useState(true); // true = show emojis, false = professional mode // admin-added COSHH chemicals
   // Keep the module-level emoji flag (read by E()) in sync with state.
   // This replaces the old useContext-inside-E() approach, which violated
@@ -390,7 +414,7 @@ export default function App() {
           llRes, pwRes, usersRes, upRes, ecRes, qfRes, conRes, conIndRes,
           conCertRes, conVisitRes, permitRes, raRes, cmRes, mcRes, eqRes,
           siRes, msdsRes, ccRes, fwRes, fdRes, fatRes, fexRes, felRes,
-          ffrRes, faRes, cmtRes, dlRes,
+          ffrRes, faRes, cmtRes, dlRes, caRes, dahRes, chRes, mvRes,
         ] = await Promise.allSettled([
           sb.from("training_assigns").select("*"),
           sb.from("training_completions").select("*"),
@@ -428,6 +452,10 @@ export default function App() {
           sb.from("first_aid_register").select("*").eq("id","singleton"),
           sb.from("custom_machine_types").select("*"),
           sb.from("dashboard_layout").select("*"),
+          sb.from("coshh_assessments").select("*"),
+          sb.from("doc_ack_history").select("*"),
+          sb.from("training_completion_history").select("*"),
+          sb.from("module_versions").select("*"),
         ]);
 
         // Small helper: allSettled wraps each result in {status, value} or
@@ -436,7 +464,7 @@ export default function App() {
         // everything else's processing below.
         const rows = (res) => (res.status === "fulfilled" ? (res.value?.data ?? null) : null);
         if (usersRes.status === "rejected") console.error("Supabase load error (users):", usersRes.reason);
-        [aRes,cRes,iRes,invRes,ackRes,daRes,docRes,dseRes,resRes,llRes,pwRes,upRes,ecRes,qfRes,conRes,conIndRes,conCertRes,conVisitRes,permitRes,raRes,cmRes,mcRes,eqRes,siRes,msdsRes,ccRes,fwRes,fdRes,fatRes,fexRes,felRes,ffrRes,faRes,cmtRes,dlRes]
+        [aRes,cRes,iRes,invRes,ackRes,daRes,docRes,dseRes,resRes,llRes,pwRes,upRes,ecRes,qfRes,conRes,conIndRes,conCertRes,conVisitRes,permitRes,raRes,cmRes,mcRes,eqRes,siRes,msdsRes,ccRes,fwRes,fdRes,fatRes,fexRes,felRes,ffrRes,faRes,cmtRes,dlRes,caRes,dahRes,chRes,mvRes]
           .forEach(r => { if (r.status === "rejected") console.error("Supabase load error:", r.reason); });
 
         // Pattern used below: rows(x) → null/[] means "nothing stored" → keep seed data.
@@ -463,7 +491,7 @@ export default function App() {
           const map = {};
           cRows.forEach(r => {
             const tc_uid=String(r.user_id); map[tc_uid] = map[tc_uid] || {};
-            map[tc_uid][String(r.module_id)] = { score: r.score, date: r.date, certId: r.cert_id, answers: r.answers };
+            map[tc_uid][String(r.module_id)] = { score: r.score, date: r.date, certId: r.cert_id, answers: r.answers, moduleVersion: r.module_version || 1 };
           });
           setComps(map);
         }
@@ -472,6 +500,11 @@ export default function App() {
         const iRows = rows(iRes);
         if (iRows && iRows.length) {
           setIncidents(iRows.map(r => ({
+            // Everything the core columns don't hold (injured person, witnesses,
+            // first aid, post-incident, measures, corrective actions, equipment,
+            // time, triaged…) comes back from the jsonb `details` column.
+            // Spread first so the core columns below always win.
+            ...((r.details && typeof r.details === "object") ? r.details : {}),
             id: r.id, date: r.date, type: r.type, accidentCode: r.accident_code,
             numberCode: r.number_code, location: r.location, reportedBy: r.reported_by,
             description: r.description, injuryType: r.injury_type, riddor: r.riddor, closed: r.closed,
@@ -497,7 +530,7 @@ export default function App() {
         const ackRows = rows(ackRes);
         if (ackRows && ackRows.length) {
           const map = {};
-          ackRows.forEach(r => { const auid=String(r.user_id); const adid=String(r.doc_id); map[auid] = map[auid] || {}; map[auid][adid] = { date: r.date }; });
+          ackRows.forEach(r => { const auid=String(r.user_id); const adid=String(r.doc_id); map[auid] = map[auid] || {}; map[auid][adid] = { date: r.date, version: r.version || 1 }; });
           setDocAcknowledgements(map);
         }
 
@@ -519,6 +552,7 @@ export default function App() {
               id: r.id, title: r.title, date: r.date, size: r.size,
               type: r.type, ext: r.ext, fileName: r.file_name, fileData: r.file_url || null, fileUrl: r.file_url || null, version: r.version || 1, reviewDate: r.review_date || null,
               description: r.description || null,
+              history: Array.isArray(r.history) ? r.history : [],
             }))];
           });
         }
@@ -537,7 +571,7 @@ export default function App() {
           const map = {};
           resRows.forEach(r => {
             const ar_uid=String(r.user_id); map[ar_uid] = map[ar_uid] || {};
-            map[ar_uid][`${r.report_idx}_${r.issue_idx}`] = { comment: r.comment, resolved: r.resolved };
+            map[ar_uid][`${r.report_idx}_${r.issue_idx}`] = { comment: r.comment, resolved: r.resolved, ...(r.signed_off_by ? { signedOffBy: r.signed_off_by, signedOffAt: r.signed_off_at } : {}) };
           });
           setAdminResponses(map);
         }
@@ -679,6 +713,19 @@ export default function App() {
         }
 
         // Custom chemicals
+        // Versioning history (read-only lists; appended to as people complete/read things)
+        const dahRows = rows(dahRes); if (dahRows && dahRows.length) setDocAckHistory(dahRows);
+        const chRows  = rows(chRes);  if (chRows && chRows.length) setCompHistory(chRows);
+        const mvRows  = rows(mvRes);  if (mvRows && mvRows.length) setModuleVersions(mvRows);
+
+        // COSHH assessments (one per substance code)
+        const caRows = rows(caRes);
+        if (caRows && caRows.length) {
+          const map = {};
+          caRows.forEach(r => { if (r && r.code != null) map[String(r.code)] = r.data; });
+          setCoshhAssessments(map);
+        }
+
         const ccRows = rows(ccRes);
         if (ccRows && ccRows.length) {
           setCustomChemicals(ccRows.map(r => r.data));
@@ -716,33 +763,35 @@ export default function App() {
     loadAll();
   }, []);
 
-  // Each seed risk assessment is turned into an HTML "document" (base64 data URL)
-  // so it appears in the Documents library. These are generated in the browser
-  // every load and are NOT saved to the documents table.
-  // Seed Documents tab with RA docs on mount (moved from RiskAssessmentTab)
+  // Every risk assessment (seed RAs and admin-created ones, as loaded from
+  // risk_assessments) is turned into an HTML "document" (base64 data URL) so it
+  // appears in the Documents library. These are generated in the browser once the
+  // data has loaded and are NOT saved to the documents table — regenerating them
+  // from `ras` is what stops a published RA vanishing from Documents on reload.
+  // The id "d_<raId>" is stable, so document assignments/acknowledgements match
+  // across reloads (RiskAssessmentTab.finalise uses the same id).
   useEffect(() => {
+    if (!dbReady) return;
     setDocs(prevDocs => {
-      const existingRaIds = new Set(prevDocs.filter(d=>d.raId).map(d=>d.raId));
-      const newEntries = INIT_RAS
-        .filter(ra => !existingRaIds.has(ra.id))
-        .map(ra => {
-          const html = generateRAHtml(ra);
-          const b64 = "data:text/html;base64," + btoa(unescape(encodeURIComponent(html)));
-          return {
-            id: "d_" + ra.id,
-            title: ra.title,
-            date: ra.date,
-            size: Math.round(html.length / 1024) + " KB",
-            type: "Risk Assessment",
-            fileData: b64,
-            fileName: ra.title.toLowerCase().replace(/\s+/g,"-").replace(/[^a-z0-9-]/g,"") + ".html",
-            ext: "HTML",
-            raId: ra.id,
-          };
-        });
-      return newEntries.length > 0 ? [...prevDocs, ...newEntries] : prevDocs;
+      const raDocs = ras.map(ra => {
+        const html = generateRAHtml(ra);
+        const b64 = "data:text/html;base64," + btoa(unescape(encodeURIComponent(html)));
+        return {
+          id: "d_" + ra.id,
+          title: ra.title || "Untitled Risk Assessment",
+          date: ra.date,
+          size: Math.round(html.length / 1024) + " KB",
+          type: "Risk Assessment",
+          fileData: b64,
+          fileName: (ra.title || "risk-assessment").toLowerCase().replace(/\s+/g,"-").replace(/[^a-z0-9-]/g,"") + ".html",
+          ext: "HTML",
+          raId: ra.id,
+        };
+      });
+      const raIds = new Set(raDocs.map(d => d.raId));
+      return [...prevDocs.filter(d => !(d.raId && raIds.has(d.raId))), ...raDocs];
     });
-  }, []); // eslint-disable-line
+  }, [dbReady]); // eslint-disable-line
 
   // HOW AUTO-SYNC WORKS
   // `_ready` stays false until loadAll() has finished, so the initial setState
@@ -751,11 +800,27 @@ export default function App() {
   // written to Supabase. That's simple but chatty — see "Known technical debt"
   // in the file header. Collections NOT listed here (e.g. permits, users,
   // assigns, completions) are saved explicitly by the code that changes them.
-  // ⚠ dseReports/adminResponses/passwords effects convert uid with Number(uid) —
+  // ⚠ dseReports/adminResponses effects convert uid with Number(uid) —
   //   fine for numeric ids, but a non-numeric text id would become NaN.
   // ── Auto-sync watchers — fire whenever state changes after initial load ───────
   const _ready = useRef(false);
-  useEffect(() => { if (dbReady) _ready.current = true; }, [dbReady]);
+  // Once data has loaded, snapshot every audited record WITHOUT logging (lib/audit.js),
+  // so only real changes from here on create audit-trail entries. Declared before the
+  // auto-sync effects below so the snapshots exist before their first re-save.
+  useEffect(() => { if (!dbReady) return;
+    primeAuditList("incident", incidents);
+    primeAuditMap("investigation", investigations);
+    primeAuditList("risk_assessment", ras);
+    primeAuditMap("coshh_assessment", coshhAssessments);
+    primeAuditMap("dse_report", dseReports);
+    primeAuditMap("dse_response", adminResponses);
+    primeAuditList("inspection", siteInspections);
+    _ready.current = true;
+  }, [dbReady]); // eslint-disable-line
+
+  // Audit entries are attributed to whoever is signed in.
+  useEffect(() => { setAuditUser(user); }, [user]);
+  const auditNameOf = (uid) => (allUsers.find(u => String(u.id) === String(uid)) || {}).name || `User ${uid}`;
 
   useEffect(() => { if (!_ready.current) return;
     incidents.forEach(inc => dbSaveIncident(inc));
@@ -766,11 +831,15 @@ export default function App() {
   }, [investigations]); // eslint-disable-line
 
   useEffect(() => { if (!_ready.current) return;
-    Object.entries(dseReports).forEach(([uid, reports]) => dbSaveDseReport(Number(uid), reports));
+    Object.entries(dseReports).forEach(([uid, reports]) => {
+      auditRecord("dse_report", uid, reports, auditNameOf(uid));
+      dbSaveDseReport(Number(uid), reports);
+    });
   }, [dseReports]); // eslint-disable-line
 
   useEffect(() => { if (!_ready.current) return;
     Object.entries(adminResponses).forEach(([uid, keys]) => {
+      auditRecord("dse_response", uid, keys, auditNameOf(uid));
       Object.entries(keys).forEach(([key, rec]) => {
         const [ri, ii] = key.split("_").map(Number);
         dbSaveDseAdminResponse(Number(uid), ri, ii, rec);
@@ -783,6 +852,7 @@ export default function App() {
   }, [equipment]); // eslint-disable-line
 
   useEffect(() => { if (!_ready.current) return;
+    auditList("inspection", siteInspections, i => [i.date, (INSP_TYPES.find(t => t.id === i.type) || {}).label || i.type, i.location].filter(Boolean).join(" · "));
     dbSaveSiteInspections(siteInspections);
   }, [siteInspections]); // eslint-disable-line
 
@@ -802,9 +872,10 @@ export default function App() {
     customMachineTypes.forEach(m => dbSaveCustomMachineType(m));
   }, [customMachineTypes]); // eslint-disable-line
 
-  useEffect(() => { if (!_ready.current) return;
-    Object.entries(passwords).forEach(([uid, pw]) => dbSavePassword(Number(uid), pw));
-  }, [passwords]); // eslint-disable-line
+  // NB: there is deliberately NO auto-sync effect for `passwords`. It used to write
+  // EVERY user's password whenever any one changed, so a browser that had been open
+  // since before a reset could put everyone's old passwords back. Password changes
+  // now go through savePasswordFor(), which writes that one user only.
 
   // ── Sync helpers — call these wherever state currently changes ───────────────
 
@@ -822,11 +893,19 @@ export default function App() {
   }
 
   // One row per (user, module). Retaking a module overwrites the previous result.
+  // Also appends to training_completion_history, so earlier results (and which
+  // module version they were for) are kept when a retake or a major new version
+  // replaces the current row.
   async function dbSaveCompletion(userId, moduleId, rec) {
+    const moduleVersion = rec.moduleVersion || (allModules.find(m => String(m.id) === String(moduleId)) || {}).version || 1;
+    const hist = { user_id: String(userId), module_id: String(moduleId), module_version: moduleVersion, score: rec.score, date: rec.date, cert_id: rec.certId || null, at: new Date().toISOString() };
+    setCompHistory(p => [...p, hist]);
     await dbWrite(sb.from("training_completions").upsert({
       user_id: userId, module_id: moduleId,
       score: rec.score, date: rec.date, cert_id: rec.certId, answers: rec.answers,
+      module_version: moduleVersion,
     }, { onConflict: "user_id,module_id" }), "training completion");
+    await dbWrite(sb.from("training_completion_history").insert(hist), "training completion history");
   }
 
   // Upserts one incident (and uploads any new photos first). Called for EVERY incident by the auto-sync effect.
@@ -840,15 +919,15 @@ export default function App() {
     if (photos.length !== prev.length || photos.some((p, i) => p !== prev[i])) {
       setIncidents(list => list.map(i => i.id === inc.id ? { ...i, photos } : i));
     }
-    // ⚠ ONLY THE COLUMNS LISTED BELOW ARE PERSISTED. The full incident form (formToInc.js)
-    // also sets time, injured person details (personName/Dob/Address/Postcode),
-    // witness1/2, firstAidProvided/Details/By, postIncidentOutcome, immediateMeasures,
-    // correctiveActions/By, equipmentId, plus triaged from other screens.
-    // (quickReport + urgency ARE persisted — columns quick_report / urgency,
-    //  see quick_report_columns.sql.) The others live in memory only and are LOST on reload, because
-    // neither this upsert nor loadAll() maps them. Fix: add matching columns (or a
-    // single jsonb `details` column) to the incidents table and map them here AND in
-    // the "Incidents" block of loadAll().
+    // Core fields have their own columns (below). EVERY other field on the
+    // incident — injured person, witnesses, first aid, post-incident outcome,
+    // immediate measures, corrective actions, equipment, time, triaged, and
+    // anything added to the form later — is saved in the jsonb `details`
+    // column (see incident_details_column.sql) and restored by loadAll().
+    const details = {};
+    Object.entries(inc).forEach(([k, v]) => {
+      if (!INCIDENT_CORE_KEYS.has(k) && v !== undefined && typeof v !== "function") details[k] = v;
+    });
     await dbWrite(sb.from("incidents").upsert({
       id: inc.id, date: inc.date, type: inc.type, accident_code: inc.accidentCode,
       number_code: inc.numberCode, location: inc.location, reported_by: inc.reportedBy,
@@ -860,15 +939,19 @@ export default function App() {
       riddor_reported_by: inc.riddorReportedBy||null,
       quick_report: !!inc.quickReport,
       urgency: inc.urgency||null,
+      details,
     }, { onConflict: "id" }), "incident", { alertOnError: true });
+    auditRecord("incident", inc.id, { ...inc, photos }, incidentAuditLabel(inc));
   }
 
   async function dbDeleteIncident(id) {
+    auditDelete("incident", id, incidentAuditLabel(incidents.find(i => i.id === id)));
     await dbWrite(sb.from("incidents").delete().eq("id", id), "incident delete");
   }
 
   // Investigations are keyed by incident id; the whole investigation is one JSON `data` blob.
   async function dbSaveInvestigation(incidentId, data) {
+    auditRecord("investigation", incidentId, data, incidentAuditLabel(incidents.find(i => String(i.id) === String(incidentId))) || String(incidentId));
     await dbWrite(sb.from("investigations").upsert({ incident_id: incidentId, data }, { onConflict: "incident_id" }), "investigation");
   }
 
@@ -890,8 +973,14 @@ export default function App() {
     await dbSaveInvestigation(incidentId, next);
   }
 
+  // Records which VERSION was read, and appends to doc_ack_history so earlier reads
+  // are kept when a major new version clears the current acknowledgements.
   async function dbAcknowledgeDoc(userId, docId, date) {
-    await dbWrite(sb.from("doc_acknowledgements").upsert({ user_id: String(userId), doc_id: String(docId), date }, { onConflict: "user_id,doc_id" }), "document acknowledgement");
+    const version = (docs.find(d => String(d.id) === String(docId)) || {}).version || 1;
+    const hist = { user_id: String(userId), doc_id: String(docId), version, date, at: new Date().toISOString() };
+    setDocAckHistory(p => [...p, hist]);
+    await dbWrite(sb.from("doc_acknowledgements").upsert({ user_id: String(userId), doc_id: String(docId), date, version }, { onConflict: "user_id,doc_id" }), "document acknowledgement");
+    await dbWrite(sb.from("doc_ack_history").insert(hist), "document read history");
   }
 
   // Replaces the full list of staff a document is assigned to (delete-then-insert).
@@ -919,6 +1008,7 @@ export default function App() {
       version: doc.version || 1,
       review_date: doc.reviewDate || null,
       description: doc.description || null,
+      history: doc.history || [],
     }, { onConflict: "id" }), "document", { alertOnError: true });
   }
 
@@ -946,11 +1036,19 @@ export default function App() {
     await dbWrite(sb.from("dse_admin_responses").upsert({
       user_id: userId, report_idx: reportIdx, issue_idx: issueIdx,
       comment: rec.comment, resolved: rec.resolved,
+      signed_off_by: rec.signedOffBy || null, signed_off_at: rec.signedOffAt || null,
     }, { onConflict: "user_id,report_idx,issue_idx" }), "DSE admin response");
   }
 
   async function dbRecordLogin(userId, ts) {
     await dbWrite(sb.from("last_logins").upsert({ user_id: String(userId), last_login: ts }, { onConflict: "user_id" }), "last login");
+  }
+
+  // Change ONE user's password: update local state and write just that user's row.
+  // Use this (not setPasswords) wherever a password changes.
+  function savePasswordFor(userId, hash) {
+    setPasswords(p => ({ ...p, [String(userId)]: hash }));
+    return dbSavePassword(userId, hash);
   }
 
   // Accepts either a plain password or an existing 64-char SHA-256 hash and always stores the hash.
@@ -1030,7 +1128,7 @@ export default function App() {
     })),
     optimisticDocAck: (userId, docId, date) => setDocAcknowledgements(p => ({
       ...p,
-      [userId]: { ...(p[userId] || {}), [docId]: { date } },
+      [userId]: { ...(p[userId] || {}), [docId]: { date, version: (docs.find(d => String(d.id) === String(docId)) || {}).version || 1 } },
     })),
     optimisticIncident: (rec) => setIncidents(p => [rec, ...p]),
     optimisticDseReport: (userId, report) => setDseReports(p => ({
@@ -1157,6 +1255,7 @@ export default function App() {
   }
 
   async function dbSaveRA(ra) {
+    auditRecord("risk_assessment", ra.id, ra, [ra.reference, ra.title].filter(Boolean).join(" · "));
     await dbWrite(sb.from("risk_assessments").upsert({ id: ra.id, data: ra }, { onConflict: "id" }), "risk assessment", { alertOnError: true });
   }
 
@@ -1189,6 +1288,7 @@ export default function App() {
     cloned.title = `${m.title} (Copy)`;
     cloned._custom = true;
     delete cloned._override; // a duplicate is always a brand new, independent module — never an override
+    cloned.version = 1; delete cloned.versionNote; delete cloned.versionChange; cloned.versionDate = new Date().toISOString().slice(0,10);
     setCustomModules(prev=>[...prev, cloned]);
     dbSaveCustomModule(cloned);
     // Jump straight into the editor so the admin can rename/adjust the new version
@@ -1214,6 +1314,87 @@ export default function App() {
       return [...prev, updated];
     });
     dbSaveCustomModule(updated);
+  }
+
+  // ── Manager actions (My Team tab, role "manager") — each one is audited ──────────
+  // Add modules to a team member's assignments (managers can add, not remove).
+  function managerAssign(member, moduleIds) {
+    const uid = String(member.id);
+    const current = assigns[uid] || [];
+    const added = moduleIds.filter(id => !current.includes(id));
+    if (!added.length) return;
+    const next = [...current, ...added];
+    setAssigns(p => ({ ...p, [uid]: next }));
+    dbSaveAssigns({ [uid]: next });
+    const titles = added.map(id => (allModules.find(m => m.id === id) || {}).title || id);
+    auditEvent("training_assign", uid, "assign", `Assigned by line manager: ${titles.join(", ")}`, { modules: { from: null, to: titles } }, member.name);
+  }
+  // Manager signs off one DSE issue as resolved (stored on the admin response record).
+  function managerSignOffDse(member, ri, ii, issue, note) {
+    const uid = String(member.id), key = `${ri}_${ii}`, today = new Date().toISOString().slice(0,10);
+    const cur = (adminResponses[uid] || adminResponses[member.id] || {})[key] || { comment: "", resolved: false };
+    const rec = { ...cur, resolved: true, signedOffBy: user.name, signedOffAt: today,
+      comment: note ? (cur.comment ? `${cur.comment}\n${note}` : note) : cur.comment };
+    const nextUser = { ...(adminResponses[uid] || adminResponses[member.id] || {}), [key]: rec };
+    primeAudit("dse_response", uid, nextUser);   // the explicit sign-off entry below replaces the automatic diff
+    setAdminResponses(p => ({ ...p, [uid]: nextUser }));
+    auditEvent("dse_response", uid, "sign_off", `Line manager signed off DSE issue: ${issue.question}${note ? ` — ${note}` : ""}`,
+      { resolved: { from: !!cur.resolved, to: true }, signedOffBy: { from: null, to: user.name } }, member.name);
+  }
+  // Manager signs off a corrective action (marks it complete first if it isn't already).
+  function managerSignOffAction(incidentId, action, member, note) {
+    const inv = investigations[incidentId]; if (!inv) return;
+    const today = new Date().toISOString().slice(0,10);
+    const done = action.status === "complete" || action.status === "closed";
+    const next = { ...inv, actions: (inv.actions || []).map(a => a.id !== action.id ? a : {
+      ...a,
+      ...(done ? {} : { status: "complete", completedDate: today, completedBy: user.name }),
+      managerSignOff: { by: user.name, date: today, note: note || "" },
+    }) };
+    primeAudit("investigation", incidentId, next);
+    setInvestigations(p => ({ ...p, [incidentId]: next }));
+    auditEvent("corrective_action", incidentId, "sign_off",
+      `Line manager signed off action for ${member.name}: ${action.description}${done ? "" : " (marked complete)"}${note ? ` — ${note}` : ""}`,
+      { status: { from: action.status || "open", to: "complete" }, managerSignOff: { from: null, to: `${user.name} ${today}` } },
+      incidentAuditLabel(incidents.find(i => String(i.id) === String(incidentId))));
+  }
+
+  // Saves an edited module as a NEW VERSION (called from NewVersionModal).
+  //  • the previous content is kept in module_versions (snapshot)
+  //  • change "major" clears everyone's current completion so they must redo it —
+  //    their earlier result stays in training_completion_history
+  //  • change "minor" keeps completions (each records the version it was for)
+  function saveModuleVersion(change, note) {
+    const { m, prev } = pendingModuleSave;
+    const prevVer = prev.version || 1, newVer = prevVer + 1, today = new Date().toISOString().slice(0,10);
+    const snap = { id: `${prev.id}_v${prevVer}`, module_id: String(prev.id), version: prevVer, data: prev,
+      saved_at: new Date().toISOString(), saved_by: user ? user.name : "", change, note: note || null };
+    setModuleVersions(p => [...p.filter(x => x.id !== snap.id), snap]);
+    dbWrite(sb.from("module_versions").upsert(snap, { onConflict: "id" }), "module version snapshot");
+    const saved = { ...m, version: newVer, versionDate: today, versionNote: note || "", versionChange: change };
+    if (prev._custom) {
+      const upd = { ...saved, _custom: true, ...(prev._override ? { _override: true } : {}) };
+      setCustomModules(p => p.map(x => x.id === m.id ? upd : x));
+      dbSaveCustomModule(upd);
+    } else {
+      // Built-in module → saved as an override with the same id
+      const upd = { ...saved, _custom: true, _override: true };
+      setCustomModules(p => p.find(x => x.id === m.id) ? p.map(x => x.id === m.id ? upd : x) : [...p, upd]);
+      dbSaveCustomModule(upd);
+    }
+    let cleared = 0;
+    if (change === "major") {
+      const affected = Object.keys(comps).filter(uid => comps[uid] && comps[uid][m.id]);
+      cleared = affected.length;
+      setComps(p => { const n = { ...p }; affected.forEach(uid => { n[uid] = { ...n[uid] }; delete n[uid][m.id]; }); return n; });
+      affected.forEach(uid => dbWrite(sb.from("training_completions").delete().match({ user_id: String(uid), module_id: String(m.id) }), "completion clear (new module version)"));
+    }
+    auditEvent("module", m.id, "new_version",
+      `Version ${newVer} (${change === "major" ? `major — ${cleared} ${cleared === 1 ? "person" : "people"} must redo it` : "minor — completions kept"})${note ? `: ${note}` : ""}`,
+      { version: { from: prevVer, to: newVer }, change: { from: null, to: change } }, m.title || "");
+    setPendingModuleSave(null);
+    setEditingModule(null);
+    setAtab("modules");
   }
 
   async function dbSaveCustomMachineType(type) {
@@ -1425,7 +1606,7 @@ export default function App() {
     setQsub(true);
     const certId = pct>=70 ? "ZSL-" + (user.id.toString(36) + mod.id + Date.now().toString(36)).toUpperCase().slice(-8) : null;
     if (pct>=70) setShowCelebration(true);
-    const rec = {score:pct, date:new Date().toISOString().slice(0,10), answers:{...qans}, certId};
+    const rec = {score:pct, date:new Date().toISOString().slice(0,10), answers:{...qans}, certId, moduleVersion: mod.version||1};
     setComps(p=>({...p,[user.id]:{...p[user.id],[mod.id]:rec}}));
     dbSaveCompletion(user.id, mod.id, rec);
     // Record failure for admin visibility
@@ -2172,10 +2353,10 @@ export default function App() {
         <div style={{background:`linear-gradient(90deg,${T.navyDk},${T.navyMd})`,borderBottom:`1px solid ${T.border}`,padding:"0 24px",display:"flex",alignItems:"center",position:"relative"}}>
           <div style={{marginRight:20,padding:"10px 0",flexShrink:0}}><ZeusLogo darkMode={darkMode}/></div>
           <div style={{display:"flex",alignItems:"center",gap:2,flex:1,overflowX:"auto"}} className="staff-nav-tabs">
-            {["dashboard","training","history","documents","incidents","dse",...(isWarehouseWorker(user)?["machinery"]:[]),"actions"].map(t=>(
+            {["dashboard","training","history","documents","incidents","dse",...(isWarehouseWorker(user)?["machinery"]:[]),"actions",...(user.role==="manager"?["team"]:[])].map(t=>(
               <button key={t} onClick={()=>setStab(t)}
                 style={{background:"none",border:"none",borderBottom:stab===t?`2px solid ${T.accent}`:"2px solid transparent",color:stab===t?T.white:T.muted,fontWeight:stab===t?700:400,fontSize:13,cursor:"pointer",padding:"14px 14px 12px",fontFamily:font,whiteSpace:"nowrap",letterSpacing:.3,transition:"color .15s"}}>
-                {{dashboard:"Dashboard",training:"My Training",history:"History",documents:"Documents",incidents:"Report Incident",dse:"My DSE",machinery:"My Machinery",actions:"My Actions"}[t]}
+                {{dashboard:"Dashboard",training:"My Training",history:"History",documents:"Documents",incidents:"Report Incident",dse:"My DSE",machinery:"My Machinery",actions:"My Actions",team:"My Team"}[t]}
               </button>
             ))}
           </div>
@@ -2218,6 +2399,16 @@ export default function App() {
                 (inv.actions||[]).filter(a=>a.owner===user.name&&a.status!=="complete"&&a.status!=="closed")
               );
               const overdueActions = myActions.filter(a=>a.dueDate&&a.dueDate<new Date().toISOString().slice(0,10));
+              // Line managers: team items waiting for their sign-off
+              if (user.role==="manager") {
+                const team = teamOf(user, allUsers);
+                const teamNames = new Set(team.map(u=>String(u.name).trim().toLowerCase()));
+                const dseOpen = team.reduce((n,u)=>{ const reps=dseReports[u.id]||dseReports[String(u.id)]||[]; const ri=reps.length-1; if(ri<0) return n;
+                  const resp=adminResponses[u.id]||adminResponses[String(u.id)]||{}; return n+(reps[ri].issues||[]).filter((_,ii)=>!(resp[`${ri}_${ii}`]||{}).resolved).length; },0);
+                const actsToSign = Object.values(investigations).flatMap(inv=>(inv.actions||[]).filter(a=>teamNames.has(String(a.owner||"").trim().toLowerCase())&&(a.status==="complete"||a.status==="closed")&&!a.managerSignOff)).length;
+                if (dseOpen) notifications.push({type:"dse",urgent:false,title:`${dseOpen} team DSE issue${dseOpen!==1?"s":""} to sign off`,detail:"Open My Team to review and sign off",nav:{tab:"team"}});
+                if (actsToSign) notifications.push({type:"report",urgent:false,title:`${actsToSign} completed team action${actsToSign!==1?"s":""} awaiting your sign-off`,detail:"Open My Team to sign them off",nav:{tab:"team"}});
+              }
               if(overdueActions.length) notifications.push({type:"report",urgent:true,title:`${overdueActions.length} overdue corrective action${overdueActions.length!==1?"s":""}`,detail:"Investigation actions past due date — action required",nav:{tab:"actions"}});
               else if(myActions.length) notifications.push({type:"report",urgent:false,title:`${myActions.length} open corrective action${myActions.length!==1?"s":""}`,detail:`You have been assigned action${myActions.length!==1?"s":""} from an investigation`,nav:{tab:"actions"}});
               return <NotificationBell notifications={notifications} onNavigate={n=>{ setStab(n.tab); if(n.editId) setQuickEditId(n.editId); }} Z={T} font={font}/>;
@@ -2256,10 +2447,10 @@ export default function App() {
       {/* Mobile nav drawer */}
         {mobileMenuOpen && (
           <div className="mobile-nav-drawer" style={{position:"relative"}}>
-            {["dashboard","training","history","documents","incidents","dse",...(isWarehouseWorker(user)?["machinery"]:[]),"actions"].map(t=>(
+            {["dashboard","training","history","documents","incidents","dse",...(isWarehouseWorker(user)?["machinery"]:[]),"actions",...(user.role==="manager"?["team"]:[])].map(t=>(
               <button key={t} onClick={()=>{setStab(t);setMobileMenuOpen(false);}}
                 style={{display:"block",width:"100%",textAlign:"left",padding:"12px 24px",background:stab===t?"rgba(37,99,235,0.15)":"transparent",border:"none",borderBottom:`1px solid rgba(255,255,255,0.05)`,color:stab===t?T.white:T.muted,fontWeight:stab===t?700:400,fontSize:14,cursor:"pointer",fontFamily:font}}>
-                {{dashboard:E("🏠 ","")+"Dashboard",training:E("📚 ","")+"My Training",history:E("📋 ","")+"History",documents:E("📄 ","")+"Documents",incidents:E("🚨 ","")+"Report Incident",dse:"🖥️ My DSE",machinery:"⚙️ My Machinery",actions:"✅ My Actions"}[t]}
+                {{dashboard:E("🏠 ","")+"Dashboard",training:E("📚 ","")+"My Training",history:E("📋 ","")+"History",documents:E("📄 ","")+"Documents",incidents:E("🚨 ","")+"Report Incident",dse:"🖥️ My DSE",machinery:"⚙️ My Machinery",actions:"✅ My Actions",team:E("👥 ","")+"My Team"}[t]}
               </button>
             ))}
           </div>
@@ -2630,6 +2821,31 @@ export default function App() {
                     ))}
                   </div>)}</div>
                 )}
+              {/* Passed results for EARLIER versions of a module (kept when a module is
+                  updated — see saveModuleVersion). Certificates stay viewable. */}
+              {(()=>{
+                const earlier = compHistory.filter(h=>String(h.user_id)===String(user.id) && h.score>=70 && (()=>{
+                  const m = allModules.find(x=>String(x.id)===String(h.module_id));
+                  return m && (h.module_version||1) < (m.version||1);
+                })()).sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+                if (!earlier.length) return null;
+                return (
+                  <div style={{marginTop:28}}>
+                    <h3 style={{fontSize:15,fontWeight:800,margin:"0 0 10px",color:T.white}}>Earlier versions</h3>
+                    <p style={{color:T.muted,fontSize:12,margin:"0 0 12px"}}>Modules you passed before they were updated. Your result and certificate for that version are kept here.</p>
+                    <div style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:16,overflow:"hidden",border:`1px solid ${T.border}`}}>
+                      {earlier.map((h,i)=>{ const m=allModules.find(x=>String(x.id)===String(h.module_id)); return (
+                        <div key={i} style={{display:"grid",gridTemplateColumns:isMobile?"1fr auto":"2fr 1fr 1fr 1fr",gap:8,padding:"12px 20px",borderTop:i>0?`1px solid ${T.border}`:"none",alignItems:"center"}}>
+                          <div style={{display:"flex",alignItems:"center",gap:10}}><span>{m.icon}</span><span style={{fontSize:13,fontWeight:700}}>{m.title} <span style={{color:T.muted,fontWeight:600}}>· v{h.module_version||1}</span></span></div>
+                          {!isMobile && <span style={{color:T.muted,fontSize:13}}>{h.date}</span>}
+                          {!isMobile && <span style={{color:T.green,fontWeight:800,fontSize:14}}>{h.score}%</span>}
+                          <button onClick={()=>setCert({module:m,score:h.score,date:h.date,certId:h.cert_id||null})} style={{justifySelf:"start",background:`${T.gold}1A`,border:`1px solid ${T.gold}4D`,color:T.gold,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font}}>{E("🏅 ","")}Certificate</button>
+                        </div>
+                      );})}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           )}
 
@@ -2690,7 +2906,7 @@ export default function App() {
                                           ✓ Read & Confirmed
                                         </div>
                                       : <button
-                                          onClick={()=>{const dt=new Date().toISOString().slice(0,10);setDocAcknowledgements(p=>({...p,[user.id]:{...(p[user.id]||{}),[d.id]:{date:dt}}}));dbAcknowledgeDoc(user.id,d.id,dt);}}
+                                          onClick={()=>{const dt=new Date().toISOString().slice(0,10);setDocAcknowledgements(p=>({...p,[user.id]:{...(p[user.id]||{}),[d.id]:{date:dt,version:d.version||1}}}));dbAcknowledgeDoc(user.id,d.id,dt);}}
                                           style={{background:`linear-gradient(135deg,${T.green},#059669)`,color:"#fff",border:"none",borderRadius:8,padding:"7px 16px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font,whiteSpace:"nowrap",boxShadow:"0 2px 10px rgba(16,185,129,0.4)"}}>
                                           ✓ Confirm I Have Read This
                                         </button>
@@ -2747,7 +2963,7 @@ export default function App() {
             </div>
           )}
 
-          {stab==="account" && <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}><LazyAccountTab user={user} passwords={passwords} setPasswords={setPasswords} darkMode={darkMode} setDarkMode={setDarkMode} theme={theme} setTheme={setTheme} onSaveTheme={k=>dbSaveTheme(user.id,k)} emojiMode={emojiMode} onSaveEmojiMode={v=>{setEmojiMode(v);dbSaveEmojiMode(user.id,v);}} Z={T} font={font}/></React.Suspense>}
+          {stab==="account" && <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}><LazyAccountTab user={user} passwords={passwords} onSetPassword={savePasswordFor} darkMode={darkMode} setDarkMode={setDarkMode} theme={theme} setTheme={setTheme} onSaveTheme={k=>dbSaveTheme(user.id,k)} emojiMode={emojiMode} onSaveEmojiMode={v=>{setEmojiMode(v);dbSaveEmojiMode(user.id,v);}} Z={T} font={font}/></React.Suspense>}
 
           {/* Floating hazard report button — mobile only */}
           {isMobile && stab!=="dashboard" && (
@@ -2784,6 +3000,16 @@ export default function App() {
             />
             </React.Suspense>
           )}
+          {stab==="team" && user.role==="manager" && (
+            <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
+            <LazyMyTeamTab manager={user} users={allUsers} allModules={allModules} assigns={assigns} comps={comps}
+              docs={docs} docAssignments={docAssignments} docAcknowledgements={docAcknowledgements}
+              dseReports={dseReports} adminResponses={adminResponses} investigations={investigations}
+              onAssign={managerAssign} onSignOffDse={managerSignOffDse} onSignOffAction={managerSignOffAction}
+              Z={T} font={font}/>
+            </React.Suspense>
+          )}
+
           {stab==="actions" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
             <LazyStaffActionsTab
@@ -3063,11 +3289,17 @@ export default function App() {
           </div>
         )}
         <PreviewModal doc={previewDoc} onClose={()=>setPreviewDoc(null)} Z={T} font={font}/>
+        {pendingModuleSave && (
+          <NewVersionModal kind="module" title={pendingModuleSave.m.title || "Training module"}
+            fromVersion={pendingModuleSave.prev.version || 1}
+            affectedCount={Object.keys(comps).filter(uid => comps[uid] && comps[uid][pendingModuleSave.m.id]).length}
+            onConfirm={saveModuleVersion} onCancel={() => setPendingModuleSave(null)} Z={T} font={font}/>
+        )}
         {editingStaff && (
           <EditStaffModal
             staffUser={editingStaff}
             allUsers={allUsers} setAllUsers={setAllUsers} onSaveProfile={u=>{dbSaveUser(u);dbSaveUserProfile(u);}}
-            passwords={passwords} setPasswords={setPasswords}
+            passwords={passwords} onSetPassword={savePasswordFor}
             onClose={()=>setEditingStaff(null)}
             Z={T} font={font}
           />
@@ -3101,11 +3333,11 @@ export default function App() {
                   </div>
                 </div>
               ); })()}
-              {(()=>{ const DOC_TABS=["documents","coshh"]; const docActive=DOC_TABS.includes(atab); return (
+              {(()=>{ const DOC_TABS=["documents","coshh","audit"]; const docActive=DOC_TABS.includes(atab); return (
                 <div style={{position:"relative",display:"inline-block"}} onMouseEnter={e=>e.currentTarget.querySelector(".doc-dd").style.display="block"} onMouseLeave={e=>e.currentTarget.querySelector(".doc-dd").style.display="none"}>
                   <button style={{...navBtn(docActive,T.gold),display:"flex",alignItems:"center",gap:5}}>Documents<span style={{fontSize:9,opacity:.7,marginTop:1}}>▼</span></button>
                   <div className="doc-dd" style={{display:"none",position:"absolute",top:"100%",left:0,zIndex:200,minWidth:180,background:`linear-gradient(135deg,${T.navyDk},${T.navyMd})`,border:`1px solid ${T.borderMd}`,borderRadius:10,boxShadow:"0 8px 32px rgba(0,0,0,0.35)",overflow:"hidden",paddingTop:4,paddingBottom:4}}>
-                    {[["documents","H&S Documents"],["coshh","COSHH Register"]].map(([id,label])=>(<button key={id} onClick={()=>setAtab(id)} style={{display:"block",width:"100%",textAlign:"left",padding:"10px 18px",background:atab===id?`rgba(245,158,11,0.12)`:"transparent",border:"none",color:atab===id?T.gold:T.white,fontWeight:atab===id?700:500,fontSize:13,cursor:"pointer",fontFamily:font,transition:"background .15s",letterSpacing:.3}}>{label}</button>))}
+                    {[["documents","H&S Documents"],["coshh","COSHH Register"],["audit","Audit Trail"]].map(([id,label])=>(<button key={id} onClick={()=>setAtab(id)} style={{display:"block",width:"100%",textAlign:"left",padding:"10px 18px",background:atab===id?`rgba(245,158,11,0.12)`:"transparent",border:"none",color:atab===id?T.gold:T.white,fontWeight:atab===id?700:500,fontSize:13,cursor:"pointer",fontFamily:font,transition:"background .15s",letterSpacing:.3}}>{label}</button>))}
                   </div>
                 </div>
               ); })()}
@@ -3241,7 +3473,7 @@ export default function App() {
 
         {/* Module Preview Modal */}
         {previewModule && (
-          <ModulePreviewModal m={previewModule} staff={staff} assigns={assigns} comps={comps} isMobile={isMobile} setAtab={setAtab} onClose={()=>setPreviewModule(null)} T={T} font={font}/>
+          <ModulePreviewModal m={previewModule} staff={staff} assigns={assigns} comps={comps} compHistory={compHistory} moduleVersions={moduleVersions} isMobile={isMobile} setAtab={setAtab} onClose={()=>setPreviewModule(null)} T={T} font={font}/>
         )}
 
         {/* Mobile nav drawer */}
@@ -3263,6 +3495,7 @@ export default function App() {
               ["permits", E("📋 ","")+"Permits"],
               ["documents","📄 H&S Documents"],
               ["coshh","🧪 COSHH Register"],
+              ["audit", E("🕘 ","")+"Audit Trail"],
               ["machinery","🔧 Machinery Competence"],
               ["equipment","📦 Equipment Register"],
               ["account","👤 My Account"],
@@ -3597,6 +3830,25 @@ export default function App() {
                 </div>
               </div>
 
+              {/* Line managers: My Team matches each staff member's Line Manager text to the
+                  name of an account with the "Line manager" role. Flag the ones that don't match. */}
+              <datalist id="zp-manager-names">{allUsers.filter(u=>u.role==="manager").map(u=><option key={u.id} value={u.name}/>)}</datalist>
+              {(()=>{
+                const nm = x => String(x||"").trim().replace(/\s+/g," ").toLowerCase();
+                const mgrs = allUsers.filter(u=>u.role==="manager");
+                if (!mgrs.length) return null;
+                const names = new Set(mgrs.map(u=>nm(u.name)));
+                const unmatched = staff.filter(u=>(u.status||"active")!=="leaver" && nm(u.manager) && !names.has(nm(u.manager)));
+                if (!unmatched.length) return null;
+                const lm = Array.from(new Set(unmatched.map(u=>u.manager.trim())));
+                return (
+                  <div style={{background:`${T.amber}14`,border:`1px solid ${T.amber}55`,borderRadius:12,padding:"12px 16px",marginBottom:18,fontSize:13,color:T.slate,lineHeight:1.5}}>
+                    <b style={{color:T.amber}}>{unmatched.length} staff member{unmatched.length!==1?"s have a Line Manager":" has a Line Manager"} with no line-manager account:</b> {lm.slice(0,8).join(", ")}{lm.length>8?` +${lm.length-8} more`:""}.
+                    {" "}They won't appear in anyone's My Team. Edit the staff record so the Line Manager matches a manager's name exactly, or give that person the <b>Line manager</b> role.
+                  </div>
+                );
+              })()}
+
               {/* Bulk Password Reset Panel */}
               {showBulkReset && (
                 <div style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:16,padding:24,marginBottom:20,border:"1px solid rgba(239,68,68,0.3)"}}>
@@ -3651,12 +3903,8 @@ export default function App() {
                           onClick={async()=>{
                             const targets = bulkResetScope==="all" ? staff.map(u=>u.id) : bulkResetSelected;
                             const hashed = await hashPassword(bulkResetPw);
-                            setPasswords(p=>{
-                              const n={...p};
-                              targets.forEach(id=>{ n[id]=hashed; });
-                              return n;
-                            });
-                            await Promise.all(targets.map(id=>dbSavePassword(id, hashed)));
+                            // One write per selected user (savePasswordFor updates state + that row only).
+                            await Promise.all(targets.map(id=>savePasswordFor(id, hashed)));
                             setBulkResetDone(true);
                             setBulkResetPw("");
                           }}
@@ -3726,12 +3974,12 @@ export default function App() {
                         const hashed=await hashPassword("pass123");
                         // Imported users get sequential numeric ids after the current max id.
                         const maxId=Math.max(0,...allUsers.map(u=>u.id));
-                        const newUsers=toAdd.map((r,i)=>({id:maxId+i+1,name:r.name.trim(),email:r.email.trim().toLowerCase(),jobTitle:r.jobTitle,manager:r.manager,department:r.department,role:r.role==="admin"?"admin":"staff",isWarehouseWorker:false,status:"active",password:hashed}));
+                        const newUsers=toAdd.map((r,i)=>({id:maxId+i+1,name:r.name.trim(),email:r.email.trim().toLowerCase(),jobTitle:r.jobTitle,manager:r.manager,department:r.department,role:["admin","manager"].includes(r.role)?r.role:"staff",isWarehouseWorker:false,status:"active",password:hashed}));
                         newUsers.forEach(u=>{
                           setAllUsers(p=>[...p,u]);
                           dbSaveUser(u);
                           dbSaveUserProfile(u);
-                          dbSavePassword(u.id,hashed);
+                          savePasswordFor(u.id,hashed);
                         });
                         setCsvPreview([]);
                         setShowCsvImport(false);
@@ -3769,7 +4017,7 @@ export default function App() {
                     </div>
                     <div>
                       <label style={{color:T.muted,fontSize:11,fontWeight:700,letterSpacing:.5,display:"block",marginBottom:6}}>LINE MANAGER</label>
-                      <input value={newManager} onChange={e=>setNewManager(e.target.value)} placeholder="e.g. John Smith"
+                      <input value={newManager} onChange={e=>setNewManager(e.target.value)} placeholder="e.g. John Smith" list="zp-manager-names"
                         style={{width:"100%",background:T.overlay,border:`1px solid ${T.borderMd}`,borderRadius:10,padding:"10px 14px",color:T.white,fontSize:13,outline:"none",fontFamily:font,boxSizing:"border-box"}}/>
                     </div>
                     <div>
@@ -3777,6 +4025,7 @@ export default function App() {
                       <select value={newRole} onChange={e=>setNewRole(e.target.value)}
                         style={{width:"100%",background:T.overlay,border:`1px solid ${T.borderMd}`,borderRadius:10,padding:"10px 14px",color:T.white,fontSize:13,outline:"none",fontFamily:font,cursor:"pointer",boxSizing:"border-box"}}>
                         <option value="staff">Staff</option>
+                        <option value="manager">Line manager</option>
                         <option value="admin">Admin</option>
                       </select>
                     </div>
@@ -4160,23 +4409,10 @@ export default function App() {
             <LazyCreateModuleTab
               editingModule={editingModule}
               onSave={m=>{
-                if (editingModule) {
-                  // Editing existing — update in customModules or TRAINING_MODULES override
-                  if (editingModule._custom) {
-                    setCustomModules(prev=>prev.map(x=>x.id===m.id?{...m,_custom:true}:x));
-                    dbSaveCustomModule({...m,_custom:true});
-                  } else {
-                    // Override built-in by adding to customModules with same id
-                    setCustomModules(prev=>{
-                      const exists = prev.find(x=>x.id===m.id);
-                      if (exists) return prev.map(x=>x.id===m.id?{...m,_custom:true,_override:true}:x);
-                      return [...prev, {...m,_custom:true,_override:true}];
-                    });
-                    dbSaveCustomModule({...m,_custom:true,_override:true});
-                  }
-                } else {
-                  setCustomModules(prev=>[...prev,m]);
-                }
+                // Editing an existing module = a new VERSION: ask minor/major first
+                // (NewVersionModal → saveModuleVersion). A brand-new module is version 1.
+                if (editingModule) { setPendingModuleSave({ m, prev: editingModule }); return; }
+                setCustomModules(prev=>[...prev,{...m, version:1, versionDate:new Date().toISOString().slice(0,10)}]);
                 setEditingModule(null);
                 setAtab("modules");
               }}
@@ -4215,6 +4451,7 @@ export default function App() {
                     <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:m._custom?12:0}}>
                       <Pill label={`${staff.filter(u=>(assigns[u.id]||[]).includes(m.id)).length} assigned`} col="navy"/>
                       <Pill label={`${staff.filter(u=>comps[u.id]?.[m.id]).length} completed`} col="green"/>
+                      <Pill label={`v${m.version||1}`} col="amber"/>
                     </div>
                     <div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>
                       <button onClick={()=>setPreviewModule(m)}
@@ -4440,7 +4677,7 @@ export default function App() {
                       const unreadCount = assignedStaff.length - readCount;
 
                       return (
-                        <DocCard key={d.id} d={d} staff={staff} assignedIds={assignedIds} assignedStaff={assignedStaff} readCount={readCount} unreadCount={unreadCount} icon={icon} docAcknowledgements={docAcknowledgements} setDocAcknowledgements={setDocAcknowledgements} setDocAssignments={setDocAssignments} dbSaveDocAssignments={dbSaveDocAssignments} setDocs={setDocs} dbDeleteDoc={dbDeleteDoc} dbSaveDoc={dbSaveDoc} setPreviewDoc={setPreviewDoc} T={T} font={font}/>
+                        <DocCard key={d.id} d={d} staff={staff} assignedIds={assignedIds} assignedStaff={assignedStaff} readCount={readCount} unreadCount={unreadCount} icon={icon} docAcknowledgements={docAcknowledgements} setDocAcknowledgements={setDocAcknowledgements} setDocAssignments={setDocAssignments} dbSaveDocAssignments={dbSaveDocAssignments} setDocs={setDocs} dbDeleteDoc={dbDeleteDoc} dbSaveDoc={dbSaveDoc} setPreviewDoc={setPreviewDoc} docAckHistory={docAckHistory} T={T} font={font}/>
                       );
                     })}
                   </div>
@@ -4452,7 +4689,13 @@ export default function App() {
           {/* ── Remaining admin tabs are thin wrappers around lazy-loaded domain components ── */}
           {atab==="coshh" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
-            <LazyCoshhTab Z={T} font={font} msdsFiles={msdsFiles} setMsdsFiles={setMsdsFiles} customChemicals={customChemicals} setCustomChemicals={setCustomChemicals}/>
+            <LazyCoshhTab Z={T} font={font} msdsFiles={msdsFiles} setMsdsFiles={setMsdsFiles} customChemicals={customChemicals} setCustomChemicals={setCustomChemicals} assessments={coshhAssessments} setAssessments={setCoshhAssessments}/>
+            </React.Suspense>
+          )}
+
+          {atab==="audit" && (
+            <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
+            <LazyAuditTrailTab Z={T} font={font}/>
             </React.Suspense>
           )}
 
@@ -4534,7 +4777,7 @@ export default function App() {
           )}
           {atab==="account" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
-            <LazyAccountTab user={user} passwords={passwords} setPasswords={setPasswords} darkMode={darkMode} setDarkMode={setDarkMode} theme={theme} setTheme={setTheme} onSaveTheme={k=>dbSaveTheme(user.id,k)} emojiMode={emojiMode} onSaveEmojiMode={v=>{setEmojiMode(v);dbSaveEmojiMode(user.id,v);}} Z={T} font={font}/>
+            <LazyAccountTab user={user} passwords={passwords} onSetPassword={savePasswordFor} darkMode={darkMode} setDarkMode={setDarkMode} theme={theme} setTheme={setTheme} onSaveTheme={k=>dbSaveTheme(user.id,k)} emojiMode={emojiMode} onSaveEmojiMode={v=>{setEmojiMode(v);dbSaveEmojiMode(user.id,v);}} Z={T} font={font}/>
             </React.Suspense>
           )}
         </div>

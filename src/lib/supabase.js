@@ -1,3 +1,45 @@
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * lib/supabase.js — Database + file storage client, password hashing, write helper
+ * ═══════════════════════════════════════════════════════════════════════════
+ * This is a small hand-written replacement for the official `@supabase/supabase-js`
+ * library. It talks directly to Supabase's REST API (PostgREST) and Storage API
+ * using fetch(). It supports only the handful of operations the portal needs:
+ *
+ *   sb.from("table").select("*")                 → GET all rows
+ *   sb.from("table").select("*").eq(col, val)    → GET rows where col = val
+ *   sb.from("table").query("select=*&order=…")   → GET with a raw PostgREST filter string
+ *   sb.from("table").insert(rowOrRows)           → POST (plain insert)
+ *   sb.from("table").upsert(rows, {onConflict})  → POST insert-or-update
+ *   sb.from("table").delete().eq(col, val)       → DELETE matching rows
+ *   sb.storage.upload / remove / getPublicUrl    → file storage (photos, PDFs, videos)
+ *
+ * NOTE: there is NO `.update()` — use upsert with onConflict instead.
+ * The API shape deliberately mimics supabase-js so the calling code reads the
+ * same, but it is NOT a drop-in: chaining (e.g. .select().eq().order()) is not
+ * supported. Add new filters to `from()` below if you need them.
+ *
+ * RETURN SHAPE: every call resolves to `{ data, error }` and NEVER throws.
+ *   - GET failure  → { data: [], error: "message" }  (so the app still boots)
+ *   - write failure→ { data: null, error: "message" }
+ *   Always check `error`, or wrap writes in dbWrite() (bottom of this file).
+ *
+ * ── SECURITY NOTES (read before going further than an internal tool) ────────
+ *  1. SUPABASE_ANON is the public "anon" key. It is visible to anyone who opens
+ *     the site's JavaScript. That is normal for Supabase, BUT it means the data
+ *     is only as protected as the Row Level Security (RLS) policies configured
+ *     in the Supabase dashboard. If RLS is disabled on a table, anyone with
+ *     the URL can read/write it.
+ *  2. Logins are checked in the browser by comparing SHA-256 hashes (see
+ *     hashPassword below). This is not a substitute for server-side auth
+ *     (e.g. Supabase Auth). Consider migrating if the portal is exposed to
+ *     untrusted users.
+ *  3. If you ever rotate the anon key in Supabase, update SUPABASE_ANON here
+ *     (and in any Netlify Functions that reuse it) and redeploy.
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+
+// Project URL and public anon key — from Supabase dashboard → Project Settings → API.
 const SUPABASE_URL  = "https://aoahugfyswgcisfiosyn.supabase.co";
 const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFvYWh1Z2Z5c3dnY2lzZmlvc3luIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk5NjY1NzMsImV4cCI6MjA5NTU0MjU3M30.9mlm3pVxqwTgCdrdVF2ek1mBHro28P-MTaVjdAUvCIs";
 
@@ -7,6 +49,13 @@ const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFz
 // at "CONNECTING TO DATABASE…" indefinitely. Every request now has a ceiling.
 const REQUEST_TIMEOUT_MS = 12000;
 
+/**
+ * fetch() with an automatic abort after `ms` milliseconds.
+ * An aborted request rejects with an error whose name is "AbortError" —
+ * the catch block in q() below turns that into a friendly "timed out" message.
+ * NOTE: Storage uploads/removes further down use plain fetch() (no timeout)
+ * because large video uploads can legitimately take longer than 12s.
+ */
 async function fetchWithTimeout(url, options = {}, ms = REQUEST_TIMEOUT_MS) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
@@ -17,9 +66,27 @@ async function fetchWithTimeout(url, options = {}, ms = REQUEST_TIMEOUT_MS) {
   }
 }
 
+/**
+ * The shared database client. Built once (IIFE) and imported everywhere as `sb`.
+ */
 const sb = (() => {
+  // Standard headers Supabase requires on every REST call.
   const h = { "Content-Type": "application/json", "apikey": SUPABASE_ANON, "Authorization": `Bearer ${SUPABASE_ANON}` };
+  // PostgREST exposes each table at /rest/v1/<table_name>.
   const rest = (table) => `${SUPABASE_URL}/rest/v1/${table}`;
+
+  /**
+   * Low-level request builder used by every method below.
+   * @param {"GET"|"POST"|"DELETE"} method
+   * @param {string} table
+   * @param {{filter?: string, body?: any, upsertOn?: string}} opts
+   *   filter   – raw PostgREST query string, e.g. "select=*&user_id=eq.42"
+   *   body     – JSON body for inserts/upserts (always an array of rows)
+   *   upsertOn – column(s) forming the unique key for upserts, e.g. "id" or "user_id,module_id".
+   *              The table MUST have a unique constraint / primary key on these columns,
+   *              otherwise Postgres rejects the upsert (this caused the old
+   *              custom_modules timeout bug).
+   */
   const q = async (method, table, opts = {}) => {
     const { filter, body, upsertOn } = opts;
     let url = rest(table);
@@ -28,6 +95,9 @@ const sb = (() => {
     if (method === "POST" && upsertOn) filters.push(`on_conflict=${encodeURIComponent(upsertOn)}`);
     if (filters.length) url += "?" + filters.join("&");
     const headers = { ...h };
+    // "Prefer" tells PostgREST how to behave:
+    //   resolution=merge-duplicates → turn the INSERT into an UPSERT (update on key clash)
+    //   return=minimal              → don't send the saved rows back (faster; we don't use them)
     if (method === "POST" && upsertOn) headers["Prefer"] = "resolution=merge-duplicates,return=minimal";
     else if (method === "POST") headers["Prefer"] = "return=minimal";
     try {
@@ -52,7 +122,17 @@ const sb = (() => {
       return { data: null, error: reason };
     }
   };
+  /**
+   * Table accessor, supabase-js style: sb.from("incidents").select("*")
+   * Values passed to eq/neq/etc. are URL-encoded here, so callers pass raw values.
+   * Remember all user_id columns are TEXT — pass String(id) to be safe.
+   */
   const from = (table) => ({
+    // select() fires the "all rows" GET immediately and returns that promise.
+    // .eq()/.neq() are bolted onto the same promise object and fire a SECOND,
+    // filtered GET — so `select().eq(...)` makes two requests (the unfiltered one
+    // is simply ignored). Harmless for small tables; worth fixing (lazy request)
+    // if a large table is ever queried this way.
     select: (cols = "*") => {
       const base = { filter: `select=${cols}` };
       const promise = q("GET", table, base);
@@ -60,17 +140,34 @@ const sb = (() => {
       promise.neq = (col, val) => q("GET", table, { filter: `select=${cols}&${col}=neq.${encodeURIComponent(val)}` });
       return promise;
     },
+    // Raw filtered GET, e.g. query("select=*&order=at.desc&limit=500&entity=eq.incident").
+    // Use when you need ordering/limits (select() always fetches every row).
+    query: (filter) => q("GET", table, { filter: filter || "select=*" }),
+    // Single rows are wrapped in an array — PostgREST accepts arrays for bulk writes.
     insert: (rows) => q("POST", table, { body: Array.isArray(rows) ? rows : [rows] }),
+    // Preferred write method across the app (upsert-and-prune pattern — see README).
+    // Without opts.onConflict this behaves like a plain insert.
     upsert: (rows, opts = {}) => q("POST", table, { body: Array.isArray(rows) ? rows : [rows], upsertOn: opts.onConflict }),
+    // PostgREST refuses DELETE without a filter, so you must pick one of these.
     delete: () => ({
       eq:     (col, val) => q("DELETE", table, { filter: `${col}=eq.${encodeURIComponent(val)}` }),
       neq:    (col, val) => q("DELETE", table, { filter: `${col}=neq.${encodeURIComponent(val)}` }),
       gte:    (col, val) => q("DELETE", table, { filter: `${col}=gte.${encodeURIComponent(val)}` }),
+      // ⚠ "Delete everything" trick: id >= 0. Only works on tables with a NUMERIC id
+      // column. Text ids (e.g. "mod_abc") won't match and nothing is deleted.
       all:    ()         => q("DELETE", table, { filter: `id=gte.0` }),
+      // match({user_id:"12", module_id:"m3"}) → delete rows matching ALL the given columns.
       match:  (conditions) => q("DELETE", table, { filter: Object.entries(conditions).map(([k,v])=>`${k}=eq.${encodeURIComponent(v)}`).join("&") }),
     }),
   });
+  /**
+   * Supabase Storage (file buckets). Buckets must exist in the Supabase dashboard
+   * and be PUBLIC for getPublicUrl() links to work in <img>/<video> tags.
+   * `path` is the file's key inside the bucket, e.g. "incidents/123/photo1.jpg";
+   * each path segment is URL-encoded so spaces/special chars in filenames are safe.
+   */
   const storage = {
+    // "x-upsert: true" overwrites an existing file at the same path instead of failing.
     upload: async (bucket, path, file) => {
       // Supabase Storage expects the raw file body with Content-Type set to the file's MIME type
       const contentType = file.type && file.type !== "" ? file.type : "application/octet-stream";
@@ -90,6 +187,7 @@ const sb = (() => {
       if (!res.ok) console.error("Storage upload error:", res.status, text);
       return { error: res.ok ? null : text };
     },
+    // Deletes one or more files. `paths` is an array of in-bucket paths.
     remove: async (bucket, paths) => {
       const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${bucket}`, {
         method: "DELETE",
@@ -98,12 +196,22 @@ const sb = (() => {
       });
       return { error: res.ok ? null : await res.text() };
     },
+    // Pure string builder — makes no network call and doesn't check the file exists.
     getPublicUrl: (bucket, path) => `${SUPABASE_URL}/storage/v1/object/public/${bucket}/${path.split('/').map(encodeURIComponent).join('/')}`,
   };
   return { from, storage };
 })();
 
 // ─── Password hashing ───────────────────────────────────────────────────────────
+/**
+ * SHA-256 hex digest of a password, computed in the browser (Web Crypto API).
+ * Stored in the users table and compared at login.
+ * NOTE: unsalted, fast hash — fine for an internal portal, but see the security
+ * notes at the top of this file. crypto.subtle only works on HTTPS or localhost.
+ * If you ever change the algorithm, every existing stored hash stops matching,
+ * so all users would need a password reset.
+ * @returns {Promise<string>} 64-char lowercase hex string
+ */
 async function hashPassword(password) {
   const encoder = new TextEncoder();
   const data = encoder.encode(password);
@@ -112,6 +220,10 @@ async function hashPassword(password) {
   return hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
 }
 // Default password hash (for "pass123")
+// Given to newly created staff accounts. Computed asynchronously at module load,
+// so it is "" for a split second on startup. Because it's exported as a `let`,
+// ES modules give importers a LIVE binding — they see the filled-in value once
+// the promise resolves. Do not copy it into a const at import time.
 let DEFAULT_HASH = "";
 hashPassword("pass123").then(h => { DEFAULT_HASH = h; });
 
@@ -119,6 +231,13 @@ hashPassword("pass123").then(h => { DEFAULT_HASH = h; });
 // Wrap any sb.from(...).upsert/insert/update/delete(...) or sb.storage.upload/remove(...)
 // call. Logs on failure (and optionally alerts) so a failed save is never silent.
 // Usage: await dbWrite(sb.from("incidents").upsert({...}), "incident");
+//
+// @param {Promise<{error}>} promise  Any sb write call (not awaited yet).
+// @param {string} label             Short name shown in logs/alerts, e.g. "incident".
+// @param {{alertOnError?: boolean}} opts  Set alertOnError:true for user-initiated
+//                                    saves where the user must know it failed.
+// @returns {Promise<boolean>} true if saved OK, false if it failed.
+// CONVENTION: all new write call sites should go through this helper.
 async function dbWrite(promise, label, opts = {}) {
   const { error } = await promise;
   if (error) {

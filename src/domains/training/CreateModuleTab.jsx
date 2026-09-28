@@ -8,15 +8,44 @@ import { HotspotEditor } from "./HotspotEditor";
 import { sanitizeHtml } from "../../lib/sanitizeHtml";
 import { htmlToPlainText } from "./slideTextUtils";
 
+/**
+ * CreateModuleTab — admin 4-step wizard to create or edit a training module.
+ *   1. Details  (title, category, level, duration, icon, renewal period)
+ *   2. Slides   (heading, rich text, images, optional video, optional hotspot activity)
+ *   3. Quiz     (multiple choice, 4 options, one correct answer index)
+ *   4. Preview & Save
+ *
+ * Props:
+ *   editingModule – module to edit, or null to create a new one
+ *   onSave(module)– NEW module: called after a successful save to Supabase (version 1).
+ *                   EDITED module: called WITHOUT saving — App.jsx shows NewVersionModal
+ *                   (minor/major) and saveModuleVersion() writes it as the next version.
+ *   Z, font       – theme + font
+ *
+ * SAVED MODULE SHAPE (custom_modules.data):
+ *   { id, title, category, level, duration, icon, renewalMonths, passMark?, description?,
+ *     content: [ { heading, text(HTML), images:[{name,type,url,data}], video:{name,type,url,data}|null,
+ *                  hotspots:[{id,x,y,radius,correct,label,feedback}]|null, hotspotInstructions } ],
+ *     quiz: [ { q, options:[4 strings], answer:<index 0-3> } ],
+ *     _custom:true }
+ *   `url` and `data` hold the SAME storage URL (older code read `data`, newer reads `url`).
+ *
+ * MEDIA: images/videos upload immediately on selection to the "documents" bucket
+ * (slideimg_<ts>_<name> / video_<ts>_<name>) and are held as {uploading:true}
+ * placeholders until done. Saving is blocked while any upload is in progress.
+ */
 function CreateModuleTab({ onSave, editingModule, Z, font }) {
   const isMobile = useWindowWidth() <= 1024;
   const ICONS = ["📋","🔥","💪","🧠","⚡","🏥","🦺","🧯","☢️","🌿","🔧","📊","🚧","👁","🩺","🎓","⚠️","🔐","🚨","📡"];
   const CATEGORIES = ["Fire Safety","Physical Safety","Mental Health","Hazardous Substances","Electrical Safety","First Aid","Environmental","Equipment Safety","Manual Handling","General H&S","Food Safety","Compliance","Custom"];
   const LEVELS = ["Mandatory","Recommended","Optional"];
+  // Templates for new slides/questions. Always spread-copy them — never push the same object twice.
   const BLANK_SLIDE = { heading:"", text:"", video:null, images:[], hotspots:null, hotspotInstructions:"" }; // video: { name, data/url, type }; images: array of same; hotspots: array of { id,x,y,radius,correct,label,feedback } or null if no activity
   const BLANK_Q = { q:"", options:["","","",""], answer:0 };
 
   const [step, setStep] = useState("details");
+  // Wizard state. When editing, the module is copied into local state so changes are
+  // discarded unless the admin reaches step 4 and saves.
   const [details, setDetails] = useState(editingModule ? {
     title: editingModule.title||"",
     category: editingModule.category||"General H&S",
@@ -48,6 +77,7 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
   function addSlide() { setSlides(p=>[...p, {...BLANK_SLIDE}]); }
   function removeSlide(i) { if(slides.length>1) setSlides(p=>p.filter((_,idx)=>idx!==i)); }
   function updateSlide(i,k,v) { setSlides(p=>p.map((s,idx)=>idx===i?{...s,[k]:v}:s)); }
+  // Swap slide i with its neighbour (dir = -1 up, +1 down).
   function moveSlide(i, dir) {
     setSlides(p=>{
       const a=[...p]; const j=i+dir;
@@ -61,6 +91,7 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
   function updateQ(i,k,v) { setQuiz(p=>p.map((q,idx)=>idx===i?{...q,[k]:v}:q)); }
   function updateOption(qi,oi,v) { setQuiz(p=>p.map((q,idx)=>idx===qi?{...q,options:q.options.map((o,oidx)=>oidx===oi?v:o)}:q)); }
 
+  // Validates the CURRENT step before moving to `to`. Errors are shown in the red banner.
   function validateAndNext(to) {
     setErr("");
     if(step==="details") {
@@ -81,6 +112,10 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
     setStep(to);
   }
 
+  // Cleans the slides (sanitises HTML, drops failed uploads), writes to custom_modules,
+  // then calls onSave. NOTE: App.jsx's onSave writes the same record again (adding
+  // _override for built-in modules) and the customModules auto-sync effect writes it a
+  // third time — redundant but harmless. New modules get id "custom_<timestamp>".
   async function saveModule() {
     // Wait for any in-progress video or image uploads before saving
     const anyUploading = slides.some(s => (s.video && s.video.uploading) || (s.images||[]).some(img=>img.uploading));
@@ -107,8 +142,11 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
       quiz: quiz.map(q=>({...q, answer:Number(q.answer)})),
       _custom: true,
     };
-    // Save directly to Supabase before updating state
-    const { error } = await sb.from("custom_modules").upsert({ id: newModule.id, data: newModule }, { onConflict: "id" });
+    // Editing an existing module: App.jsx asks "minor or major change?" and saves it as a
+    // new version (saveModuleVersion) — nothing is written until the admin confirms.
+    if (editingModule) { onSave(newModule); return; }
+    // New module: save directly to Supabase before updating state
+    const { error } = await sb.from("custom_modules").upsert({ id: newModule.id, data: { ...newModule, version: 1 } }, { onConflict: "id" });
     if (error) {
       console.error("Failed to save module:", error);
       setErr(`Failed to save module — your changes were not saved. ${error}`);
@@ -241,6 +279,7 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
                   ref={el=>imageInputRefs.current[i]=el}
                   type="file" accept={ACCEPT_IMAGES}
                   style={{display:"none"}}
+                  // Upload flow: add placeholder → upload → replace the placeholder (matched by file name) with the real URL.
                   onChange={async e=>{
                     const file=e.target.files[0]; if(!file) return;
                     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g,"_");

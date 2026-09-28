@@ -5,6 +5,32 @@ import { E } from "../../lib/emoji";
 import { ACCEPT_IMAGES } from "../../lib/constants";
 import { InvestigationDashboard } from "./InvestigationDashboard";
 
+/**
+ * InvestigationTab — admin incident investigations (root cause + corrective actions).
+ *
+ * Three views: "dashboard" (InvestigationDashboard summary), "list" (all incidents
+ * with investigation status / open & overdue action counts) and "detail" (edit form).
+ *
+ * DATA: investigations = { [incidentId]: {
+ *          summary, rootCause, contributingFactors, immediateActions, recommendations,
+ *          investigator, investigationDate, status: open|in_progress|pending_actions|closed,
+ *          photos:[{name,type,data(base64),uploaded}],
+ *          actions:[{ id, description, owner(NAME), dueDate, priority, status, notes?,
+ *                     attachments?, completedDate?, completedBy?, chasedOn?,
+ *                     managerSignOff?: { by, date, note } (line manager, My Team tab) }] } }
+ * Saved by App.jsx's [investigations] auto-sync effect (whole object per incident).
+ *
+ * EDITING MODEL: the detail view edits a local copy (`invForm`). Nothing is stored
+ * until "Save Investigation" copies invForm into App state — navigating away first
+ * discards changes (including added/edited actions).
+ *
+ * ⚠ Action status values are inconsistent across the app: this tab toggles
+ *   "open"/"complete" (and mobile sets "complete"), but the printed report and some
+ *   filters look for "closed". Treat both as done when writing new code, or
+ *   standardise on one value with a one-off data fix.
+ * ⚠ Photos are stored as base64 inside the investigation JSON (≤5 MB each), which
+ *   makes rows large. Uploading to Storage (lib/photos.js) would be lighter.
+ */
 function InvestigationTab({ incidents, setIncidents, staff, investigations, setInvestigations, focusedId, setFocusedId, onBack, Z, font }) {
   const isMobile = useWindowWidth() <= 1024;
   const [view, setView] = useState(focusedId ? "detail" : "dashboard"); // "dashboard" | "list" | "detail"
@@ -18,6 +44,8 @@ function InvestigationTab({ incidents, setIncidents, staff, investigations, setI
   const BLANK_INV = { summary:"", rootCause:"", contributingFactors:"", immediateActions:"", recommendations:"", investigator:"", investigationDate:new Date().toISOString().slice(0,10), status:"open", photos:[], actions:[] };
   const BLANK_ACTION = { description:"", owner:"", dueDate:"", priority:"medium", status:"open" };
 
+  // When another screen asks to open a specific incident (focusedId), load its
+  // investigation (or a blank one) into the form and switch to the detail view.
   // Sync external focusedId changes
   useEffect(()=>{
     if(!focusedId) return;
@@ -42,12 +70,15 @@ function InvestigationTab({ incidents, setIncidents, staff, investigations, setI
     setPhotoError("");
   }
 
+  // Commit the local form into App state (→ auto-saved to Supabase).
   function saveInvestigation() {
     setInvestigations(p=>({...p,[activeId]:{...invForm}}));
     setSaved(true);
     setTimeout(()=>setSaved(false), 2000);
   }
 
+  // Builds an HTML investigation report and downloads it as a .html file (Blob + <a download>),
+  // rather than opening a print window.
   function generateInvestigationReport() {
     if(!inc||!invForm) return;
     const today = new Date().toLocaleDateString("en-GB");
@@ -153,6 +184,7 @@ function InvestigationTab({ incidents, setIncidents, staff, investigations, setI
     URL.revokeObjectURL(url);
   }
 
+  // Reads selected images as base64 (max 5 MB each) and appends them to invForm.photos.
   function handlePhotoUpload(e) {
     const files = Array.from(e.target.files);
     setPhotoError("");
@@ -178,6 +210,7 @@ function InvestigationTab({ incidents, setIncidents, staff, investigations, setI
     setInvForm(p=>({...p, photos:p.photos.filter((_,i)=>i!==idx)}));
   }
 
+  // Add (new id "a<timestamp>") or replace (editActionIdx) a corrective action in the LOCAL form.
   function saveAction() {
     if (!actionForm.description.trim()) return;
     setInvForm(p=>{
@@ -463,6 +496,7 @@ function InvestigationTab({ incidents, setIncidents, staff, investigations, setI
                             {a.owner && <span style={{fontSize:10,color:Z.muted}}>👤 {a.owner}</span>}
                             {a.dueDate && <span style={{fontSize:10,color:overdue?"#f87171":Z.muted}}>{overdue?"🚨 Overdue: ":"📅 "}{a.dueDate}</span>}
                             {a.status==="complete" && <span style={{fontSize:10,color:"#10b981",fontWeight:700}}>✓ Complete{a.completedBy?` — ${a.completedBy}`:""}{a.completedAt?` · ${a.completedAt}`:""}</span>}
+                            {a.managerSignOff && <span style={{fontSize:10,color:Z.gold,fontWeight:700}}>✓ Signed off by {a.managerSignOff.by} {a.managerSignOff.date}{a.managerSignOff.note?` — ${a.managerSignOff.note}`:""}</span>}
                             {attachments.length>0 && <span style={{fontSize:10,color:Z.muted}}>📎 {attachments.length} file{attachments.length!==1?"s":""}</span>}
                           </div>
                         </div>

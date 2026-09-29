@@ -11,10 +11,12 @@
  * entries dead weight otherwise.
  */
 
-const CACHE_VERSION = "v3";
+// Changing this string makes the activate handler delete every older cache.
+const CACHE_VERSION = "v4"; // v4: new favicon & app icons
 const SHELL_CACHE = `zeus-shell-${CACHE_VERSION}`;
 const MEDIA_CACHE = `zeus-media-${CACHE_VERSION}`;
 
+// Files needed to open the app offline. Missing files are tolerated (see install).
 const SHELL_ASSETS = [
   "/",
   "/index.html",
@@ -50,6 +52,9 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+// File types treated as immutable media (cache-first). NB: this matches ANY origin,
+// not just Supabase — a replaced file at the same URL will keep serving the cached copy
+// until CACHE_VERSION changes, so upload new versions under a new file name.
 function isMedia(url) {
   return /\.(png|jpe?g|gif|webp|svg|mp4|webm|ogg|pdf|docx?|xlsx?)$/i.test(url.pathname);
 }
@@ -58,6 +63,10 @@ function isSupabase(url) {
   return url.hostname.endsWith(".supabase.co");
 }
 
+// Request routing, first match wins:
+//   non-GET → network · Supabase REST → network (never cached) · Range/video/audio → network
+//   media files → cache-first · /assets/* (hashed build) → cache-first · same-origin → network-first
+//   anything else (other origins) → browser default
 self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET") return;
@@ -148,6 +157,7 @@ self.addEventListener("sync", (event) => {
   );
 });
 
+// Lets the page activate a waiting worker immediately (postMessage {type:"SKIP_WAITING"}).
 self.addEventListener("message", (event) => {
   if (event.data && event.data.type === "SKIP_WAITING") self.skipWaiting();
 });

@@ -156,7 +156,7 @@ function AccountTab({ user, passwords, onSetPassword, darkMode, setDarkMode, the
         {/* Professional Mode toggle — spans full width */}
         <div style={{...card,gridColumn:isMobile?"1":"1 / -1",padding:24}}>
           <h3 style={{fontSize:13,fontWeight:700,letterSpacing:.5,color:Z.muted,margin:"0 0 4px",textTransform:"uppercase"}}>Display Preferences</h3>
-          <p style={{fontSize:12,color:Z.muted,margin:"0 0 20px",lineHeight:1.5}}>Control how the portal presents information. Professional Mode removes decorative emoji from navigation, headers, and UI labels throughout the portal.</p>
+          <p style={{fontSize:12,color:Z.muted,margin:"0 0 20px",lineHeight:1.5}}>Control how the portal presents information. Professional Mode replaces the colourful emoji throughout the portal with plain black symbols (for example ⚠︎ ▦ ⌕ ✔︎) that follow your colour theme.</p>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"16px 20px",background:Z.overlay,borderRadius:12,border:`1px solid ${!emojiMode?"rgba(37,99,235,0.35)":Z.borderMd}`,transition:"border .2s"}}>
             <div>
               <div style={{fontWeight:700,fontSize:14,color:Z.white,marginBottom:3}}>
@@ -165,7 +165,7 @@ function AccountTab({ user, passwords, onSetPassword, darkMode, setDarkMode, the
               <div style={{fontSize:12,color:Z.muted}}>
                 {emojiMode
                   ? "Emoji icons are shown throughout the portal interface"
-                  : "Emoji icons are hidden — clean text-only labels"}
+                  : "Emoji are shown as plain black symbols"}
               </div>
             </div>
             <button onClick={()=>{ const next=!emojiMode; onSaveEmojiMode(next); }}

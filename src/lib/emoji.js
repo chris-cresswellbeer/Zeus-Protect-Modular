@@ -5,7 +5,12 @@
  * The portal lets users turn emoji icons off (some work PCs render them badly
  * or users find them unprofessional). Every place that shows an emoji calls
  *
- *     E("🔥", "Fire")        → returns "🔥" when emoji mode is on, "Fire" when off
+ *     E("🔥", "Fire")        → returns "🔥" when emoji mode is on. In Professional
+ *                              Mode it returns the plain symbol for "🔥" (♨︎, see
+ *                              lib/plainSymbols.js), or the fallback if there isn't one.
+ *
+ * Emoji written WITHOUT E() are converted too in Professional Mode, by the page
+ * watcher in lib/plainSymbols.js (started/stopped by App.jsx).
  *
  * HOW IT STAYS IN SYNC:
  *   App.jsx holds the real `emojiMode` React state and calls syncEmojiMode()
@@ -23,6 +28,7 @@
  * ═══════════════════════════════════════════════════════════════════════════
  */
 import React from "react";
+import { toPlain } from "./plainSymbols";
 
 /** React context carrying the emoji flag (default: on). Kept for compatibility; E() does not use it. */
 const EmojiCtx = React.createContext(true);
@@ -42,10 +48,15 @@ function syncEmojiMode(value) {
 /**
  * Pick an emoji or its plain-text fallback depending on the user's setting.
  * @param {string} emoji     What to show when emoji mode is ON.
- * @param {*} fallback       What to show when OFF (usually a short string, may be "" or a JSX node).
+ * @param {*} fallback       Used in Professional Mode only if the emoji has no plain substitute.
  */
 function E(emoji, fallback) {
-  return _emojiMode ? emoji : fallback;
+  if (_emojiMode) return emoji;
+  if (typeof emoji === "string") {
+    const plain = toPlain(emoji);
+    if (plain !== emoji) return plain;      // the plain black symbol
+  }
+  return fallback;
 }
 
 export { EmojiCtx, E, syncEmojiMode };

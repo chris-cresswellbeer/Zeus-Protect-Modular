@@ -116,6 +116,7 @@ import { HotspotActivity } from "./domains/training/HotspotActivity";
 import { sanitizeHtml } from "./lib/sanitizeHtml";
 import { getExpiryStatus } from "./lib/dates";
 import { EmojiCtx, E, syncEmojiMode } from "./lib/emoji";
+import { startPlainSymbols, stopPlainSymbols } from "./lib/plainSymbols";
 import { sb, hashPassword, DEFAULT_HASH, dbWrite } from "./lib/supabase";
 import { uploadPhotos, PHOTO_BUCKET } from "./lib/photos";
 import { HelpTip } from "./shared/HelpTip";
@@ -160,6 +161,35 @@ function SortableStatCard({ id, children }) {
  * State below is grouped roughly as: auth/session → training → documents → DSE →
  * incidents/investigations → other H&S registers → admin UI form state.
  */
+// One `incidents` table row → the incident record the app uses. Shared by loadAll()
+// and refreshSharedRecords(). Everything without its own column comes back from the
+// jsonb `details` column; the core columns below always win.
+const mapIncidentRow = (r) => ({
+            // Everything the core columns don't hold (injured person, witnesses,
+            // first aid, post-incident, measures, corrective actions, equipment,
+            // time, triaged…) comes back from the jsonb `details` column.
+            // Spread first so the core columns below always win.
+            ...((r.details && typeof r.details === "object") ? r.details : {}),
+            id: r.id, date: r.date, type: r.type, accidentCode: r.accident_code,
+            numberCode: r.number_code, location: r.location, reportedBy: r.reported_by,
+            description: r.description, injuryType: r.injury_type, riddor: r.riddor, closed: r.closed,
+            riddorReported: r.riddor_reported||false,
+            riddorReportedDate: r.riddor_reported_date||null,
+            hseReference: r.hse_reference||null,
+            riddorReportedBy: r.riddor_reported_by||null,
+            quickReport: !!r.quick_report,
+            urgency: r.urgency||null,
+            photos: Array.isArray(r.photos) ? r.photos : [],
+});
+
+// Key-order-independent JSON, used to tell whether a record really changed.
+function stableJSON(v) {
+  if (v === undefined) return "null";
+  if (v === null || typeof v !== "object") return JSON.stringify(v);
+  if (Array.isArray(v)) return "[" + v.map(stableJSON).join(",") + "]";
+  return "{" + Object.keys(v).sort().filter(k => v[k] !== undefined).map(k => JSON.stringify(k) + ":" + stableJSON(v[k])).join(",") + "}";
+}
+
 // Short human-readable labels for audit-trail entries.
 const INCIDENT_TYPE_LABELS = { accident:"Accident", near_miss:"Near miss", unsafe_condition:"Unsafe condition", unsafe_act:"Unsafe act" };
 const incidentAuditLabel = (inc) => inc ? [inc.date, INCIDENT_TYPE_LABELS[inc.type] || inc.type, inc.location].filter(Boolean).join(" · ") : "";
@@ -252,8 +282,14 @@ export default function App() {
   // This replaces the old useContext-inside-E() approach, which violated
   // the Rules of Hooks whenever E() was called a different number of
   // times across renders (e.g. switching between staff/admin views).
+  // Set during render (not only in the effect) so E() calls in THIS render already
+  // use the new setting — otherwise the screen lagged one render behind the toggle.
+  syncEmojiMode(emojiMode);
   useEffect(() => {
     syncEmojiMode(emojiMode);
+    // Professional Mode: swap every emoji on the page for its plain symbol
+    // (including ones not wrapped in E()); switching back restores them.
+    if (emojiMode) stopPlainSymbols(); else startPlainSymbols();
   }, [emojiMode]);
   useEffect(() => { ensureRteStyles(); }, []);
   // Fire safety is ONE state object holding six lists; each list maps to its own Supabase table (see dbSaveFireSafety).
@@ -499,23 +535,7 @@ export default function App() {
         // Incidents
         const iRows = rows(iRes);
         if (iRows && iRows.length) {
-          setIncidents(iRows.map(r => ({
-            // Everything the core columns don't hold (injured person, witnesses,
-            // first aid, post-incident, measures, corrective actions, equipment,
-            // time, triaged…) comes back from the jsonb `details` column.
-            // Spread first so the core columns below always win.
-            ...((r.details && typeof r.details === "object") ? r.details : {}),
-            id: r.id, date: r.date, type: r.type, accidentCode: r.accident_code,
-            numberCode: r.number_code, location: r.location, reportedBy: r.reported_by,
-            description: r.description, injuryType: r.injury_type, riddor: r.riddor, closed: r.closed,
-            riddorReported: r.riddor_reported||false,
-            riddorReportedDate: r.riddor_reported_date||null,
-            hseReference: r.hse_reference||null,
-            riddorReportedBy: r.riddor_reported_by||null,
-            quickReport: !!r.quick_report,
-            urgency: r.urgency||null,
-            photos: Array.isArray(r.photos) ? r.photos : [],
-          })));
+          setIncidents(iRows.map(mapIncidentRow));
         }
 
         // Investigations
@@ -804,6 +824,15 @@ export default function App() {
   //   fine for numeric ids, but a non-numeric text id would become NaN.
   // ── Auto-sync watchers — fire whenever state changes after initial load ───────
   const _ready = useRef(false);
+  // Last version of each incident / investigation known to be in the database
+  // (id → stableJSON). The auto-sync effects below only write records that differ,
+  // so one browser can no longer overwrite another's newer changes with its stale
+  // copy just because something ELSE changed. refreshSharedRecords() keeps these up to date.
+  const incidentSavedRef = useRef(new Map());
+  const investigationSavedRef = useRef(new Map());
+  const incidentWritingRef = useRef(new Set());       // incident ids with a save in flight
+  const investigationWritingRef = useRef(new Set());
+  const refreshBusyRef = useRef(false);
   // Once data has loaded, snapshot every audited record WITHOUT logging (lib/audit.js),
   // so only real changes from here on create audit-trail entries. Declared before the
   // auto-sync effects below so the snapshots exist before their first re-save.
@@ -815,6 +844,8 @@ export default function App() {
     primeAuditMap("dse_report", dseReports);
     primeAuditMap("dse_response", adminResponses);
     primeAuditList("inspection", siteInspections);
+    incidents.forEach(i => incidentSavedRef.current.set(String(i.id), stableJSON(i)));
+    Object.entries(investigations).forEach(([id, d]) => investigationSavedRef.current.set(String(id), stableJSON(d)));
     _ready.current = true;
   }, [dbReady]); // eslint-disable-line
 
@@ -822,13 +853,83 @@ export default function App() {
   useEffect(() => { setAuditUser(user); }, [user]);
   const auditNameOf = (uid) => (allUsers.find(u => String(u.id) === String(uid)) || {}).name || `User ${uid}`;
 
+  // Only incidents / investigations that changed since they were last saved or loaded are written.
   useEffect(() => { if (!_ready.current) return;
-    incidents.forEach(inc => dbSaveIncident(inc));
+    incidents.forEach(inc => {
+      const id = String(inc.id), j = stableJSON(inc);
+      if (incidentSavedRef.current.get(id) === j) return;
+      incidentSavedRef.current.set(id, j);
+      dbSaveIncident(inc);
+    });
   }, [incidents]); // eslint-disable-line
 
   useEffect(() => { if (!_ready.current) return;
-    Object.entries(investigations).forEach(([id, data]) => dbSaveInvestigation(id, data));
+    Object.entries(investigations).forEach(([id, data]) => {
+      const j = stableJSON(data);
+      if (investigationSavedRef.current.get(String(id)) === j) return;
+      investigationSavedRef.current.set(String(id), j);
+      dbSaveInvestigation(id, data);
+    });
   }, [investigations]); // eslint-disable-line
+
+  // ── Live refresh ────────────────────────────────────────────────────────────
+  // Everything else is loaded once per page load, so an admin who stays signed in
+  // wouldn't see incidents reported by others (or their investigation updates, e.g.
+  // actions completed on the phone). Re-read both tables every 30 s while the tab is
+  // visible, when the window regains focus, and when an incidents screen is opened.
+  // Records with a save still in flight from THIS browser are kept as they are.
+  async function refreshSharedRecords() {
+    if (!_ready.current || refreshBusyRef.current) return;
+    refreshBusyRef.current = true;
+    try {
+      const [iRes, invRes] = await Promise.all([sb.from("incidents").select("*"), sb.from("investigations").select("*")]);
+      if (!iRes.error && Array.isArray(iRes.data)) {
+        const fresh = iRes.data.map(mapIncidentRow);
+        setIncidents(cur => {
+          const writing = incidentWritingRef.current;
+          const freshIds = new Set(fresh.map(i => String(i.id)));
+          const curById = new Map(cur.map(i => [String(i.id), i]));
+          const merged = [
+            ...fresh.map(f => (writing.has(String(f.id)) && curById.get(String(f.id))) || f),
+            ...cur.filter(i => !freshIds.has(String(i.id)) && writing.has(String(i.id))),   // new, save in flight
+          ];
+          const same = merged.length === cur.length && merged.every(m => { const c = curById.get(String(m.id)); return c && stableJSON(c) === stableJSON(m); });
+          if (same) return cur;
+          // Treat what we just read as "already saved" and "already audited", so it
+          // is neither written back nor logged as a change made in this browser.
+          merged.forEach(m => { if (!writing.has(String(m.id))) { incidentSavedRef.current.set(String(m.id), stableJSON(m)); primeAudit("incident", m.id, m); } });
+          // Keep the current on-screen order; new arrivals go to the top.
+          const order = new Map(cur.map((c, i) => [String(c.id), i]));
+          return merged.sort((a, b) => (order.has(String(a.id)) ? order.get(String(a.id)) : -1) - (order.has(String(b.id)) ? order.get(String(b.id)) : -1));
+        });
+      }
+      if (!invRes.error && Array.isArray(invRes.data)) {
+        const fresh = {}; invRes.data.forEach(r => { fresh[r.incident_id] = r.data; });
+        setInvestigations(cur => {
+          const writing = investigationWritingRef.current;
+          const next = { ...fresh };
+          Object.keys(cur).forEach(id => { if (writing.has(String(id))) next[id] = cur[id]; });
+          const keys = new Set([...Object.keys(cur), ...Object.keys(next)]);
+          if ([...keys].every(k => stableJSON(cur[k]) === stableJSON(next[k]))) return cur;
+          Object.entries(next).forEach(([id, d]) => { if (!writing.has(String(id))) { investigationSavedRef.current.set(String(id), stableJSON(d)); primeAudit("investigation", id, d); } });
+          return next;
+        });
+      }
+    } finally {
+      refreshBusyRef.current = false;
+    }
+  }
+  useEffect(() => {
+    if (!dbReady || !user) return;
+    const tick = () => { if (document.visibilityState === "visible") refreshSharedRecords(); };
+    const iv = setInterval(tick, 30000);
+    window.addEventListener("focus", tick);
+    document.addEventListener("visibilitychange", tick);
+    return () => { clearInterval(iv); window.removeEventListener("focus", tick); document.removeEventListener("visibilitychange", tick); };
+  }, [dbReady, user]); // eslint-disable-line
+  useEffect(() => {
+    if ((view === "admin" && atab === "incidents") || (view === "staff" && (stab === "incidents" || stab === "actions" || stab === "team"))) refreshSharedRecords();
+  }, [view, atab, stab]); // eslint-disable-line
 
   useEffect(() => { if (!_ready.current) return;
     Object.entries(dseReports).forEach(([uid, reports]) => {
@@ -910,6 +1011,10 @@ export default function App() {
 
   // Upserts one incident (and uploads any new photos first). Called for EVERY incident by the auto-sync effect.
   async function dbSaveIncident(inc) {
+    incidentWritingRef.current.add(String(inc.id));
+    try { await dbSaveIncidentNow(inc); } finally { incidentWritingRef.current.delete(String(inc.id)); }
+  }
+  async function dbSaveIncidentNow(inc) {
     // Photos arrive from the mobile app as data URLs. Push them to Storage and
     // store the resulting URLs — a data URL in the row would bloat every read.
     // Already-uploaded photos pass straight through, so this is a no-op on the
@@ -951,6 +1056,10 @@ export default function App() {
 
   // Investigations are keyed by incident id; the whole investigation is one JSON `data` blob.
   async function dbSaveInvestigation(incidentId, data) {
+    investigationWritingRef.current.add(String(incidentId));
+    try { await dbSaveInvestigationNow(incidentId, data); } finally { investigationWritingRef.current.delete(String(incidentId)); }
+  }
+  async function dbSaveInvestigationNow(incidentId, data) {
     auditRecord("investigation", incidentId, data, incidentAuditLabel(incidents.find(i => String(i.id) === String(incidentId))) || String(incidentId));
     await dbWrite(sb.from("investigations").upsert({ incident_id: incidentId, data }, { onConflict: "incident_id" }), "investigation");
   }

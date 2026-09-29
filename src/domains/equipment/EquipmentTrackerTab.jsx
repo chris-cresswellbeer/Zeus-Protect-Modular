@@ -305,10 +305,10 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, Z, font }) {
         <div style={{background:"rgba(245,158,11,0.07)",border:"1px solid rgba(245,158,11,0.25)",borderRadius:14,padding:"14px 18px",marginBottom:20}}>
           <div style={{fontSize:12,fontWeight:800,color:"#f59e0b",textTransform:"uppercase",letterSpacing:.5,marginBottom:10}}>⚠️ Open Defects ({openDefects})</div>
           {equipment.flatMap(e=>e.defects.filter(d=>d.status==="open").map(d=>({...d,eq:e}))).map(d=>(
-            <div key={d.id} style={{display:"flex",alignItems:"center",gap:12,padding:"8px 12px",background:"#1e2d5a",borderRadius:10,marginBottom:6,flexWrap:"wrap"}}>
+            <div key={d.id} style={{display:"flex",alignItems:"center",gap:12,padding:"8px 12px",background:Z.navyMd,borderRadius:10,marginBottom:6,flexWrap:"wrap"}}>
               <span style={{fontSize:20}}>{cat(d.eq.category).icon}</span>
               <div style={{flex:1}}>
-                <div style={{fontSize:13,fontWeight:700,color:"#ffffff"}}>{d.eq.name}</div>
+                <div style={{fontSize:13,fontWeight:700,color:Z.white}}>{d.eq.name}</div>
                 <div style={{fontSize:11,color:"#94a3b8"}}>{d.description} · Reported: {d.date}</div>
               </div>
               <span style={{fontSize:10,fontWeight:700,background:`${SEV_COL[d.severity]}22`,color:SEV_COL[d.severity],padding:"2px 8px",borderRadius:99,border:`1px solid ${SEV_COL[d.severity]}44`}}>{d.severity}</span>
@@ -647,14 +647,14 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, Z, font }) {
             ) : (
               <div style={{display:"grid",gap:10}}>
                 {activeEq.defects.map(d=>(
-                  <div key={d.id} style={{background:"#1e2d5a",borderRadius:12,padding:"14px 18px",border:`1px solid ${d.status==="resolved"?"rgba(16,185,129,0.35)":"rgba(239,68,68,0.35)"}`}}>
+                  <div key={d.id} style={{background:Z.navyMd,borderRadius:12,padding:"14px 18px",border:`1px solid ${d.status==="resolved"?"rgba(16,185,129,0.35)":"rgba(239,68,68,0.35)"}`}}>
                     <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:6,flexWrap:"wrap"}}>
                       <span style={{fontSize:10,fontWeight:700,background:`${SEV_COL[d.severity]}22`,color:SEV_COL[d.severity],padding:"2px 8px",borderRadius:99,border:`1px solid ${SEV_COL[d.severity]}44`}}>{d.severity}</span>
                       <span style={{fontSize:11,color:"#94a3b8"}}>📅 {d.date}</span>
                       {d.reportedBy&&<span style={{fontSize:11,color:"#94a3b8"}}>👤 {d.reportedBy}</span>}
                       <span style={{marginLeft:"auto",fontSize:10,fontWeight:700,color:d.status==="resolved"?"#10b981":"#f87171",background:d.status==="resolved"?"rgba(16,185,129,0.12)":"rgba(239,68,68,0.1)",padding:"2px 8px",borderRadius:99}}>{d.status==="resolved"?"✓ Resolved":"Open"}</span>
                     </div>
-                    <p style={{fontSize:13,fontWeight:600,color:"#ffffff",margin:"0 0 6px",lineHeight:1.5}}>{d.description}</p>
+                    <p style={{fontSize:13,fontWeight:600,color:Z.white,margin:"0 0 6px",lineHeight:1.5}}>{d.description}</p>
                     {d.resolution&&<p style={{fontSize:11,color:"#94a3b8",margin:"0 0 6px",fontStyle:"italic"}}>Resolution: {d.resolution}</p>}
                     {d.status==="open" && (
                       <div style={{display:"flex",gap:8,marginTop:8,alignItems:"center",flexWrap:"wrap"}}>

@@ -19,8 +19,9 @@ function Pill({ label, col }) {
     amber:  {bg:"#fef3c7",c:"#92400e"},
     red:    {bg:"#fee2e2",c:"#991b1b"},
     blue:   {bg:"#dbeafe",c:"#1e40af"},
-    navy:   {bg:Z.borderMd,c:"#fff"},
-    gray:   {bg:Z.overlay,c:"#94a3b8"},
+    // CSS variables let the light themes swap these (lib/lightThemeFix.js); dark themes use the fallbacks.
+    navy:   {bg:`var(--zp-pill-navy-bg, ${Z.borderMd})`,c:"var(--zp-pill-navy-fg, #fff)"},
+    gray:   {bg:`var(--zp-pill-gray-bg, ${Z.overlay})`,c:"var(--zp-pill-gray-fg, #94a3b8)"},
   };
   const s = map[col] || map.gray;
   return <span style={{background:s.bg,color:s.c,borderRadius:99,padding:"2px 10px",fontSize:11,fontWeight:700,letterSpacing:.5,whiteSpace:"nowrap"}}>{label}</span>;

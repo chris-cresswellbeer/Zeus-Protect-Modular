@@ -87,8 +87,8 @@ function DSEAssessment({ user, dseAnswers, setDseAnswers, dseComments, setDseCom
               {issueCount === 0 ? "Excellent — No Issues Found" : resolvedCount === issueCount ? "All Issues Resolved" : `${issueCount} Issue${issueCount !== 1 ? "s" : ""} Identified`}
             </h1>
             <p style={{ color: Z.muted, fontSize: 14 }}>
-              {issueCount > 0 && resolvedCount < issueCount && "Your manager has been notified and will follow up with you."}
-              {issueCount > 0 && resolvedCount === issueCount && "Your manager has marked all issues as resolved. Keep your workstation setup up to date."}
+              {issueCount > 0 && resolvedCount < issueCount && "Your issues have been logged in the portal for the H&S team to review. Their responses will appear on your My DSE page."}
+              {issueCount > 0 && resolvedCount === issueCount && "All issues have been marked as resolved. Keep your workstation setup up to date."}
               {issueCount === 0 && "Keep reviewing your setup annually or if anything changes."}
             </p>
             {issueCount > 0 && (

@@ -49,7 +49,7 @@ function StaffDSETab({ user, dseReports, adminResponses, setDseAnswers, setDseCo
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:24,flexWrap:"wrap",gap:12}}>
         <div>
-          <h2 style={{fontSize:22,fontWeight:900,letterSpacing:-.5,margin:"0 0 4px"}}>My DSE Assessment <HelpTip dark={true} text="Your Display Screen Equipment assessment. Work through each section honestly — it takes about 5 minutes. If you flag any issues your manager will be notified and can respond with comments or actions directly in the portal."/></h2>
+          <h2 style={{fontSize:22,fontWeight:900,letterSpacing:-.5,margin:"0 0 4px"}}>My DSE Assessment <HelpTip dark={true} text="Your Display Screen Equipment assessment. Work through each section honestly — it takes about 5 minutes. Any issues you flag are saved in the portal for the H&S team to review — no email or message is sent — and their responses will appear on this page."/></h2>
           <p style={{color:Z.muted,margin:0,fontSize:13}}>
             Submitted: {latestReport.date} · {latestReport.totalQuestions} questions
             {myReports.length > 1 ? ` · ${myReports.length} assessments on record` : ""}
@@ -67,11 +67,11 @@ function StaffDSETab({ user, dseReports, adminResponses, setDseAnswers, setDseCo
         <div style={{flex:1,minWidth:200}}>
           <div style={{fontWeight:800,fontSize:15,color:Z.white}}>
             {latestReport.issueCount===0 ? "No issues found — workstation is compliant" :
-             allResolved ? "All issues resolved by your manager" :
+             allResolved ? "All issues marked as resolved" :
              `${latestReport.issueCount} issue${latestReport.issueCount!==1?"s":""} identified — ${resolvedCount} resolved, ${openCount} awaiting action`}
           </div>
           <div style={{color:Z.muted,fontSize:12,marginTop:3}}>
-            {latestReport.issueCount>0 && !allResolved ? "Your manager has been notified. Check below for their responses." :
+            {latestReport.issueCount>0 && !allResolved ? "Your issues are logged in the portal for the H&S team to review. Responses will appear below." :
              latestReport.issueCount===0 ? "Keep reviewing your setup annually or if anything changes." : ""}
           </div>
         </div>
@@ -142,7 +142,7 @@ function StaffDSETab({ user, dseReports, adminResponses, setDseAnswers, setDseCo
                   ) : (
                     <div style={{padding:"9px 18px",background:Z.overlay,borderTop:`1px solid ${Z.border}`,display:"flex",alignItems:"center",gap:8}}>
                       <span style={{fontSize:12}}>⏳</span>
-                      <span style={{fontSize:12,color:Z.muted,fontStyle:"italic"}}>Your manager has been notified and will respond shortly.</span>
+                      <span style={{fontSize:12,color:Z.muted,fontStyle:"italic"}}>Logged for the H&S team to review — their response will appear here.</span>
                     </div>
                   )}
                 </div>

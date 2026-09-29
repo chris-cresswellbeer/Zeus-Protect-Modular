@@ -122,7 +122,7 @@ function DocCard({ d, staff, assignedIds, assignedStaff, readCount, unreadCount,
           <div style={{fontWeight:700,fontSize:14,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{d.title}</div>
           {!editingDesc ? (
             <div onClick={()=>{setDescInput(d.description||"");setEditingDesc(true);}}
-              style={{color:d.description?T.muted:"rgba(255,255,255,0.3)",fontSize:12,marginTop:2,cursor:"pointer",fontStyle:d.description?"normal":"italic",
+              style={{color:d.description?T.muted:T.mutedDk,fontSize:12,marginTop:2,cursor:"pointer",fontStyle:d.description?"normal":"italic",
                 whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
               {d.description || "+ Add description"}
             </div>

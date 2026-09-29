@@ -114,7 +114,7 @@ import { isHtmlContent, ensureRteStyles } from "./domains/training/slideTextUtil
 import { HotspotActivity } from "./domains/training/HotspotActivity";
 // ── Core libraries, shared UI and theme ──
 import { sanitizeHtml } from "./lib/sanitizeHtml";
-import { getExpiryStatus } from "./lib/dates";
+import { getExpiryStatus, EXPIRY_WARNING_DAYS } from "./lib/dates";
 import { EmojiCtx, E, syncEmojiMode } from "./lib/emoji";
 import { startPlainSymbols, stopPlainSymbols } from "./lib/plainSymbols";
 import { sb, hashPassword, DEFAULT_HASH, dbWrite } from "./lib/supabase";
@@ -127,6 +127,9 @@ import { Pill, Avatar, Bar } from "./shared/primitives";
 import { Z, getThemeTokens } from "./theme/tokens";
 import MobileApp from "./mobile/MobileApp.jsx";
 import { NewVersionModal } from "./shared/NewVersionModal";
+import { CertificateModal } from "./domains/training/CertificateModal";
+import { applyLightThemeFix, isLightTheme } from "./lib/lightThemeFix";
+import { mergeInvestigation, changedSince } from "./domains/incidents/investigationMerge";
 import { teamOf } from "./domains/manager/team";
 import { setAuditUser, primeAudit, primeAuditList, primeAuditMap, auditRecord, auditList, auditDelete, auditEvent } from "./lib/audit";
 
@@ -149,7 +152,7 @@ function SortableStatCard({ id, children }) {
       <span
         {...listeners}
         title="Drag to reorder"
-        style={{ position: "absolute", top: 10, right: 10, zIndex: 5, cursor: "grab", fontSize: 13, color: "rgba(255,255,255,0.35)", userSelect: "none", touchAction: "none", padding: "4px 6px", lineHeight: 1 }}
+        style={{ position: "absolute", top: 10, right: 10, zIndex: 5, cursor: "grab", fontSize: 13, color: "var(--zp-drag-handle, rgba(255,255,255,0.35))", userSelect: "none", touchAction: "none", padding: "4px 6px", lineHeight: 1 }}
       >⠿⠿</span>
       {children}
     </div>
@@ -207,6 +210,8 @@ export default function App() {
   const [darkMode, setDarkMode] = useState(true); // kept for backward compat
   const [theme, setTheme] = useState("dark"); // "dark"|"light"|"slate"|"forest"|"graphite"|"arctic"|"sand"
   const T = getThemeTokens(theme); // active theme tokens
+  // Light themes: darken the pale dark-theme text colours so admin text stays readable.
+  useEffect(() => { applyLightThemeFix(isLightTheme(theme)); }, [theme]);
   const [user,    setUser]    = useState(null);
   const [view,    setView]    = useState("login");
   const [allUsers,setAllUsers]= useState([]); // loaded from Supabase users table; USERS constant is seed-only
@@ -648,7 +653,7 @@ export default function App() {
         // Quiz failures
         const qfRows = rows(qfRes);
         if (qfRows && qfRows.length) {
-          setQuizFailures(qfRows.map(r => r.data));
+          setQuizFailures(qfRows.map(r => ({ ...r.data, _rowId: r.id })));   // _rowId: fallback key for "Mark reviewed"
         }
 
         // Contractors
@@ -752,6 +757,8 @@ export default function App() {
         }
 
         // Fire Safety
+        fireLoadOkRef.current = [fwRes, fdRes, fatRes, fexRes, felRes, ffrRes]
+          .every(r => r.status === "fulfilled" && !r.value?.error);
         const fwRows  = rows(fwRes);
         const fdRows  = rows(fdRes);
         const fatRows = rows(fatRes);
@@ -824,6 +831,10 @@ export default function App() {
   //   fine for numeric ids, but a non-numeric text id would become NaN.
   // ── Auto-sync watchers — fire whenever state changes after initial load ───────
   const _ready = useRef(false);
+  // True only if every Fire Safety table was read successfully at load. Deleting
+  // "rows no longer in the list" is only safe when we know the list came from the
+  // database (not seed data shown because a read failed).
+  const fireLoadOkRef = useRef(false);
   // Last version of each incident / investigation known to be in the database
   // (id → stableJSON). The auto-sync effects below only write records that differ,
   // so one browser can no longer overwrite another's newer changes with its stale
@@ -832,6 +843,11 @@ export default function App() {
   const investigationSavedRef = useRef(new Map());
   const incidentWritingRef = useRef(new Set());       // incident ids with a save in flight
   const investigationWritingRef = useRef(new Set());
+  // The version of each investigation this browser last read from / wrote to the
+  // database. Before saving, the DB copy is compared with it: if someone else has
+  // saved in between, the two sets of changes are combined (investigationMerge.js)
+  // instead of the last save silently wiping out the other.
+  const investigationBaseRef = useRef(new Map());
   const refreshBusyRef = useRef(false);
   // Once data has loaded, snapshot every audited record WITHOUT logging (lib/audit.js),
   // so only real changes from here on create audit-trail entries. Declared before the
@@ -845,7 +861,7 @@ export default function App() {
     primeAuditMap("dse_response", adminResponses);
     primeAuditList("inspection", siteInspections);
     incidents.forEach(i => incidentSavedRef.current.set(String(i.id), stableJSON(i)));
-    Object.entries(investigations).forEach(([id, d]) => investigationSavedRef.current.set(String(id), stableJSON(d)));
+    Object.entries(investigations).forEach(([id, d]) => { investigationSavedRef.current.set(String(id), stableJSON(d)); investigationBaseRef.current.set(String(id), d); });
     _ready.current = true;
   }, [dbReady]); // eslint-disable-line
 
@@ -911,7 +927,7 @@ export default function App() {
           Object.keys(cur).forEach(id => { if (writing.has(String(id))) next[id] = cur[id]; });
           const keys = new Set([...Object.keys(cur), ...Object.keys(next)]);
           if ([...keys].every(k => stableJSON(cur[k]) === stableJSON(next[k]))) return cur;
-          Object.entries(next).forEach(([id, d]) => { if (!writing.has(String(id))) { investigationSavedRef.current.set(String(id), stableJSON(d)); primeAudit("investigation", id, d); } });
+          Object.entries(next).forEach(([id, d]) => { if (!writing.has(String(id))) { investigationSavedRef.current.set(String(id), stableJSON(d)); investigationBaseRef.current.set(String(id), d); primeAudit("investigation", id, d); } });
           return next;
         });
       }
@@ -1059,9 +1075,38 @@ export default function App() {
     investigationWritingRef.current.add(String(incidentId));
     try { await dbSaveInvestigationNow(incidentId, data); } finally { investigationWritingRef.current.delete(String(incidentId)); }
   }
+  // Reads ONE investigation straight from the database.
+  // Returns { ok:true, data } (data undefined if there is no row yet) or { ok:false }.
+  async function fetchInvestigation(incidentId) {
+    try {
+      const { data, error } = await sb.from("investigations").query(`select=*&incident_id=eq.${encodeURIComponent(incidentId)}`);
+      if (error || !Array.isArray(data)) return { ok: false };
+      const row = data.find(r => String(r.incident_id) === String(incidentId));
+      return { ok: true, data: row ? row.data : undefined };
+    } catch { return { ok: false }; }
+  }
+  // The investigation screen calls this after the person has seen the other
+  // person's version and chosen what to do, so the save below doesn't merge again.
+  function acceptInvestigationBase(incidentId, data) {
+    investigationBaseRef.current.set(String(incidentId), data);
+  }
   async function dbSaveInvestigationNow(incidentId, data) {
+    // Someone else saved since we last read it? Combine rather than overwrite.
+    // (The investigation screen asks the person first; this catches background
+    // saves such as an action being ticked off on a phone.)
+    const key = String(incidentId);
+    const cur = await fetchInvestigation(incidentId);
+    const base = investigationBaseRef.current.get(key) || {};   // {} = we've never seen a saved copy
+    if (cur.ok && cur.data !== undefined && changedSince(base, cur.data) && changedSince(data, cur.data)) {
+      const { merged } = mergeInvestigation(base, data, cur.data);
+      primeAudit("investigation", incidentId, cur.data);   // log only what THIS person changed
+      data = merged;
+      investigationSavedRef.current.set(key, stableJSON(merged));
+      setInvestigations(p => ({ ...p, [incidentId]: merged }));
+    }
     auditRecord("investigation", incidentId, data, incidentAuditLabel(incidents.find(i => String(i.id) === String(incidentId))) || String(incidentId));
-    await dbWrite(sb.from("investigations").upsert({ incident_id: incidentId, data }, { onConflict: "incident_id" }), "investigation");
+    const ok = await dbWrite(sb.from("investigations").upsert({ incident_id: incidentId, data }, { onConflict: "incident_id" }), "investigation");
+    if (ok) investigationBaseRef.current.set(key, data);   // only once it's really in the database
   }
 
   // Marks a single corrective action complete inside its investigation and
@@ -1559,8 +1604,8 @@ export default function App() {
   // Transient fields are stripped before saving: `_fileObj` (a browser File object,
   // not serialisable) and, for FRA reviews, the base64 `fileData` (the file itself
   // lives in the "fire-safety" storage bucket instead).
-  // NOTE: deleteRemoved() skips when a list is EMPTY, so deleting the very last
-  // item of a list will not remove it from the DB.
+  // Removed items are deleted from the DB, including the very last item of a list
+  // (only when every fire table loaded OK — see fireLoadOkRef).
   async function dbSaveFireSafety(fs) {
     const upsertTable = async (table, items) => {
       if (!items || !items.length) return;
@@ -1570,8 +1615,11 @@ export default function App() {
       await dbWrite(sb.from(table).upsert(rows, { onConflict: "id" }), `fire safety: ${table}`);
     };
     const deleteRemoved = async (table, items) => {
-      if (!items || !items.length) return;
-      // Delete rows in DB that are no longer in state
+      // Delete rows in DB that are no longer in state. This must also run when the
+      // list is now EMPTY — returning early here is why deleting the last item in a
+      // list used to come back after a reload.
+      if (!fireLoadOkRef.current) return;   // list may be seed data — never prune on that
+      items = items || [];
       const { data: existing } = await sb.from(table).select("id");
       if (!existing || !existing.length) return;
       const currentIds = new Set(items.map(r => r.id));
@@ -1871,6 +1919,9 @@ export default function App() {
 
     return (
       <>
+      {/* Certificate from "View Certificate" after a pass — this screen must render it
+          itself, because the staff views (which also show it) aren't on screen here. */}
+      <CertificateModal cert={cert} user={user} onClose={() => setCert(null)} T={T} font={font}/>
       <div style={{minHeight:"100vh",background:T.bg,fontFamily:font,color:T.white,overflowX:"hidden"}}>
 
         {/* Celebration Overlay */}
@@ -1961,7 +2012,7 @@ export default function App() {
                 <div style={{display:"flex",gap:10,justifyContent:"center"}}>
                   <button onClick={()=>{
                     setShowCelebration(false);
-                    setCert({module:mod,score:qPct,date:new Date().toLocaleDateString(),certId:(comps[user.id]||{})[mod.id]?.certId||null});
+                    setCert({module:mod,score:qPct,date:(comps[user.id]||{})[mod.id]?.date||new Date().toISOString().slice(0,10),certId:(comps[user.id]||{})[mod.id]?.certId||null});
                   }} style={{background:"linear-gradient(135deg,#f59e0b,#d97706)",color:"#0d1f5c",border:"none",borderRadius:10,padding:"10px 22px",fontWeight:800,cursor:"pointer",fontFamily:font,fontSize:13}}>
                     🎓 View Certificate
                   </button>
@@ -2119,7 +2170,7 @@ export default function App() {
                 {!passed && <p style={{color:T.amber,marginTop:6}}>You need 70% to pass. Review the slides and try again.</p>}
                 <div style={{display:"flex",gap:12,justifyContent:"center",marginTop:28,flexWrap:"wrap"}}>
                   {passed && (
-                    <button onClick={()=>setCert({module:mod,score:qPct,date:new Date().toLocaleDateString(),certId:(comps[user.id]||{})[mod.id]?.certId||null})}
+                    <button onClick={()=>setCert({module:mod,score:qPct,date:(comps[user.id]||{})[mod.id]?.date||new Date().toISOString().slice(0,10),certId:(comps[user.id]||{})[mod.id]?.certId||null})}
                       style={{background:`linear-gradient(135deg,${T.gold},#d97706)`,color:T.navyDk,border:"none",borderRadius:12,padding:"12px 28px",fontWeight:800,cursor:"pointer",fontFamily:font}}>
                       🎓 View Certificate
                     </button>
@@ -2208,192 +2259,9 @@ export default function App() {
       </>
     );
   }
-  // Certificate viewer / print. Opened by setting `cert` = {module, score, date, certId}.
-  // Printing opens a new window with the certificate's HTML and calls window.print()
-  // (the app-wide pattern for PDF output — the user chooses "Save as PDF").
-  // ⚠ This is a component defined INSIDE App, and it calls useRef inside an IIFE.
-  //   It works only because a new CertModal function is created every render (so
-  //   React remounts it each time). If you touch this, move it to its own
-  //   module-level component (e.g. domains/training/CertificateModal.jsx) and
-  //   pass `cert`, `user` and `onClose` as props.
-  // If certId is missing a random one is shown — it is NOT saved anywhere.
-  const CertModal = () => cert && (() => {
-    const certRef = React.useRef(null);
-    const certId = cert.certId || "ZSL-"+Math.random().toString(36).slice(2,8).toUpperCase();
-    const issueDate = cert.date;
-    const moduleIcon = cert.module.icon || "🏅";
-
-    function printCert() {
-      const el = certRef.current;
-      if (!el) return;
-      const win = window.open("","_blank","width=900,height=650");
-      win.document.write(`
-        <html><head><title>Certificate — ${cert.module.title}</title>
-        <style>
-          @import url('https://fonts.googleapis.com/css2?family=Barlow:wght@400;600;700;800;900&display=swap');
-          * { margin:0; padding:0; box-sizing:border-box; }
-          body { background:#091548; font-family:'Barlow',sans-serif; display:flex; align-items:center; justify-content:center; min-height:100vh; }
-          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
-          @media print { body { background:#091548; } @page { margin:0; size: A4 landscape; } }
-        </style></head>
-        <body>${el.outerHTML}<script>window.onload=()=>{window.print();}<\/script></body></html>
-      `);
-      win.document.close();
-    }
-
-    return (
-      <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.9)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:20,overflow:"auto"}}>
-        <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:16,width:"100%",maxWidth:640}}>
-
-          {/* Certificate card */}
-          <div ref={certRef} style={{
-            width:"100%",
-            background:"linear-gradient(160deg,#0d1f5c 0%,#091548 60%,#0a1a4a 100%)",
-            borderRadius:20,
-            padding:0,
-            position:"relative",
-            overflow:"hidden",
-            boxShadow:`0 0 0 1px rgba(245,158,11,0.4), 0 0 0 4px rgba(245,158,11,0.08), 0 40px 80px rgba(0,0,0,0.7)`,
-          }}>
-
-            {/* Full decorative border using absolute positioned div */}
-            <div style={{position:"absolute",inset:0,borderRadius:20,border:"3px solid rgba(245,158,11,0.6)",pointerEvents:"none",zIndex:2}}/>
-            <div style={{position:"absolute",inset:8,borderRadius:14,border:"1px solid rgba(245,158,11,0.2)",pointerEvents:"none",zIndex:2}}/>
-            {/* Corner ornaments */}
-            {[["top:12px","left:12px"],["top:12px","right:12px"],["bottom:12px","left:12px"],["bottom:12px","right:12px"]].map((pos,i)=>{
-              const style = {position:"absolute",width:20,height:20,zIndex:3,pointerEvents:"none"};
-              pos.forEach(p=>{ const [k,v]=p.split(":"); style[k]=v; });
-              const r = i===1||i===3 ? "rotate(90deg)" : i===2 ? "rotate(-90deg)" : i===3 ? "rotate(180deg)" : "none";
-              const transforms = ["none","rotate(90deg)","rotate(-90deg)","rotate(180deg)"];
-              return (
-                <svg key={i} style={{...style,transform:transforms[i]}} viewBox="0 0 20 20">
-                  <path d="M0,0 L16,0 L16,2 L2,2 L2,16 L0,16 Z" fill="#f59e0b" opacity="0.8"/>
-                  <circle cx="2" cy="2" r="2" fill="#f59e0b"/>
-                </svg>
-              );
-            })}
-
-            {/* Watermark */}
-            <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none",zIndex:0}}>
-              <div style={{fontSize:72,fontWeight:900,color:"rgba(245,158,11,0.04)",letterSpacing:8,textTransform:"uppercase",transform:"rotate(-30deg)",whiteSpace:"nowrap",userSelect:"none"}}>
-                ZEUS PROTECT
-              </div>
-            </div>
-
-            {/* Top gold bar */}
-            <div style={{height:6,background:"linear-gradient(90deg,#f59e0b,#fbbf24,#f59e0b)",position:"relative",zIndex:1}}/>
-
-            {/* Content */}
-            <div style={{padding:"20px 48px 24px",position:"relative",zIndex:1,textAlign:"center"}}>
-
-              {/* Logo + title row */}
-              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:24}}>
-                <img src={ZEUS_LOGO_LIGHT_SRC} alt="Zeus" style={{height:44,objectFit:"contain"}}/>
-                <div style={{textAlign:"right"}}>
-                  <div style={{fontSize:9,fontWeight:700,letterSpacing:3,color:"rgba(245,158,11,0.7)",textTransform:"uppercase",marginBottom:2}}>Zeus Protect</div>
-                  <div style={{fontSize:9,color:"rgba(255,255,255,0.3)",letterSpacing:1}}>Health & Safety Training</div>
-                </div>
-              </div>
-
-              {/* Divider */}
-              <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:24}}>
-                <div style={{flex:1,height:1,background:"linear-gradient(90deg,transparent,rgba(245,158,11,0.4))"}}/>
-                <div style={{fontSize:11,fontWeight:700,letterSpacing:3,color:"rgba(245,158,11,0.8)",textTransform:"uppercase"}}>Certificate of Completion</div>
-                <div style={{flex:1,height:1,background:"linear-gradient(90deg,rgba(245,158,11,0.4),transparent)"}}/>
-              </div>
-
-              {/* This certifies */}
-              <div style={{fontSize:12,color:"rgba(255,255,255,0.45)",letterSpacing:1.5,textTransform:"uppercase",marginBottom:4}}>This is to certify that</div>
-
-              {/* Name */}
-              <div style={{fontSize:30,fontWeight:900,color:"#ffffff",letterSpacing:-0.5,marginBottom:2,lineHeight:1.1}}>{user?.name}</div>
-              {user?.jobTitle && <div style={{fontSize:13,color:"rgba(255,255,255,0.4)",marginBottom:10}}>{user.jobTitle}</div>}
-
-              {/* has successfully completed */}
-              <div style={{fontSize:12,color:"rgba(255,255,255,0.45)",letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>has successfully completed</div>
-
-              {/* Module */}
-              <div style={{background:"rgba(245,158,11,0.08)",border:"1px solid rgba(245,158,11,0.25)",borderRadius:12,padding:"10px 24px",marginBottom:12,display:"inline-block",minWidth:300}}>
-                <div style={{fontSize:28,marginBottom:6}}>{moduleIcon}</div>
-                <div style={{fontSize:18,fontWeight:800,color:"#f59e0b",lineHeight:1.2}}>{cert.module.title}</div>
-                {cert.module.category && <div style={{fontSize:12,color:"rgba(255,255,255,0.4)",marginTop:4}}>{cert.module.category}</div>}
-              </div>
-
-              {/* Score + date row */}
-              <div style={{display:"flex",justifyContent:"center",gap:32,marginBottom:24}}>
-                <div style={{textAlign:"center"}}>
-                  <div style={{fontSize:11,fontWeight:700,letterSpacing:1.5,color:"rgba(255,255,255,0.35)",textTransform:"uppercase",marginBottom:4}}>Score Achieved</div>
-                  <div style={{fontSize:22,fontWeight:900,color:"#10b981"}}>{cert.score}%</div>
-                </div>
-                <div style={{width:1,background:"rgba(255,255,255,0.1)"}}/>
-                <div style={{textAlign:"center"}}>
-                  <div style={{fontSize:11,fontWeight:700,letterSpacing:1.5,color:"rgba(255,255,255,0.35)",textTransform:"uppercase",marginBottom:4}}>Date Issued</div>
-                  <div style={{fontSize:18,fontWeight:700,color:"rgba(255,255,255,0.8)"}}>{issueDate}</div>
-                </div>
-                {cert.module.renewalMonths && <>
-                  <div style={{width:1,background:"rgba(255,255,255,0.1)"}}/>
-                  <div style={{textAlign:"center"}}>
-                    <div style={{fontSize:11,fontWeight:700,letterSpacing:1.5,color:"rgba(255,255,255,0.35)",textTransform:"uppercase",marginBottom:4}}>Valid For</div>
-                    <div style={{fontSize:18,fontWeight:700,color:"rgba(255,255,255,0.8)"}}>{cert.module.renewalMonths} months</div>
-                  </div>
-                </>}
-              </div>
-
-              {/* Signature line + seal row */}
-              <div style={{display:"flex",alignItems:"flex-end",justifyContent:"space-between",borderTop:"1px solid rgba(255,255,255,0.08)",paddingTop:20}}>
-                {/* Signature */}
-                <div style={{textAlign:"left"}}>
-                  <div style={{fontFamily:"Georgia,serif",fontSize:22,color:"rgba(255,255,255,0.7)",letterSpacing:1,marginBottom:4,fontStyle:"italic"}}>Zeus Protect</div>
-                  <div style={{width:120,height:1,background:"rgba(255,255,255,0.2)",marginBottom:6}}/>
-                  <div style={{fontSize:10,color:"rgba(255,255,255,0.35)",letterSpacing:1,textTransform:"uppercase"}}>Authorised Signature</div>
-                </div>
-
-                {/* Gold seal */}
-                <div style={{position:"relative",width:80,height:80,flexShrink:0}}>
-                  <svg viewBox="0 0 80 80" style={{position:"absolute",inset:0,width:"100%",height:"100%"}}>
-                    {/* Starburst */}
-                    {Array.from({length:16}).map((_,i)=>{
-                      const a = (i*22.5)*Math.PI/180;
-                      const a2 = (i*22.5+11.25)*Math.PI/180;
-                      const x1=40+34*Math.cos(a), y1=40+34*Math.sin(a);
-                      const x2=40+28*Math.cos(a2), y2=40+28*Math.sin(a2);
-                      const x3=40+34*Math.cos(a+22.5*Math.PI/180), y3=40+34*Math.sin(a+22.5*Math.PI/180);
-                      return <polygon key={i} points={`40,40 ${x1},${y1} ${x2},${y2} ${x3},${y3}`} fill="#f59e0b" opacity="0.9"/>;
-                    })}
-                    <circle cx="40" cy="40" r="24" fill="#0d1f5c" stroke="#f59e0b" strokeWidth="1.5"/>
-                    <text x="40" y="35" textAnchor="middle" fill="#f59e0b" fontSize="7" fontWeight="700" fontFamily="Barlow,sans-serif" letterSpacing="1">ZEUS</text>
-                    <text x="40" y="44" textAnchor="middle" fill="#fbbf24" fontSize="5.5" fontFamily="Barlow,sans-serif" letterSpacing="0.5">PROTECT</text>
-                    <text x="40" y="53" textAnchor="middle" fill="rgba(245,158,11,0.6)" fontSize="4.5" fontFamily="Barlow,sans-serif">VERIFIED</text>
-                  </svg>
-                </div>
-
-                {/* Cert ref */}
-                <div style={{textAlign:"right"}}>
-                  <div style={{fontSize:10,color:"rgba(255,255,255,0.35)",letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>Certificate ID</div>
-                  <div style={{fontSize:12,fontWeight:700,color:"rgba(245,158,11,0.7)",letterSpacing:2,fontFamily:"monospace"}}>{certId}</div>
-                </div>
-              </div>
-            </div>
-
-            {/* Bottom gold bar */}
-            <div style={{height:4,background:"linear-gradient(90deg,#f59e0b,#fbbf24,#f59e0b)"}}/>
-          </div>
-
-          {/* Buttons */}
-          <div style={{display:"flex",gap:10}}>
-            <button onClick={printCert}
-              style={{background:`linear-gradient(135deg,${T.accent},${T.blue})`,color:"#fff",border:"none",borderRadius:10,padding:"11px 24px",cursor:"pointer",fontFamily:font,fontWeight:700,fontSize:13,boxShadow:"0 4px 14px rgba(37,99,235,0.4)"}}>
-              🖨 Print / Save PDF
-            </button>
-            <button onClick={()=>setCert(null)}
-              style={{background:T.headerBgMd,color:T.muted,border:`1px solid ${T.borderMd}`,borderRadius:10,padding:"11px 24px",cursor:"pointer",fontFamily:font,fontWeight:700,fontSize:13}}>
-              Close
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  })();
+  // Certificate viewer / print: domains/training/CertificateModal.jsx. Shown whenever
+  // `cert` is set — in the staff views AND in the module player (see below).
+  const CertModal = () => <CertificateModal cert={cert} user={user} onClose={() => setCert(null)} T={T} font={font}/>;
 
   // ══════════════════════════════════════════════════════════════════════════
   // STAFF PORTAL
@@ -2436,7 +2304,7 @@ export default function App() {
     const myExtCerts = extCerts[user.id]||{};
     const myCertTypes = EXT_CERT_TYPES.filter(ct=>myExtCerts[ct.id]);
     const expiredCerts  = myCertTypes.filter(ct=>{ const c=myExtCerts[ct.id]; return c.expiryDate && new Date(c.expiryDate)<new Date(); });
-    const expiringCerts = myCertTypes.filter(ct=>{ const c=myExtCerts[ct.id]; if(!c.expiryDate) return false; const d=Math.ceil((new Date(c.expiryDate)-new Date())/86400000); return d>=0&&d<=90; });
+    const expiringCerts = myCertTypes.filter(ct=>{ const c=myExtCerts[ct.id]; if(!c.expiryDate) return false; const d=Math.ceil((new Date(c.expiryDate)-new Date())/86400000); return d>=0&&d<=EXPIRY_WARNING_DAYS; });
     // Documents needing acknowledgement
     const myDocAssigns = Object.entries(docAssignments||{}).filter(([,uids])=>uids.includes(String(user.id))).map(([did])=>did);
     const unreadDocs = myDocAssigns.filter(did=>!(docAcknowledgements[String(user.id)]||{})[did]);
@@ -2500,7 +2368,7 @@ export default function App() {
               if(latestDse){
                 const ri = (dseReports[user.id]||[]).length - 1;
                 const openIssues=latestDse.issues.filter((_,ii)=>!(adminResponses[user.id]||{})[`${ri}_${ii}`]?.resolved&&latestDse.issueCount>0);
-                if(openIssues.length) notifications.push({type:"dse",urgent:false,title:`${openIssues.length} open DSE issue${openIssues.length!==1?"s":""}`,detail:"Check My DSE for manager responses",nav:{tab:"dse"}});
+                if(openIssues.length) notifications.push({type:"dse",urgent:false,title:`${openIssues.length} open DSE issue${openIssues.length!==1?"s":""}`,detail:"Check My DSE for H&S team responses",nav:{tab:"dse"}});
               }
               // NB: action owners are matched by NAME (a.owner===user.name), not id — renaming a user orphans their actions.
               // Investigation corrective actions assigned to this user
@@ -2614,7 +2482,7 @@ export default function App() {
                   { label:"Up to Date", value:upToDate.length,         color:"#10b981",     sub:"completed & valid" },
                   { label:"Not Started",value:notStarted.length,       color:notStarted.length>0?"#f59e0b":"#10b981", sub:"awaiting completion" },
                   { label:"Expired",    value:expired.length,          color:expired.length>0?"#ef4444":"#10b981",    sub:"need renewal" },
-                  { label:"Expiring",   value:expiring.length,         color:expiring.length>0?"#f59e0b":"#10b981",   sub:"within 90 days" },
+                  { label:"Expiring",   value:expiring.length,         color:expiring.length>0?"#f59e0b":"#10b981",   sub:`within ${EXPIRY_WARNING_DAYS} days` },
                   { label:"Documents",  value:unreadDocs.length,       color:unreadDocs.length>0?"#f59e0b":"#10b981", sub:"need acknowledgement" },
                 ].map((s,i)=>(
                   <div key={i} style={{background:T.overlay,borderRadius:12,padding:"14px 16px",border:`1px solid ${s.value>0&&s.color!=="#10b981"?s.color+"44":T.borderMd}`}}>
@@ -3462,7 +3330,7 @@ export default function App() {
             {isMobile && (<button onClick={()=>setMobileMenuOpen(m=>!m)} style={{background:"none",border:`1px solid ${T.borderMd}`,borderRadius:8,color:T.white,fontSize:20,cursor:"pointer",padding:"4px 10px",lineHeight:1,fontFamily:font,flexShrink:0}}>{mobileMenuOpen?"✕":"☰"}</button>)}
             {(()=>{
               // Admin notification list (same shape as the staff one; nav.tab = admin tab key).
-              // Thresholds used: training expiring ≤60d, RA/doc review ≤30d, drill >365d,
+              // Thresholds used: training/certificates expiring ≤EXPIRY_WARNING_DAYS (lib/dates.js), RA/doc review ≤30d, drill >365d,
               // fire warden cert default 36 months.
               const notifications = [];
               // Staff with overdue mandatory modules
@@ -3502,7 +3370,7 @@ export default function App() {
                 });
               });
               if(expiredCount>0) notifications.push({type:"module",urgent:true,title:`${expiredCount} expired training certificate${expiredCount!==1?"s":""}`,detail:"Staff need to renew — check Reports tab",nav:{tab:"reports"}});
-              else if(expiringCount>0) notifications.push({type:"module",urgent:false,title:`${expiringCount} training certificate${expiringCount!==1?"s":""} expiring within 60 days`,detail:"Review Reports tab to see who needs to renew",nav:{tab:"reports"}});
+              else if(expiringCount>0) notifications.push({type:"module",urgent:false,title:`${expiringCount} training certificate${expiringCount!==1?"s":""} expiring within ${EXPIRY_WARNING_DAYS} days`,detail:"Review Reports tab to see who needs to renew",nav:{tab:"reports"}});
               // Open incidents
               const openIncidents = incidents.filter(i=>!i.closed);
               const riddorIncidents = incidents.filter(i=>i.riddor&&!i.closed);
@@ -3530,7 +3398,7 @@ export default function App() {
               // Fire safety alerts
               const fs2 = fireSafety||{};
               const expiredFW = (fs2.wardens||[]).filter(w=>{ const exp=new Date(w.qualDate); exp.setMonth(exp.getMonth()+(w.renewalMonths||36)); return exp.toISOString().slice(0,10)<today2; });
-              const expiringFW = (fs2.wardens||[]).filter(w=>{ const exp=new Date(w.qualDate); exp.setMonth(exp.getMonth()+(w.renewalMonths||36)); const d=Math.ceil((exp-new Date())/86400000); return d>=0&&d<=60; });
+              const expiringFW = (fs2.wardens||[]).filter(w=>{ const exp=new Date(w.qualDate); exp.setMonth(exp.getMonth()+(w.renewalMonths||36)); const d=Math.ceil((exp-new Date())/86400000); return d>=0&&d<=EXPIRY_WARNING_DAYS; });
               if(expiredFW.length) notifications.push({type:"report",urgent:true,title:`${expiredFW.length} fire warden cert${expiredFW.length!==1?"s":""} expired`,detail:"Check Fire Safety → Wardens",nav:{tab:"firesafety"}});
               else if(expiringFW.length) notifications.push({type:"report",urgent:false,title:`${expiringFW.length} fire warden cert${expiringFW.length!==1?"s":""} expiring`,detail:"Check Fire Safety → Wardens",nav:{tab:"firesafety"}});
               const overdueExtsN = (fs2.extinguishers||[]).filter(e=>e.nextServiceDue&&e.nextServiceDue<today2);
@@ -3678,7 +3546,7 @@ export default function App() {
                 <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:8}}>
                   <div>
                     <div style={{fontSize:11,fontWeight:700,letterSpacing:.5,color:T.muted,textTransform:"uppercase",marginBottom:6}}>{label}</div>
-                    <div style={{fontSize:32,fontWeight:900,color:urgent?"#f87171":col?"#f59e0b":value===0?T.green:"#fff",lineHeight:1}}>{value}</div>
+                    <div style={{fontSize:32,fontWeight:900,color:urgent?"#f87171":col?"#f59e0b":value===0?T.green:T.white,lineHeight:1}}>{value}</div>
                     {sub && <div style={{fontSize:11,color:T.muted,marginTop:5}}>{sub}</div>}
                   </div>
                   <span style={{fontSize:28,opacity:.7}}>{icon}</span>
@@ -3841,7 +3709,7 @@ export default function App() {
                       return (<>
                         <Avatar name={u.name} size={28}/>
                         <div style={{flex:1,minWidth:0}}>
-                          <div style={{fontSize:13,fontWeight:700,color:"#fff",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{u.name}</div>
+                          <div style={{fontSize:13,fontWeight:700,color:T.white,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{u.name}</div>
                           <div style={{fontSize:11,color:T.muted}}>{d}/{a} modules · {pct}%</div>
                         </div>
                         <button onClick={()=>setAtab("assign")} style={{background:"rgba(37,99,235,0.1)",color:T.accentLt,border:`1px solid ${T.accent}33`,borderRadius:7,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font,flexShrink:0}}>Assign →</button>
@@ -3855,7 +3723,7 @@ export default function App() {
                       <>
                         <span style={{fontSize:18,flexShrink:0}}>{{accident:"🚑",near_miss:"⚠️",unsafe_condition:"🏗",unsafe_act:"🚫"}[inc.type]||"📋"}</span>
                         <div style={{flex:1,minWidth:0}}>
-                          <div style={{fontSize:13,fontWeight:700,color:"#fff",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{inc.description?.slice(0,60)}{inc.description?.length>60?"…":""}</div>
+                          <div style={{fontSize:13,fontWeight:700,color:T.white,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{inc.description?.slice(0,60)}{inc.description?.length>60?"…":""}</div>
                           <div style={{fontSize:11,color:T.muted}}>{inc.date} · {inc.location}</div>
                         </div>
                         {inc.riddor&&!inc.riddorReported&&<span style={{fontSize:10,fontWeight:700,color:"#f87171",background:"rgba(239,68,68,0.1)",padding:"2px 7px",borderRadius:6,border:"1px solid rgba(239,68,68,0.25)",flexShrink:0}}>RIDDOR ⚠</span>}
@@ -3872,7 +3740,7 @@ export default function App() {
                       return (<>
                         <span style={{fontSize:18,flexShrink:0}}>🔧</span>
                         <div style={{flex:1,minWidth:0}}>
-                          <div style={{fontSize:13,fontWeight:700,color:"#fff",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{e.name}</div>
+                          <div style={{fontSize:13,fontWeight:700,color:T.white,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{e.name}</div>
                           <div style={{fontSize:11,color:overdue?"#f87171":"#f59e0b"}}>{overdue?`Overdue by ${Math.abs(days)}d`:`Due in ${days}d`} · {e.location||"—"}</div>
                         </div>
                         <button onClick={()=>setAtab("equipment")} style={{background:"rgba(245,158,11,0.1)",color:"#f59e0b",border:"1px solid rgba(245,158,11,0.2)",borderRadius:7,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font,flexShrink:0}}>View →</button>
@@ -3886,7 +3754,7 @@ export default function App() {
                       <>
                         <span style={{fontSize:18,flexShrink:0}}>{item.certType.icon}</span>
                         <div style={{flex:1,minWidth:0}}>
-                          <div style={{fontSize:13,fontWeight:700,color:"#fff",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{item.user.name}</div>
+                          <div style={{fontSize:13,fontWeight:700,color:T.white,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{item.user.name}</div>
                           <div style={{fontSize:11,color:"#f87171"}}>{item.certType.label} expired {item.cert.expiryDate}</div>
                         </div>
                         <button onClick={()=>setAtab("assign")} style={{background:"rgba(239,68,68,0.1)",color:"#f87171",border:"1px solid rgba(239,68,68,0.2)",borderRadius:7,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font,flexShrink:0}}>Update →</button>
@@ -3901,7 +3769,7 @@ export default function App() {
                     <>
                       <span style={{fontSize:16,flexShrink:0}}>{{accident:"🚑",near_miss:"⚠️",unsafe_condition:"🏗",unsafe_act:"🚫"}[inc.type]||"📋"}</span>
                       <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontSize:13,fontWeight:600,color:"#fff",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{inc.description?.slice(0,70)}{inc.description?.length>70?"…":""}</div>
+                        <div style={{fontSize:13,fontWeight:600,color:T.white,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{inc.description?.slice(0,70)}{inc.description?.length>70?"…":""}</div>
                         <div style={{fontSize:11,color:T.muted}}>{inc.date} · {inc.location} · {inc.closed?"Closed":"Open"}</div>
                       </div>
                     </>
@@ -4810,7 +4678,7 @@ export default function App() {
 
           {atab==="reports" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
-            <LazyReportsTab staff={staff} assigns={assigns} comps={comps} docs={docs} docAssignments={docAssignments} docAcknowledgements={docAcknowledgements} reportView={adminReportView} setReportView={setAdminReportView} dseReports={dseReports} adminResponses={adminResponses} setAdminResponses={setAdminResponses} darkMode={darkMode} Z={T} font={font} modules={allModules} machineComps={machineComps} allMachineTypes={allMachineTypes} lastLoginMap={lastLoginMap} extCerts={extCerts} quizFailures={quizFailures} setQuizFailures={setQuizFailures} incidents={incidents} inspections={siteInspections} ras={ras} investigations={investigations} setAtab={setAtab} onExportPDF={u=>generateStaffPDF(u,allModules,assigns,comps,docs,docAssignments,docAcknowledgements,extCerts,machineComps,lastLoginMap,T,allMachineTypes)}/>
+            <LazyReportsTab staff={staff} assigns={assigns} comps={comps} docs={docs} docAssignments={docAssignments} docAcknowledgements={docAcknowledgements} reportView={adminReportView} setReportView={setAdminReportView} dseReports={dseReports} adminResponses={adminResponses} setAdminResponses={setAdminResponses} darkMode={darkMode} Z={T} font={font} modules={allModules} machineComps={machineComps} allMachineTypes={allMachineTypes} lastLoginMap={lastLoginMap} extCerts={extCerts} quizFailures={quizFailures} setQuizFailures={setQuizFailures} incidents={incidents} inspections={siteInspections} ras={ras} investigations={investigations} setAtab={setAtab} userName={user?.name||""} onExportPDF={u=>generateStaffPDF(u,allModules,assigns,comps,docs,docAssignments,docAcknowledgements,extCerts,machineComps,lastLoginMap,T,allMachineTypes)}/>
             </React.Suspense>
           )}
 
@@ -4828,6 +4696,7 @@ export default function App() {
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
             <LazyInvestigationTab incidents={incidents} setIncidents={setIncidents} staff={staff}
               investigations={investigations} setInvestigations={setInvestigations}
+              fetchInvestigation={fetchInvestigation} acceptInvestigationBase={acceptInvestigationBase}
               focusedId={investigationView} setFocusedId={setInvestigationView}
               onBack={()=>setAtab("incidents")}
               Z={T} font={font}/>

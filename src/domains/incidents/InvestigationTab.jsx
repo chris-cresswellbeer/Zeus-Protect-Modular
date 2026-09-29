@@ -1,9 +1,10 @@
 import React from "react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useWindowWidth } from "../../shared/hooks";
 import { E } from "../../lib/emoji";
 import { ACCEPT_IMAGES } from "../../lib/constants";
 import { InvestigationDashboard } from "./InvestigationDashboard";
+import { mergeInvestigation, changedSince } from "./investigationMerge";
 
 /**
  * InvestigationTab — admin incident investigations (root cause + corrective actions).
@@ -24,6 +25,12 @@ import { InvestigationDashboard } from "./InvestigationDashboard";
  * until "Save Investigation" copies invForm into App state — navigating away first
  * discards changes (including added/edited actions).
  *
+ * TWO PEOPLE AT ONCE: baseRef holds the version this person opened. On save the
+ * database copy is re-read (fetchInvestigation, from App.jsx); if someone else has
+ * saved since, a prompt shows what they changed and offers: combine both sets of
+ * changes / overwrite with mine / discard mine and load theirs / cancel.
+ * A banner also appears while editing if the live refresh brings in their change.
+ *
  * ⚠ Action status values are inconsistent across the app: this tab toggles
  *   "open"/"complete" (and mobile sets "complete"), but the printed report and some
  *   filters look for "closed". Treat both as done when writing new code, or
@@ -31,7 +38,7 @@ import { InvestigationDashboard } from "./InvestigationDashboard";
  * ⚠ Photos are stored as base64 inside the investigation JSON (≤5 MB each), which
  *   makes rows large. Uploading to Storage (lib/photos.js) would be lighter.
  */
-function InvestigationTab({ incidents, setIncidents, staff, investigations, setInvestigations, focusedId, setFocusedId, onBack, Z, font }) {
+function InvestigationTab({ incidents, setIncidents, staff, investigations, setInvestigations, fetchInvestigation, acceptInvestigationBase, focusedId, setFocusedId, onBack, Z, font }) {
   const isMobile = useWindowWidth() <= 1024;
   const [view, setView] = useState(focusedId ? "detail" : "dashboard"); // "dashboard" | "list" | "detail"
   const [activeId, setActiveId] = useState(focusedId || null);
@@ -40,6 +47,9 @@ function InvestigationTab({ incidents, setIncidents, staff, investigations, setI
   const [editActionIdx, setEditActionIdx] = useState(null);
   const [photoError, setPhotoError] = useState("");
   const [saved, setSaved] = useState(false);
+  const baseRef = useRef(undefined);              // the version this person opened (see header)
+  const [conflict, setConflict] = useState(null); // { theirs, merged, theirChanges, conflicts } while the prompt is open
+  const [checking, setChecking] = useState(false);
 
   const BLANK_INV = { summary:"", rootCause:"", contributingFactors:"", immediateActions:"", recommendations:"", investigator:"", investigationDate:new Date().toISOString().slice(0,10), status:"open", photos:[], actions:[] };
   const BLANK_ACTION = { description:"", owner:"", dueDate:"", priority:"medium", status:"open" };
@@ -52,6 +62,8 @@ function InvestigationTab({ incidents, setIncidents, staff, investigations, setI
     setActiveId(focusedId);
     setView("detail");
     const existing = investigations[focusedId];
+    baseRef.current = existing;
+    setConflict(null);
     setInvForm(existing ? {...existing} : {...BLANK_INV, photos:[], actions:[]});
     setSaved(false);
     setActionForm(null);
@@ -62,6 +74,8 @@ function InvestigationTab({ incidents, setIncidents, staff, investigations, setI
     setActiveId(id);
     setFocusedId(id);
     const existing = investigations[id];
+    baseRef.current = existing;
+    setConflict(null);
     setInvForm(existing ? {...existing} : {...BLANK_INV, photos:[], actions:[]});
     setView("detail");
     setSaved(false);
@@ -70,11 +84,51 @@ function InvestigationTab({ incidents, setIncidents, staff, investigations, setI
     setPhotoError("");
   }
 
-  // Commit the local form into App state (→ auto-saved to Supabase).
-  function saveInvestigation() {
-    setInvestigations(p=>({...p,[activeId]:{...invForm}}));
+  // If someone else saves this investigation while it's open here and this person
+  // hasn't typed anything yet, just show the new version (no need to warn).
+  const liveCopy = activeId ? investigations[activeId] : undefined;
+  useEffect(()=>{
+    if (view!=="detail" || !invForm || conflict) return;
+    if (!changedSince(baseRef.current, liveCopy)) return;
+    if (baseRef.current !== undefined && liveCopy && !changedSince(baseRef.current, invForm)) {
+      baseRef.current = liveCopy;
+      setInvForm({...liveCopy});
+    }
+  },[liveCopy]); // eslint-disable-line
+
+  // Commit a version into App state (→ auto-saved to Supabase). `theirs` is the
+  // database copy the person has now seen, so App.jsx won't merge it in again.
+  function commitInvestigation(data, theirs) {
+    if (acceptInvestigationBase) acceptInvestigationBase(activeId, theirs);
+    setInvestigations(p=>({...p,[activeId]:{...data}}));
+    baseRef.current = data;
+    setInvForm({...data});
+    setConflict(null);
     setSaved(true);
     setTimeout(()=>setSaved(false), 2000);
+  }
+
+  // Save: first re-read the database copy. If someone else saved since this
+  // person opened the investigation, show the "changed since you opened it" prompt.
+  async function saveInvestigation() {
+    if (checking) return;
+    setChecking(true);
+    let theirs = investigations[activeId];
+    try {
+      if (fetchInvestigation) { const r = await fetchInvestigation(activeId); if (r && r.ok) theirs = r.data; }
+    } finally { setChecking(false); }
+    if (!changedSince(baseRef.current, theirs) || !changedSince(invForm, theirs)) { commitInvestigation(invForm, theirs); return; }
+    if (baseRef.current !== undefined && !changedSince(baseRef.current, invForm)) { loadTheirVersion(theirs); return; }   // nothing of mine to lose
+    setConflict({ theirs, ...mergeInvestigation(baseRef.current, invForm, theirs) });
+  }
+
+  // Throw away this person's edits and show the latest saved version.
+  function loadTheirVersion(theirs) {
+    if (acceptInvestigationBase) acceptInvestigationBase(activeId, theirs);
+    if (theirs) setInvestigations(p=>({...p,[activeId]:theirs}));
+    baseRef.current = theirs;
+    setInvForm(theirs ? {...theirs} : {...BLANK_INV, photos:[], actions:[]});
+    setConflict(null);
   }
 
   // Builds an HTML investigation report and downloads it as a .html file (Blob + <a download>),
@@ -326,6 +380,19 @@ function InvestigationTab({ incidents, setIncidents, staff, investigations, setI
       {/* Detail / edit view */}
       {view==="detail" && inc && invForm && (
         <div>
+          {/* Someone else saved this investigation while it was open here */}
+          {!conflict && changedSince(baseRef.current, investigations[activeId]) && (
+            <div role="alert" style={{background:"rgba(245,158,11,0.12)",border:"1px solid rgba(245,158,11,0.45)",borderRadius:12,padding:"12px 16px",marginBottom:16,display:"flex",gap:12,alignItems:"center",flexWrap:"wrap"}}>
+              <span style={{fontSize:18}}>{E("⚠️","⚠")}</span>
+              <div style={{flex:1,minWidth:200,fontSize:13,color:Z.white}}>
+                <b>This investigation has changed since you opened it.</b> Someone else has saved changes. When you save, you'll be shown what they changed and can choose how to combine them.
+              </div>
+              <button onClick={saveInvestigation} disabled={checking}
+                style={{background:"transparent",color:"#f59e0b",border:"1px solid rgba(245,158,11,0.5)",borderRadius:8,padding:"7px 14px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:12}}>
+                Review changes
+              </button>
+            </div>
+          )}
           {/* Incident summary banner */}
           <div style={{background:"rgba(139,92,246,0.08)",border:"1px solid rgba(139,92,246,0.25)",borderRadius:14,padding:"14px 18px",marginBottom:20}}>
             <div style={{fontSize:11,fontWeight:700,letterSpacing:.5,color:"#a78bfa",textTransform:"uppercase",marginBottom:6}}>Linked Incident</div>
@@ -544,8 +611,8 @@ function InvestigationTab({ incidents, setIncidents, staff, investigations, setI
 
           {/* Save button */}
           <div style={{display:"flex",gap:12,alignItems:"center",flexWrap:"wrap"}}>
-            <button onClick={saveInvestigation}
-              style={{background:`linear-gradient(135deg,${Z.accent},${Z.blue})`,color:"#fff",border:"none",borderRadius:12,padding:"12px 32px",fontWeight:800,cursor:"pointer",fontFamily:font,fontSize:14,boxShadow:"0 4px 18px rgba(37,99,235,0.35)"}}>
+            <button onClick={saveInvestigation} disabled={checking}
+              style={{opacity:checking?0.6:1,background:`linear-gradient(135deg,${Z.accent},${Z.blue})`,color:"#fff",border:"none",borderRadius:12,padding:"12px 32px",fontWeight:800,cursor:"pointer",fontFamily:font,fontSize:14,boxShadow:"0 4px 18px rgba(37,99,235,0.35)"}}>
               💾 Save Investigation
             </button>
             <button onClick={generateInvestigationReport}
@@ -553,10 +620,66 @@ function InvestigationTab({ incidents, setIncidents, staff, investigations, setI
               📄 Export Report
             </button>
             {saved && <span style={{color:"#10b981",fontSize:13,fontWeight:700}}>✓ Investigation saved</span>}
+            {!saved && !conflict && changedSince(baseRef.current, investigations[activeId]) && (
+              <span style={{color:"#f59e0b",fontSize:13,fontWeight:700}}>{E("⚠ ","")}Changed by someone else since you opened it — you'll be asked how to combine when you save</span>
+            )}
             <button onClick={()=>setView("list")}
               style={{background:"transparent",color:Z.muted,border:`1px solid ${Z.borderMd}`,borderRadius:12,padding:"12px 20px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:13}}>
               ← Back to list
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* "Changed since you opened it" prompt */}
+      {conflict && (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+          <div role="dialog" aria-label="Investigation changed since you opened it"
+            style={{background:Z.bgCard||Z.navy,border:`1px solid ${Z.borderMd}`,borderRadius:16,padding:24,maxWidth:620,width:"100%",maxHeight:"88vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.45)"}}>
+            <h3 style={{margin:"0 0 6px",fontSize:18,fontWeight:900,color:Z.white}}>{E("⚠️ ","")}This investigation has changed since you opened it</h3>
+            <p style={{margin:"0 0 14px",fontSize:13,color:Z.muted,lineHeight:1.5}}>Someone else saved changes to it while you were editing. Your changes have not been saved yet.</p>
+
+            <div style={{fontSize:11,fontWeight:800,letterSpacing:.5,color:Z.muted,textTransform:"uppercase",marginBottom:6}}>What they changed</div>
+            <ul style={{margin:"0 0 14px",paddingLeft:20,fontSize:13,color:Z.white,lineHeight:1.6}}>
+              {(conflict.theirChanges.length ? conflict.theirChanges : ["Investigation details"]).map((c,i)=><li key={i}>{c}</li>)}
+            </ul>
+
+            {conflict.conflicts.length > 0 ? (
+              <div style={{background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:10,padding:"12px 14px",marginBottom:16}}>
+                <div style={{fontSize:12,fontWeight:800,color:"#f87171",marginBottom:6}}>You both changed:</div>
+                {conflict.conflicts.map((c,i)=>{
+                  const show = v => { const t = v==null||v==="" ? "(blank)" : typeof v==="object" ? JSON.stringify(v) : String(v); return t.length>140 ? t.slice(0,140)+"…" : t; };
+                  return (
+                    <div key={i} style={{fontSize:12,color:Z.white,marginBottom:8}}>
+                      <div style={{fontWeight:700}}>{c.label}</div>
+                      <div style={{color:Z.muted}}>Theirs: <span style={{color:Z.white}}>{show(c.theirs)}</span></div>
+                      <div style={{color:Z.muted}}>Yours: <span style={{color:Z.white}}>{show(c.mine)}</span></div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p style={{margin:"0 0 16px",fontSize:13,color:"#10b981",fontWeight:700}}>{E("✓ ","")}Their changes don't overlap with yours, so both can be kept.</p>
+            )}
+
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              <button onClick={()=>commitInvestigation(conflict.merged, conflict.theirs)}
+                style={{background:`linear-gradient(135deg,${Z.accent},${Z.blue})`,color:"#fff",border:"none",borderRadius:10,padding:"11px 16px",fontWeight:800,cursor:"pointer",fontFamily:font,fontSize:13,textAlign:"left"}}>
+                {conflict.conflicts.length ? "Combine — keep their other changes, use mine where we both changed" : "Combine both sets of changes and save"}
+              </button>
+              <button onClick={()=>{ if (window.confirm("Save your version and discard the other person's changes listed above?")) commitInvestigation(invForm, conflict.theirs); }}
+                style={{background:"transparent",color:"#f87171",border:"1px solid rgba(239,68,68,0.4)",borderRadius:10,padding:"10px 16px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:13,textAlign:"left"}}>
+                Overwrite with my version (their changes are lost)
+              </button>
+              <button onClick={()=>{ if (window.confirm("Discard your unsaved changes and load the latest saved version?")) loadTheirVersion(conflict.theirs); }}
+                style={{background:"transparent",color:Z.white,border:`1px solid ${Z.borderMd}`,borderRadius:10,padding:"10px 16px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:13,textAlign:"left"}}>
+                Discard my changes and load their version
+              </button>
+              <button onClick={()=>setConflict(null)}
+                style={{background:"transparent",color:Z.muted,border:"none",padding:"8px 16px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:13,textAlign:"left"}}>
+                Cancel — keep editing (nothing saved)
+              </button>
+            </div>
           </div>
         </div>
       )}

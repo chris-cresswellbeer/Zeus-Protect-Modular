@@ -48,9 +48,16 @@ function addMonths(dateStr, months) {
  * }}
  * Returns null when either input is missing (i.e. "no renewal required").
  *
- * The "expiring" warning window is 60 days — change the `<= 60` below to adjust
- * it everywhere at once.
+ * The "expiring" warning window is EXPIRY_WARNING_DAYS (below).
  */
+/**
+ * How many days before expiry something counts as "expiring" (amber) — used by
+ * EVERY expiry warning in the portal: training modules, external certificates,
+ * machinery licences, fire wardens, first aiders, the staff dashboard tile and
+ * the notification bell. Change this one number to change them all.
+ */
+const EXPIRY_WARNING_DAYS = 60;
+
 function getExpiryStatus(completionDate, renewalMonths) {
   // returns: { expiryDate, daysLeft, status: "valid"|"expiring"|"expired", label }
   if (!completionDate || !renewalMonths) return null;
@@ -60,11 +67,11 @@ function getExpiryStatus(completionDate, renewalMonths) {
   const daysLeft = Math.ceil((expiry - today) / (1000 * 60 * 60 * 24));
   const expiryStr = expiry.toISOString().slice(0,10);
   if (daysLeft < 0)  return { expiryDate:expiryStr, daysLeft, status:"expired",  label:"Expired",          color:"#ef4444", bg:"rgba(239,68,68,0.15)"  };
-  if (daysLeft <= 60) return { expiryDate:expiryStr, daysLeft, status:"expiring", label:`Expires in ${daysLeft}d`, color:"#f59e0b", bg:"rgba(245,158,11,0.15)" };
+  if (daysLeft <= EXPIRY_WARNING_DAYS) return { expiryDate:expiryStr, daysLeft, status:"expiring", label:`Expires in ${daysLeft}d`, color:"#f59e0b", bg:"rgba(245,158,11,0.15)" };
   return               { expiryDate:expiryStr, daysLeft, status:"valid",    label:`Valid until ${expiryStr}`,  color:"#10b981", bg:"rgba(16,185,129,0.12)" };
 }
 
 // (Leftover section marker from the original single-file build — the logo now lives in shared/Logo.jsx.)
 // ─── Zeus Logo SVG (text-based approximation) ────────────────────────────────
 
-export { addMonths, getExpiryStatus };
+export { addMonths, getExpiryStatus, EXPIRY_WARNING_DAYS };

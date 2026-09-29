@@ -14,7 +14,10 @@
  *   sb.from("table").delete().eq(col, val)       → DELETE matching rows
  *   sb.storage.upload / remove / getPublicUrl    → file storage (photos, PDFs, videos)
  *
- * NOTE: there is NO `.update()` — use upsert with onConflict instead.
+ *   sb.from("table").update(values).eq(col, val)  → PATCH matching rows (col may be a
+ *                                                   JSON path, e.g. "data->>id")
+ * Prefer upsert with onConflict where the table has a unique key; use update()
+ * when it doesn't (e.g. quiz_failures, keyed only by a value inside `data`).
  * The API shape deliberately mimics supabase-js so the calling code reads the
  * same, but it is NOT a drop-in: chaining (e.g. .select().eq().order()) is not
  * supported. Add new filters to `from()` below if you need them.
@@ -77,7 +80,7 @@ const sb = (() => {
 
   /**
    * Low-level request builder used by every method below.
-   * @param {"GET"|"POST"|"DELETE"} method
+   * @param {"GET"|"POST"|"PATCH"|"DELETE"} method
    * @param {string} table
    * @param {{filter?: string, body?: any, upsertOn?: string}} opts
    *   filter   – raw PostgREST query string, e.g. "select=*&user_id=eq.42"
@@ -148,6 +151,11 @@ const sb = (() => {
     // Preferred write method across the app (upsert-and-prune pattern — see README).
     // Without opts.onConflict this behaves like a plain insert.
     upsert: (rows, opts = {}) => q("POST", table, { body: Array.isArray(rows) ? rows : [rows], upsertOn: opts.onConflict }),
+    // PATCH: update only the given columns on rows matching the filter.
+    // PostgREST refuses an unfiltered PATCH, so .eq() is required.
+    update: (values) => ({
+      eq: (col, val) => q("PATCH", table, { filter: `${col}=eq.${encodeURIComponent(val)}`, body: values }),
+    }),
     // PostgREST refuses DELETE without a filter, so you must pick one of these.
     delete: () => ({
       eq:     (col, val) => q("DELETE", table, { filter: `${col}=eq.${encodeURIComponent(val)}` }),

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { FA_SHIFTS, FA_ZONES, FA_CERT_TYPES, FA_KIT_TYPES } from "../../data/seedFirstAid";
+import { EXPIRY_WARNING_DAYS } from "../../lib/dates";
 
 /**
  * FirstAidRegisterTab — admin first aid arrangements (Health and Safety (First-Aid)
@@ -72,12 +73,12 @@ function FirstAidRegisterTab({ staff, extCerts, firstAidData, setFirstAidData, Z
   const lbl = t => <div style={{fontSize:11,fontWeight:700,color:Z.muted,letterSpacing:1,textTransform:"uppercase",marginBottom:4,marginTop:14}}>{t}</div>;
 
   function daysUntil(d) { return d ? Math.ceil((new Date(d)-new Date())/86400000) : null; }
-  // First aid certificates: amber within 90 days of expiry (FAW/EFAW certificates last 3 years).
+  // First aid certificates: amber within EXPIRY_WARNING_DAYS of expiry (lib/dates.js) (FAW/EFAW certificates last 3 years).
   function certBadge(expiryDate) {
     const d = daysUntil(expiryDate);
     if (d === null) return { label:"No date", color:"#6b7280", bg:"rgba(107,114,128,0.12)" };
     if (d < 0)   return { label:"Expired",          color:"#ef4444", bg:"rgba(239,68,68,0.15)" };
-    if (d <= 90) return { label:`Exp. in ${d}d`,    color:"#f59e0b", bg:"rgba(245,158,11,0.15)" };
+    if (d <= EXPIRY_WARNING_DAYS) return { label:`Exp. in ${d}d`,    color:"#f59e0b", bg:"rgba(245,158,11,0.15)" };
     return               { label:"Valid",            color:"#10b981", bg:"rgba(16,185,129,0.12)" };
   }
   // Kits should be checked roughly monthly: due 35 days after the last check, amber in the final 7 days.

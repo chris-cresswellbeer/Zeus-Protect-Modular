@@ -6,17 +6,21 @@ import { riskLevel } from "../../shared/RiskMatrix";
 import { E } from "../../lib/emoji";
 import { sb, dbWrite } from "../../lib/supabase";
 import { TRAINING_MODULES } from "../../data/seedTraining";
-import { getExpiryStatus } from "../../lib/dates";
+import { getExpiryStatus, EXPIRY_WARNING_DAYS } from "../../lib/dates";
 import { isWarehouseWorker, machineExpiryStatus } from "../../data/seedMachinery";
 import { EXT_CERT_TYPES } from "../../data/seedExtCerts";
 import { ManagerRow } from "./ManagerRow";
 import { AdminDSETab } from "../dse/AdminDSETab";
+import { TrainingMatrixView } from "./TrainingMatrixView";
+import { MonthlyReportView } from "../reports/MonthlyReportView";
 
 /**
  * ReportsTab — admin "Training → Reports" area. One component, many report views,
  * selected by `reportView` (state lives in App.jsx as adminReportView so other
  * screens — dashboard cards, notifications — can deep-link to a view):
  *
+ *   "matrix"    – staff × module training matrix, coloured by status, Excel export (TrainingMatrixView)
+ *   "monthly"   – monthly H&S management report / board pack as PDF (MonthlyReportView)
  *   "staff"     – per-staff training progress, expandable to quiz answers, ext. certs, machinery
  *   "manager"   – compliance grouped by line manager (uses ManagerRow)
  *   "expiry"    – training + machinery competences expired/expiring
@@ -36,7 +40,18 @@ import { AdminDSETab } from "../dse/AdminDSETab";
  * COMPLIANCE MATHS used throughout: completed assigned modules ÷ assigned modules,
  * capped at 100%. Bands: 100% green/"Compliant", ≥50% amber/"In Progress", else red/"Overdue".
  */
-function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledgements, reportView, setReportView, dseReports, adminResponses, setAdminResponses, darkMode, Z, font, modules, machineComps, allMachineTypes, lastLoginMap, extCerts, quizFailures, setQuizFailures, incidents, inspections, ras, investigations, onExportPDF, setAtab }) {
+// Mark one quiz failure as reviewed in the database. quiz_failures rows are
+// { id (row number), data (the failure record) }, so match on the record's own id
+// inside `data`; very old records without one fall back to the row number.
+function saveQuizFailureReviewed(f) {
+  const data = { ...f, acknowledged: true, reviewedAt: new Date().toISOString().slice(0,10) };
+  delete data._rowId;
+  const req = f.id ? sb.from("quiz_failures").update({ data }).eq("data->>id", f.id)
+                   : f._rowId != null ? sb.from("quiz_failures").update({ data }).eq("id", f._rowId) : null;
+  if (req) dbWrite(req, "quiz failure reviewed", { alertOnError: true });
+}
+
+function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledgements, reportView, setReportView, dseReports, adminResponses, setAdminResponses, darkMode, Z, font, modules, machineComps, allMachineTypes, lastLoginMap, extCerts, quizFailures, setQuizFailures, incidents, inspections, ras, investigations, onExportPDF, setAtab, userName }) {
   const isMobile = useWindowWidth() <= 1024;
   const [rptFilterSearch, setRptFilterSearch] = React.useState("");
   const [showTeamExport, setShowTeamExport] = React.useState(false);
@@ -186,6 +201,8 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:24,flexWrap:"wrap",gap:14}}>
         <h2 style={{fontSize:22,fontWeight:900,letterSpacing:-.5,margin:0}}>Compliance Reports <HelpTip dark={false} text="View completion rates, expiry status, document acknowledgements and DSE assessments across all staff. Use the Training Expiry tab to identify anyone with overdue renewals before they become a compliance issue."/></h2>
         <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+          {tabBtn("matrix",    E("▦ ","")+"Training Matrix")}
+          {tabBtn("monthly",   E("📑 ","")+"Monthly Report")}
           {tabBtn("staff",     E("👥 ","")+"Staff Overview")}
           {tabBtn("manager",   E("📊 ","")+"Manager Performance")}
           {tabBtn("dse",       E("🖥 ","")+"DSE Reports")}
@@ -649,9 +666,11 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
             </div>
             {(quizFailures||[]).filter(f=>!f.acknowledged).length > 0 && (
               <button onClick={()=>{
-                const updated = (quizFailures||[]).map(f=>({...f,acknowledged:true}));
-                setQuizFailures(updated);
-                updated.forEach(f=>dbWrite(sb.from("quiz_failures").upsert({data:f},{onConflict:"data->>'id'"}), "quiz failure update"));
+                // Save each newly reviewed failure (the old upsert on "data->>'id'" was
+                // rejected by the database, so reviews were lost on reload).
+                const toMark = (quizFailures||[]).filter(f=>!f.acknowledged);
+                setQuizFailures((quizFailures||[]).map(f=>({...f,acknowledged:true})));
+                toMark.forEach(f=>saveQuizFailureReviewed(f));
               }} style={{background:"rgba(16,185,129,0.1)",color:Z.green,border:"1px solid rgba(16,185,129,0.25)",borderRadius:10,padding:"8px 16px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font}}>
                 ✓ Mark all as reviewed
               </button>
@@ -684,9 +703,8 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
                       {f.acknowledged
                         ? <Pill label="Reviewed" col="green"/>
                         : <button onClick={()=>{
-                            const updated = (quizFailures||[]).map(x=>x.id===f.id?{...x,acknowledged:true}:x);
-                            setQuizFailures(updated);
-                            dbWrite(sb.from("quiz_failures").upsert({data:{...f,acknowledged:true}},{onConflict:"data->>'id'"}), "quiz failure acknowledgement");
+                            setQuizFailures((quizFailures||[]).map(x=>x.id===f.id?{...x,acknowledged:true}:x));
+                            saveQuizFailureReviewed(f);
                           }} style={{background:"rgba(37,99,235,0.1)",color:Z.accentLt,border:`1px solid rgba(37,99,235,0.25)`,borderRadius:8,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font}}>
                             Mark reviewed
                           </button>
@@ -701,6 +719,15 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
       )}
 
       {/* ── INCIDENT TRENDS: hand-drawn SVG/div charts (no chart library). Types come from incident.type. ── */}
+      {reportView === "matrix" && (
+        <TrainingMatrixView staff={staff} modules={allModules} assigns={assigns} comps={comps} Z={Z} font={font}/>
+      )}
+
+      {reportView === "monthly" && (
+        <MonthlyReportView incidents={incidents} investigations={investigations} inspections={inspections} ras={ras}
+          staff={staff} modules={allModules} assigns={assigns} comps={comps} userName={userName} Z={Z} font={font}/>
+      )}
+
       {reportView === "trends" && (() => {
         const inc = incidents || [];
         const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -921,8 +948,8 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
               sourceIcon: "🏗",
               title: nc.description||nc.finding||"Non-conformance",
               ref: `${ins.location||"Unknown"} — ${ins.date||""}`,
-              assignedTo: nc.responsiblePerson||"Unassigned",
-              dueDate: nc.dueDate||null,
+              assignedTo: nc.actionOwner||nc.responsiblePerson||"Unassigned",   // inspections store actionOwner / actionDue
+              dueDate: nc.actionDue||nc.dueDate||null,
               raisedDate: ins.date||null,
               daysOld,
               priority: nc.severity==="high"||nc.priority==="high"?"high":daysOld>30?"high":daysOld>14?"medium":"low",
@@ -1182,7 +1209,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
                 </div>
                 <div style={{background:"rgba(245,158,11,0.1)",borderRadius:12,padding:"14px 20px",flex:1,minWidth:120,textAlign:"center",border:"1px solid rgba(245,158,11,0.2)"}}>
                   <div style={{fontSize:28,fontWeight:900,color:"#f59e0b",fontFamily:"'Barlow Condensed',sans-serif"}}>{expiring}</div>
-                  <div style={{fontSize:11,color:Z.muted,marginTop:2}}>⏳ Expiring &lt;60 days</div>
+                  <div style={{fontSize:11,color:Z.muted,marginTop:2}}>⏳ Expiring &lt;{EXPIRY_WARNING_DAYS} days</div>
                 </div>
                 <div style={{background:"rgba(16,185,129,0.1)",borderRadius:12,padding:"14px 20px",flex:1,minWidth:120,textAlign:"center",border:"1px solid rgba(16,185,129,0.2)"}}>
                   <div style={{fontSize:28,fontWeight:900,color:"#10b981",fontFamily:"'Barlow Condensed',sans-serif"}}>{valid}</div>
@@ -1243,7 +1270,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
                 if(!comp.licenceExpiry) return;
                 const expDate = new Date(comp.licenceExpiry);
                 const daysLeft = Math.round((expDate - today) / 86400000);
-                const status = daysLeft < 0 ? "expired" : daysLeft <= 60 ? "expiring" : "valid";
+                const status = daysLeft < 0 ? "expired" : daysLeft <= EXPIRY_WARNING_DAYS ? "expiring" : "valid";
                 const bg = status==="expired"?"rgba(239,68,68,0.08)":status==="expiring"?"rgba(245,158,11,0.08)":"rgba(16,185,129,0.08)";
                 const color = status==="expired"?"#ef4444":status==="expiring"?"#f59e0b":"#10b981";
                 const mType = (allMachineTypes||[]).find(x=>x.id===comp.machineId)||{label:comp.machineId,icon:"🔧"};
@@ -1275,7 +1302,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
                     </div>
                     <div style={{background:"rgba(245,158,11,0.1)",borderRadius:12,padding:"14px 20px",flex:1,minWidth:100,textAlign:"center",border:"1px solid rgba(245,158,11,0.2)"}}>
                       <div style={{fontSize:28,fontWeight:900,color:"#f59e0b"}}>{mExpiring}</div>
-                      <div style={{fontSize:11,color:Z.muted,marginTop:2}}>⏳ Expiring &lt;60 days</div>
+                      <div style={{fontSize:11,color:Z.muted,marginTop:2}}>⏳ Expiring &lt;{EXPIRY_WARNING_DAYS} days</div>
                     </div>
                     <div style={{background:"rgba(16,185,129,0.1)",borderRadius:12,padding:"14px 20px",flex:1,minWidth:100,textAlign:"center",border:"1px solid rgba(16,185,129,0.2)"}}>
                       <div style={{fontSize:28,fontWeight:900,color:"#10b981"}}>{mValid}</div>

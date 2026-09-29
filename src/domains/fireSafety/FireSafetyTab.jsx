@@ -1,5 +1,6 @@
 import { useState, useRef } from "react";
 import { E } from "../../lib/emoji";
+import { EXPIRY_WARNING_DAYS } from "../../lib/dates";
 
 /**
  * FireSafetyTab — admin fire safety log book (Regulatory Reform (Fire Safety) Order 2005).
@@ -54,7 +55,7 @@ function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDel
     if(!dateStr) return null;
     return Math.ceil((new Date(dateStr) - new Date()) / 86400000);
   }
-  // Warden qualification valid for renewalMonths (default 36) from qualDate; amber within 60 days.
+  // Warden qualification valid for renewalMonths (default 36) from qualDate; amber within EXPIRY_WARNING_DAYS (lib/dates.js).
   // The same rule is duplicated in App.jsx (admin notifications + dashboard) — keep in step.
   function wardenStatus(w) {
     const expiry = new Date(w.qualDate);
@@ -62,7 +63,7 @@ function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDel
     const exp = expiry.toISOString().slice(0,10);
     const d = daysUntil(exp);
     if(d < 0)  return { label:"Expired",             color:"#ef4444", bg:"rgba(239,68,68,0.15)" };
-    if(d <= 60) return { label:`Expires in ${d}d`,   color:"#f59e0b", bg:"rgba(245,158,11,0.15)" };
+    if(d <= EXPIRY_WARNING_DAYS) return { label:`Expires in ${d}d`,   color:"#f59e0b", bg:"rgba(245,158,11,0.15)" };
     return       { label:"Valid",                    color:"#10b981", bg:"rgba(16,185,129,0.12)" };
   }
   // Generic due-date badge: Overdue / Due in N days (≤ urgentDays) / OK.

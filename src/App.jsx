@@ -88,6 +88,8 @@ import { DocCard } from "./domains/documents/DocCard";
 import { ExternalCertsSection } from "./domains/documents/ExternalCertsSection";
 import { PreviewModal } from "./domains/documents/PreviewModal";
 import { openFile } from "./lib/fileAccess";
+import { RecordCompletionModal, ImportPriorTrainingModal } from "./domains/training/RecordCompletion";
+import { isPassed, scoreText, recordedText } from "./domains/training/completion";
 import { DSEAssessment } from "./domains/dse/DSEAssessment";
 const LazyStaffDSETab = React.lazy(() => import("./domains/dse/StaffDSETab").then(m => ({ default: m.StaffDSETab })));
 const LazyEquipmentTrackerTab = React.lazy(() => import("./domains/equipment/EquipmentTrackerTab").then(m => ({ default: m.EquipmentTrackerTab })));
@@ -368,6 +370,8 @@ export default function App() {
   const [addErr,  setAddErr]    = useState("");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [bulkTarget, setBulkTarget] = useState("individual");
+  const [recordFor, setRecordFor] = useState(null);          // Assign Training: { uid, mid } → "Record as completed" window
+  const [showImportPrior, setShowImportPrior] = useState(false); // Assign Training: import prior training (CSV)
   const [bulkManager, setBulkManager] = useState("");
   // ── Session safety ──
   const [dbReady, setDbReady] = useState(false); // true once initial Supabase load is complete
@@ -555,7 +559,7 @@ export default function App() {
           const map = {};
           cRows.forEach(r => {
             const tc_uid=String(r.user_id); map[tc_uid] = map[tc_uid] || {};
-            map[tc_uid][String(r.module_id)] = { score: r.score, date: r.date, certId: r.cert_id, answers: r.answers, moduleVersion: r.module_version || 1 };
+            map[tc_uid][String(r.module_id)] = { score: r.score, date: r.date, certId: r.cert_id, answers: r.answers, moduleVersion: r.module_version || 1, ...(r.recorded ? { recorded: r.recorded } : {}) };
           });
           setComps(map);
         }
@@ -1056,14 +1060,71 @@ export default function App() {
   // replaces the current row.
   async function dbSaveCompletion(userId, moduleId, rec) {
     const moduleVersion = rec.moduleVersion || (allModules.find(m => String(m.id) === String(moduleId)) || {}).version || 1;
-    const hist = { user_id: String(userId), module_id: String(moduleId), module_version: moduleVersion, score: rec.score, date: rec.date, cert_id: rec.certId || null, at: new Date().toISOString() };
+    // `recorded` (admin-recorded prior training, see completion.js) is only sent when
+    // present, so ordinary quiz results never depend on that column existing.
+    // A quiz result replacing a recorded completion clears the "recorded" mark.
+    const wasRecorded = !!((comps[String(userId)] || {})[String(moduleId)] || {}).recorded;
+    const rc = rec.recorded ? { recorded: rec.recorded } : wasRecorded ? { recorded: null } : {};
+    const hist = { user_id: String(userId), module_id: String(moduleId), module_version: moduleVersion, score: rec.score, date: rec.date, cert_id: rec.certId || null, at: new Date().toISOString(), ...(rec.recorded ? rc : {}) };
     setCompHistory(p => [...p, hist]);
-    await dbWrite(sb.from("training_completions").upsert({
+    const ok = await dbWrite(sb.from("training_completions").upsert({
       user_id: userId, module_id: moduleId,
       score: rec.score, date: rec.date, cert_id: rec.certId, answers: rec.answers,
-      module_version: moduleVersion,
-    }, { onConflict: "user_id,module_id" }), "training completion");
+      module_version: moduleVersion, ...rc,
+    }, { onConflict: "user_id,module_id" }), "training completion", rec.recorded ? { alertOnError: true } : undefined);
+    if (rec.recorded && !ok) return false;
     await dbWrite(sb.from("training_completion_history").insert(hist), "training completion history");
+    return true;
+  }
+
+  // ── Admin: record training completed before the portal (e.g. on the old system) ──
+  // items: [{ userId, moduleId, date: "YYYY-MM-DD", note }]. Each person is also
+  // assigned the module if they weren't already, so it counts towards compliance.
+  // Anyone who already has a result for that module is skipped (never overwritten).
+  // Returns { saved, skipped:[{userId,moduleId,reason}] }.
+  async function recordCompletions(items) {
+    const at = new Date().toISOString();
+    const by = user ? user.name : "", byId = user ? String(user.id) : "";
+    const skipped = [], toSave = [];
+    items.forEach(it => {
+      const uid = String(it.userId), mid = String(it.moduleId);
+      if ((comps[uid] || {})[mid]) { skipped.push({ ...it, reason: "already has a result for this module" }); return; }
+      if (toSave.some(x => x.uid === uid && x.mid === mid)) { skipped.push({ ...it, reason: "listed twice" }); return; }
+      const mod = allModules.find(m => String(m.id) === mid);
+      toSave.push({ uid, mid, rec: { score: null, date: it.date, certId: null, answers: null, moduleVersion: (mod && mod.version) || 1,
+        recorded: { by, byId, at, ...(it.note ? { note: String(it.note).slice(0, 300) } : {}) } } });
+    });
+    if (!toSave.length) return { saved: 0, skipped };
+    // assignments first (one write per person), then the completions
+    const addAssign = {};
+    toSave.forEach(({ uid, mid }) => { const cur = addAssign[uid] || assigns[uid] || []; if (!cur.includes(mid)) addAssign[uid] = [...cur, mid]; });
+    if (Object.keys(addAssign).length) { setAssigns(p => ({ ...p, ...addAssign })); await dbSaveAssigns(addAssign); }
+    let saved = 0;
+    for (const { uid, mid, rec } of toSave) {
+      const ok = await dbSaveCompletion(uid, mid, rec);
+      if (!ok) { skipped.push({ userId: uid, moduleId: mid, date: rec.date, reason: "couldn't be saved" }); continue; }
+      saved++;
+      setComps(p => ({ ...p, [uid]: { ...(p[uid] || {}), [mid]: rec } }));
+      const who = (allUsers.find(u => String(u.id) === uid) || {}).name || uid;
+      const title = (allModules.find(m => String(m.id) === mid) || {}).title || mid;
+      auditEvent("training_completion", uid, "record", `Recorded as completed on ${rec.date}: ${title}${rec.recorded.note ? ` — ${rec.recorded.note}` : ""}`,
+        { module: { from: null, to: title }, completed: { from: null, to: rec.date } }, who);
+    }
+    return { saved, skipped };
+  }
+  // Undo a recorded completion (only recorded ones — quiz results can't be removed here).
+  async function removeRecordedCompletion(userId, moduleId) {
+    const uid = String(userId), mid = String(moduleId);
+    const c = (comps[uid] || {})[mid];
+    if (!c || !c.recorded) return;
+    const ok = await dbWrite(sb.from("training_completions").delete().match({ user_id: uid, module_id: mid }), "recorded completion delete", { alertOnError: true });
+    if (!ok) return;
+    dbWrite(sb.from("training_completion_history").delete().match({ user_id: uid, module_id: mid, date: c.date }), "recorded completion history delete");
+    setComps(p => { const n = { ...p, [uid]: { ...(p[uid] || {}) } }; delete n[uid][mid]; return n; });
+    setCompHistory(p => p.filter(h => !(String(h.user_id) === uid && String(h.module_id) === mid && h.recorded && h.date === c.date)));
+    const who = (allUsers.find(u => String(u.id) === uid) || {}).name || uid;
+    const title = (allModules.find(m => String(m.id) === mid) || {}).title || mid;
+    auditEvent("training_completion", uid, "remove", `Removed recorded completion (${c.date}): ${title}`, { module: { from: title, to: null } }, who);
   }
 
   // Upserts one incident (and uploads any new photos first). Called for EVERY incident by the auto-sync effect.
@@ -2767,7 +2828,7 @@ export default function App() {
                         <div style={{fontWeight:700,fontSize:13,color:T.white,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{m.title}</div>
                         <div style={{fontSize:11,color:T.muted}}>{m.category} · {m.duration}</div>
                       </div>
-                      {isDone && <span style={{fontSize:11,color:T.muted}}>{myC[m.id].score}%</span>}
+                      {isDone && <span style={{fontSize:11,color:T.muted}}>{scoreText(myC[m.id])}</span>}
                       <span style={{fontSize:11,fontWeight:700,color:statusColor,background:`${statusColor}18`,border:`1px solid ${statusColor}33`,borderRadius:6,padding:"2px 8px",whiteSpace:"nowrap",flexShrink:0}}>{statusLabel}</span>
                     </div>
                   );
@@ -2794,10 +2855,10 @@ export default function App() {
                       {isDone && (
                         <div style={{marginBottom:14}}>
                           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
-                            <Bar pct={myC[m.id].score} color={myC[m.id].score>=70?T.green:T.amber}/>
-                            <span style={{color:myC[m.id].score>=70?T.green:T.amber,fontWeight:700,fontSize:13}}>{myC[m.id].score}%</span>
+                            <Bar pct={myC[m.id].recorded?100:myC[m.id].score} color={isPassed(myC[m.id])?T.green:T.amber}/>
+                            <span style={{color:isPassed(myC[m.id])?T.green:T.amber,fontWeight:700,fontSize:13}}>{scoreText(myC[m.id])}</span>
                           </div>
-                          <p style={{color:T.muted,fontSize:11,margin:"0 0 6px"}}>Completed {myC[m.id].date}</p>
+                          <p style={{color:T.muted,fontSize:11,margin:"0 0 6px"}}>Completed {myC[m.id].date}{myC[m.id].recorded?" · from your earlier training records":""}</p>
                           {m.renewalMonths && (() => {
                             const ex = getExpiryStatus(myC[m.id].date, m.renewalMonths);
                             if (!ex) return null;
@@ -2828,7 +2889,7 @@ export default function App() {
                             borderRadius:10,padding:"10px",fontWeight:700,cursor:"pointer",fontSize:13,fontFamily:font}}>
                           {isDone?(()=>{const ex=m.renewalMonths?getExpiryStatus(myC[m.id].date,m.renewalMonths):null; return ex&&ex.status==="expired"?"Renew Now →":ex&&ex.status==="expiring"?"Renew Soon →":"Review Module"})():"Start →"}
                         </button>
-                        {isDone && (
+                        {isDone && !myC[m.id].recorded && (
                           <button onClick={()=>setCert({module:m,score:myC[m.id].score,date:myC[m.id].date,certId:myC[m.id].certId||null})}
                             style={{background:"rgba(245,158,11,0.12)",color:T.gold,border:`1px solid rgba(245,158,11,0.3)`,borderRadius:10,padding:"10px 14px",fontWeight:700,cursor:"pointer",fontSize:12,fontFamily:font}}>
                             🏅
@@ -2893,10 +2954,10 @@ export default function App() {
                             <span style={{fontWeight:700,fontSize:14,color:T.white}}>{m.title}</span>
                           </div>
                           <MobileCardRow label="Date" value={myC[m.id].date}/>
-                          <MobileCardRow label="Score" value={<span style={{color:myC[m.id].score>=70?T.green:T.amber,fontWeight:800}}>{myC[m.id].score}%</span>}/>
+                          <MobileCardRow label="Score" value={<span style={{color:isPassed(myC[m.id])?T.green:T.amber,fontWeight:800}}>{scoreText(myC[m.id])}</span>}/>
                           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:4}}>
-                            <Pill label={myC[m.id].score>=70?"Passed":"Failed"} col={myC[m.id].score>=70?"green":"red"}/>
-                            {myC[m.id].score>=70 && <button onClick={()=>setCert({module:m,score:myC[m.id].score,date:myC[m.id].date,certId:myC[m.id].certId||null})} style={{background:"rgba(245,158,11,0.1)",border:`1px solid rgba(245,158,11,0.3)`,color:T.gold,borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font}}>🏅 Certificate</button>}
+                            <Pill label={myC[m.id].recorded?"Completed":isPassed(myC[m.id])?"Passed":"Failed"} col={isPassed(myC[m.id])?"green":"red"}/>
+                            {isPassed(myC[m.id]) && !myC[m.id].recorded && <button onClick={()=>setCert({module:m,score:myC[m.id].score,date:myC[m.id].date,certId:myC[m.id].certId||null})} style={{background:"rgba(245,158,11,0.1)",border:`1px solid rgba(245,158,11,0.3)`,color:T.gold,borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font}}>🏅 Certificate</button>}
                           </div>
                         </MobileCard>
                       ))}
@@ -2910,10 +2971,10 @@ export default function App() {
                       <div key={m.id} style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",padding:"16px 20px",borderTop:i>0?`1px solid ${T.border}`:"none",alignItems:"center"}}>
                         <div style={{display:"flex",alignItems:"center",gap:10}}><span>{m.icon}</span><span style={{fontSize:14,fontWeight:700}}>{m.title}</span></div>
                         <span style={{color:T.muted,fontSize:13}}>{myC[m.id].date}</span>
-                        <span style={{color:myC[m.id].score>=70?T.green:T.amber,fontWeight:800,fontSize:15}}>{myC[m.id].score}%</span>
+                        <span title={myC[m.id].recorded?"Recorded from your earlier training records":undefined} style={{color:isPassed(myC[m.id])?T.green:T.amber,fontWeight:800,fontSize:15}}>{scoreText(myC[m.id])}</span>
                         <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                          <Pill label={myC[m.id].score>=70?"Passed":"Failed"} col={myC[m.id].score>=70?"green":"red"}/>
-                          {myC[m.id].score>=70&&<button onClick={()=>setCert({module:m,score:myC[m.id].score,date:myC[m.id].date,certId:myC[m.id].certId||null})} style={{background:"rgba(245,158,11,0.1)",border:`1px solid rgba(245,158,11,0.3)`,color:T.gold,borderRadius:8,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font}}>🏅 Cert</button>}
+                          <Pill label={myC[m.id].recorded?"Completed":isPassed(myC[m.id])?"Passed":"Failed"} col={isPassed(myC[m.id])?"green":"red"}/>
+                          {isPassed(myC[m.id])&&!myC[m.id].recorded&&<button onClick={()=>setCert({module:m,score:myC[m.id].score,date:myC[m.id].date,certId:myC[m.id].certId||null})} style={{background:"rgba(245,158,11,0.1)",border:`1px solid rgba(245,158,11,0.3)`,color:T.gold,borderRadius:8,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font}}>🏅 Cert</button>}
                         </div>
                       </div>
                     ))}
@@ -4357,7 +4418,19 @@ export default function App() {
           {atab==="assign" && (
             <div>
               <h2 style={{fontSize:22,fontWeight:900,letterSpacing:-.5,marginBottom:6}}>Assign Training <HelpTip dark={false} text="Tick modules to assign them to staff. Assigned modules appear on the staff member's dashboard as required training. Use bulk assignment to push modules to an entire team at once."/></h2>
-              <p style={{color:T.muted,fontSize:13,marginBottom:20}}>Assign modules to individuals, teams, or all staff at once.</p>
+              <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",marginBottom:20}}>
+                <p style={{color:T.muted,fontSize:13,margin:0,flex:1,minWidth:240}}>Assign modules to individuals, teams, or all staff at once.</p>
+                <button onClick={()=>setShowImportPrior(true)}
+                  style={{background:"rgba(16,185,129,0.1)",color:T.green,border:"1px solid rgba(16,185,129,0.3)",borderRadius:10,padding:"8px 16px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font}}>
+                  {E("📥 ","")}Import training done before the portal
+                </button>
+              </div>
+              {showImportPrior && <ImportPriorTrainingModal users={allUsers.filter(u=>(u.status||"active")!=="leaver")} modules={allModules} comps={comps}
+                onImport={recordCompletions} onClose={()=>setShowImportPrior(false)} Z={T} font={font}/>}
+              {recordFor && (()=>{ const pu=allUsers.find(u=>String(u.id)===String(recordFor.uid)); const pm=allModules.find(m=>m.id===recordFor.mid);
+                return pu && pm ? <RecordCompletionModal person={pu} module={pm}
+                  onSave={(date,note)=>recordCompletions([{userId:pu.id,moduleId:pm.id,date,note}])}
+                  onClose={()=>setRecordFor(null)} Z={T} font={font}/> : null; })()}
 
               {(()=>{
                 const uniqueManagers = [...new Set(staff.map(u=>u.manager).filter(Boolean))].sort();
@@ -4500,6 +4573,23 @@ export default function App() {
                                   </div>
                                 </div>
                               </div>
+                              {bulkTarget==="individual" && (()=>{
+                                // Completion status + "Record as completed" (training done before the portal)
+                                const c=(comps[String(target)]||{})[m.id];
+                                const dd=c&&c.date?String(c.date).split("-").reverse().join("/"):"";
+                                if (!c) return (
+                                  <button onClick={()=>setRecordFor({uid:target,mid:m.id})} title="Record training they've already done, e.g. on the old system"
+                                    style={{background:"transparent",color:T.green,border:"1px solid rgba(16,185,129,0.35)",borderRadius:10,padding:"8px 14px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:12,marginRight:8,flexShrink:0}}>
+                                    {E("✓ ","")}Record as completed
+                                  </button>);
+                                if (c.recorded) return (
+                                  <span style={{display:"inline-flex",alignItems:"center",gap:6,marginRight:8,flexShrink:0}}>
+                                    <span title={recordedText(c)} style={{fontSize:11,fontWeight:700,color:T.green,background:"rgba(16,185,129,0.1)",border:"1px solid rgba(16,185,129,0.3)",borderRadius:8,padding:"4px 10px"}}>Recorded · completed {dd}</span>
+                                    <button onClick={()=>{ if(window.confirm(`Remove the recorded completion of "${m.title}"?`)) removeRecordedCompletion(target,m.id); }}
+                                      style={{background:"transparent",color:T.muted,border:"none",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font,textDecoration:"underline"}}>Undo</button>
+                                  </span>);
+                                return <span style={{fontSize:11,fontWeight:700,color:isPassed(c)?T.green:T.amber,marginRight:10,flexShrink:0}}>{isPassed(c)?"Completed":"Attempted"} {dd} · {scoreText(c)}</span>;
+                              })()}
                               {bulkTarget==="individual"
                                 ? <button onClick={()=>toggleAssign(target,m.id)}
                                     style={{background:on?`rgba(37,99,235,0.25)`:T.border,color:on?T.accentLt:T.muted,border:`1px solid ${on?T.accent+"55":T.borderMd}`,borderRadius:10,padding:"8px 20px",fontWeight:700,cursor:"pointer",fontSize:13,fontFamily:font,transition:"all .2s",flexShrink:0}}>

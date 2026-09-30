@@ -133,7 +133,7 @@ function TrainingMatrixView({ staff, modules, assigns, comps, Z, font }) {
                   <td style={{ textAlign: "center", fontWeight: 800, color: pctColor(r.pct), borderBottom: `1px solid ${Z.border}`, padding: "0 6px" }}>{r.pct === null ? "—" : `${r.pct}%`}</td>
                   {r.cells.map((c, ci) => {
                     const m = cols[ci];
-                    const tip = `${r.user.name} — ${m.title}\n${MATRIX_STATUS[c.status].label}${c.completed ? `\nCompleted ${c.completed}${c.score != null ? ` (${c.score}%)` : ""}` : ""}${c.expires ? `\nExpires ${c.expires}` : ""}${c.status !== "na" && !c.assigned ? "\n(completed but not assigned)" : ""}`;
+                    const tip = `${r.user.name} — ${m.title}\n${MATRIX_STATUS[c.status].label}${c.completed ? `\nCompleted ${c.completed}${c.recorded ? " (recorded — done before the portal)" : c.score != null ? ` (${c.score}%)` : ""}` : ""}${c.expires ? `\nExpires ${c.expires}` : ""}${c.status !== "na" && !c.assigned ? "\n(completed but not assigned)" : ""}`;
                     return (
                       <td key={m.id} title={tip} data-status={c.status} style={{ padding: 2, borderBottom: `1px solid ${Z.border}` }}>
                         <div style={{ height: 26, borderRadius: 5, display: "flex", alignItems: "center", justifyContent: "center", fontSize: showDates ? 10 : 13, whiteSpace: "nowrap", opacity: c.status !== "na" && !c.assigned ? 0.6 : 1, ...cellStyle(c.status) }}>

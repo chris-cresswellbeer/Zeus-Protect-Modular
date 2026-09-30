@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { isPassed, scoreText } from "../training/completion";
 import { HelpTip } from "../../shared/HelpTip";
 import { getExpiryStatus } from "../../lib/dates";
 import { teamOf, normName } from "./team";
@@ -26,7 +27,7 @@ function summarise(u, ctx) {
   const modules = mods.map(m => {
     const rec = c[m.id];
     let status = "not_started", ex = null;
-    if (rec && rec.score >= 70) {
+    if (isPassed(rec)) {
       ex = m.renewalMonths ? getExpiryStatus(rec.date, m.renewalMonths) : null;
       status = !ex || ex.status === "valid" ? "valid" : ex.status;   // valid | expiring | expired
     } else if (rec) status = "failed";
@@ -116,7 +117,7 @@ function MemberDetail({ u, s, allModules, assigned, onAssign, onSignOffDse, onSi
         return (
           <div key={m.id} style={row}>
             <span style={{ fontSize: 13, color: Z.white, fontWeight: 600, flex: 1, minWidth: 180 }}>{m.icon} {m.title}</span>
-            <span style={{ fontSize: 12, color: Z.muted }}>{rec ? `${rec.score}% · ${rec.date}${rec.moduleVersion ? ` · v${rec.moduleVersion}` : ""}` : ""}{ex && ex.expiryDate ? ` · expires ${ex.expiryDate}` : ""}</span>
+            <span style={{ fontSize: 12, color: Z.muted }}>{rec ? `${scoreText(rec)} · ${rec.date}${rec.moduleVersion ? ` · v${rec.moduleVersion}` : ""}` : ""}{ex && ex.expiryDate ? ` · expires ${ex.expiryDate}` : ""}</span>
             <Badge text={st.label} color={col} Z={Z} />
           </div>
         );

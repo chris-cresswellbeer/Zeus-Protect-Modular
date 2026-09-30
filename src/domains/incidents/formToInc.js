@@ -36,8 +36,6 @@ function formToInc(form, existing) {
     equipmentDamageDesc: (form.equipmentInvolved && form.equipmentDamaged) ? (form.equipmentDamageDesc||"").trim() : "",
     equipmentDamageSeverity: (form.equipmentInvolved && form.equipmentDamaged) ? (form.equipmentDamageSeverity||"medium") : "",
     equipmentOOS: form.equipmentInvolved && form.equipmentOOS,
-    // Evidence photos & files added or removed on the form (uploaded on save by App.jsx).
-    photos: Array.isArray(form.photos) ? form.photos : (existing && existing.photos) || [],
   };
 }
 

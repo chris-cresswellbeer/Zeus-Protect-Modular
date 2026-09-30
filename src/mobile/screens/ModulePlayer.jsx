@@ -13,7 +13,6 @@ import React from "react";
 import { Screen, PrimaryButton, GhostButton } from "../ui";
 import { sanitizeHtml } from "../../lib/sanitizeHtml";
 import { isHtmlContent, ensureRteStyles } from "../../domains/training/slideTextUtils";
-import { useFileUrl } from "../../lib/fileAccess";
 
 // Must match the desktop pass mark in App.jsx submitQuiz (also 70).
 const PASS_MARK = 70;
@@ -306,13 +305,9 @@ function slideImages(slide) {
 
 // No loading="lazy": inside the player's fixed, nested scroll container some
 // Android WebViews never fire the intersection that triggers the load.
-function SlideImage({ src: stored, Z }) {
-  // Private files (new sign-in) need a signed link first; null while it's fetched,
-  // so the image isn't tried with the old link and wrongly shown as failed.
-  const src = useFileUrl(stored);
+function SlideImage({ src, Z }) {
   const [failed, setFailed] = React.useState(false);
   React.useEffect(() => setFailed(false), [src]);
-  if (!src) return null;
   if (failed) return <MediaFallback kind="image" src={src} Z={Z} />;
   return (
     <img
@@ -322,11 +317,9 @@ function SlideImage({ src: stored, Z }) {
   );
 }
 
-function SlideVideo({ src: stored, Z }) {
-  const src = useFileUrl(stored);   // signed link for private files (see SlideImage)
+function SlideVideo({ src, Z }) {
   const [failed, setFailed] = React.useState(false);
   React.useEffect(() => setFailed(false), [src]);
-  if (!src) return null;
   if (failed) return <div style={{ marginTop: 16 }}><MediaFallback kind="video" src={src} Z={Z} /></div>;
   // .mov/HEVC from an iPhone plays in Safari but not Chrome on Android — the
   // fallback makes that visible instead of an empty black box.

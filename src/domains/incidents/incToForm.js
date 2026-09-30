@@ -24,7 +24,6 @@ function incToForm(inc, equipmentList) {
     postIncidentOutcome: inc.postIncidentOutcome||"",
     immediateMeasures: inc.immediateMeasures||"",
     correctiveActions: inc.correctiveActions||"", correctiveActionsBy: inc.correctiveActionsBy||"",
-    photos: Array.isArray(inc.photos) ? inc.photos : [],
     equipmentInvolved: inc.equipmentInvolved||false,
     equipmentId: inc.equipmentId||"",
     equipmentDamaged: inc.equipmentDamaged||false,

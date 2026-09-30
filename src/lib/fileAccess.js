@@ -238,3 +238,33 @@ export async function embedFiles(html) {
   for (const [from, to] of swaps) out = out.split(from).join(to);
   return out;
 }
+
+// ── opening a file in a new tab (phones) ──────────────────────────────────
+/**
+ * Open a file in its own browser tab, where the phone's own viewer shows it
+ * (PDFs and Office files don't display inside a page on most phones).
+ * Call it straight from a tap: the tab is opened at once, so pop-up blockers
+ * allow it, then pointed at the file. Works for:
+ *   • private files (new sign-in) → a freshly signed link
+ *   • data: URLs (documents generated in the portal) → turned into a local file
+ *     link, because browsers refuse to open data: URLs in a tab
+ *   • ordinary links → opened as they are
+ * Returns false if the browser blocked the new tab.
+ */
+export function openFile(u) {
+  if (typeof u !== "string" || !u) return false;
+  if (!isPrivateUrl(u) && !/^data:/i.test(u)) {
+    window.open(u, "_blank", "noopener");   // with "noopener" browsers return null, so it can't be checked
+    return true;
+  }
+  const w = window.open("", "_blank");
+  if (!w) return false;
+  try { w.opener = null; } catch { /* */ }
+  const go = url => { try { w.location.href = url; } catch { w.close(); } };
+  if (/^data:/i.test(u)) {
+    fetch(u).then(r => r.blob()).then(b => go(URL.createObjectURL(b))).catch(() => w.close());
+  } else {
+    signedUrl(u, { fresh: true }).then(go);
+  }
+  return true;
+}

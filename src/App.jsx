@@ -87,6 +87,7 @@ const LazyCoshhTab = React.lazy(() => import("./domains/coshh/CoshhTab").then(m 
 import { DocCard } from "./domains/documents/DocCard";
 import { ExternalCertsSection } from "./domains/documents/ExternalCertsSection";
 import { PreviewModal } from "./domains/documents/PreviewModal";
+import { openFile } from "./lib/fileAccess";
 import { DSEAssessment } from "./domains/dse/DSEAssessment";
 const LazyStaffDSETab = React.lazy(() => import("./domains/dse/StaffDSETab").then(m => ({ default: m.StaffDSETab })));
 const LazyEquipmentTrackerTab = React.lazy(() => import("./domains/equipment/EquipmentTrackerTab").then(m => ({ default: m.EquipmentTrackerTab })));
@@ -1330,7 +1331,15 @@ export default function App() {
       [userId]: [ ...(p[userId] || []), report ],
     })),
 
-    previewDoc: (d) => setPreviewDoc(d),
+    // Phone "Read": pictures, web pages and text show in the preview window (rendered
+    // with MobileApp below). PDFs and Office files open in their own tab, where the
+    // phone's viewer can show them — most phones can't display a PDF inside a page.
+    previewDoc: (d) => {
+      const ext = String((d.fileName ? d.fileName.split(".").pop() : d.ext) || "").toUpperCase();
+      const inPage = ["PNG","JPG","JPEG","GIF","WEBP","SVG","HTML","TXT","CSV","MD"].includes(ext);
+      if (!d.fileData || inPage) { setPreviewDoc({ ...d, ext }); return; }
+      if (!openFile(d.fileData)) setPreviewDoc({ ...d, ext });   // tab blocked → show the preview window instead
+    },
     resolveIncident: (id) => {
       setIncidents(p => p.map(i => i.id === id ? { ...i, closed: true, triaged: true } : i));
       const inc = incidents.find(i => i.id === id);
@@ -1961,6 +1970,9 @@ export default function App() {
 
   if (isPhone && user && !forceDesktop) {
     return (
+      <>
+      {/* The phone layout's document preview (MobileApp's "Read" → mobileDb.previewDoc). */}
+      <div style={{fontFamily:font,color:T.white}}><PreviewModal doc={previewDoc} onClose={()=>setPreviewDoc(null)} Z={T} font={font}/></div>
       <MobileApp
         user={user}
         onSignOut={logout}
@@ -1983,6 +1995,7 @@ export default function App() {
         setDarkMode={setDarkMode}
         db={mobileDb}
       />
+      </>
     );
   }
 

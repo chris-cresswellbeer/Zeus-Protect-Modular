@@ -210,6 +210,11 @@ const INCIDENT_CORE_KEYS = new Set([
   "quickReport","urgency",
 ]);
 
+// Demo / seed data (INIT_*) fills screens on a brand-new install in the old sign-in
+// mode. With Supabase sign-in the database decides what each person may see, so an
+// empty result must stay empty — never replaced by demo records.
+const USE_SEED = AUTH_MODE !== "supabase";
+
 export default function App() {
   const [darkMode, setDarkMode] = useState(true); // kept for backward compat
   const [theme, setTheme] = useState("dark"); // "dark"|"light"|"slate"|"forest"|"graphite"|"arctic"|"sand"
@@ -222,8 +227,8 @@ export default function App() {
   // ── Auth & users ──
   const [passwords, setPasswords] = useState({}); // userId -> password (overrides default)
   // ── Training: assigns = { [userId]: [moduleId,...] }, comps = { [userId]: { [moduleId]: {score,date,certId,answers} } } ──
-  const [assigns, setAssigns] = useState(INIT_ASSIGN);
-  const [comps,   setComps]   = useState(INIT_COMPLETE);
+  const [assigns, setAssigns] = useState(USE_SEED ? INIT_ASSIGN : {});
+  const [comps,   setComps]   = useState(USE_SEED ? INIT_COMPLETE : {});
   const [email,   setEmail]   = useState("");
   const [pass,    setPass]    = useState("");
   const [err,     setErr]     = useState("");
@@ -263,16 +268,16 @@ export default function App() {
   const [dseComments, setDseComments] = useState({});
   const [dseSection, setDseSection] = useState(0);
   const [dseSubmitted, setDseSubmitted] = useState(false);
-  const [dseReports, setDseReports] = useState(INIT_DSE_REPORTS);
+  const [dseReports, setDseReports] = useState(USE_SEED ? INIT_DSE_REPORTS : {});
   const [adminResponses, setAdminResponses] = useState({}); // { userId: { reportIdx_issueIdx: { comment, resolved } } }
   // ── Incidents, investigations and other H&S registers ──
-  const [incidents, setIncidents] = useState(INIT_INCIDENTS);
-  const [investigations, setInvestigations] = useState(INIT_INVESTIGATIONS);   // { incidentId: { ... } }
+  const [incidents, setIncidents] = useState(USE_SEED ? INIT_INCIDENTS : []);
+  const [investigations, setInvestigations] = useState(USE_SEED ? INIT_INVESTIGATIONS : {});   // { incidentId: { ... } }
   const [investigationView, setInvestigationView] = useState(null); // incidentId to open
   const [lastLoginMap, setLastLoginMap] = useState({}); // userId -> ISO date string
-  const [equipment, setEquipment] = useState(INIT_EQUIPMENT);
-  const [machineComps, setMachineComps] = useState(INIT_MACHINE_COMPS);
-  const [siteInspections, setSiteInspections] = useState(INIT_SITE_INSPECTIONS);
+  const [equipment, setEquipment] = useState(USE_SEED ? INIT_EQUIPMENT : []);
+  const [machineComps, setMachineComps] = useState(USE_SEED ? INIT_MACHINE_COMPS : {});
+  const [siteInspections, setSiteInspections] = useState(USE_SEED ? INIT_SITE_INSPECTIONS : []);
   const [customModules, setCustomModules] = useState([]); // admin-created training modules
   const [customMachineTypes, setCustomMachineTypes] = useState([]); // admin-created machinery types
   const [ras, setRas] = useState(INIT_RAS);
@@ -302,7 +307,7 @@ export default function App() {
   }, [emojiMode]);
   useEffect(() => { ensureRteStyles(); }, []);
   // Fire safety is ONE state object holding six lists; each list maps to its own Supabase table (see dbSaveFireSafety).
-  const [fireSafety, setFireSafety] = useState({ wardens:INIT_FIRE_WARDENS, drills:INIT_FIRE_DRILLS, alarmTests:INIT_ALARM_TESTS, extinguishers:INIT_EXTINGUISHERS, emergLighting:INIT_EMERG_LIGHTING, fraReviews:INIT_FRA_REVIEWS });
+  const [fireSafety, setFireSafety] = useState(USE_SEED ? { wardens:INIT_FIRE_WARDENS, drills:INIT_FIRE_DRILLS, alarmTests:INIT_ALARM_TESTS, extinguishers:INIT_EXTINGUISHERS, emergLighting:INIT_EMERG_LIGHTING, fraReviews:INIT_FRA_REVIEWS } : { wardens:[], drills:[], alarmTests:[], extinguishers:[], emergLighting:[], fraReviews:[] });
   const [firstAidData, setFirstAidData] = useState({ aiders:[], kits:[], assessment:{} });
   // ── Module merge model ─────────────────────────────────────────────────────
   // Built-in modules live in data/seedTraining.js (TRAINING_MODULES, read-only code).
@@ -371,6 +376,7 @@ export default function App() {
   const inactivityTimer = React.useRef(null);
   // Supabase sign-in mode (lib/auth.js): true while the person must replace a temporary password.
   const [mustChangePw, setMustChangePw] = useState(false);
+  const [signingIn, setSigningIn] = useState(false);   // Supabase sign-in: loading data after the password check
   // Temporary passwords to show the admin once: { title, items:[{name,login,password}], failures:[{name,error}] }
   const [tempPwNotice, setTempPwNotice] = useState(null);
   const INACTIVITY_MINUTES = 30;
@@ -404,7 +410,11 @@ export default function App() {
     const reset = () => {
       clearTimeout(inactivityTimer.current);
       inactivityTimer.current = setTimeout(() => {
-        if (AUTH_MODE === "supabase") signOut();
+        if (AUTH_MODE === "supabase") {
+          alert("You have been logged out due to 30 minutes of inactivity.");
+          signOut().finally(() => window.location.reload());
+          return;
+        }
         setUser(null); setView("login"); setMod(null); setMustChangePw(false);
         alert("You have been logged out due to 30 minutes of inactivity.");
       }, INACTIVITY_MINUTES * 60 * 1000);
@@ -448,6 +458,9 @@ export default function App() {
   // error-logging list, then add a block that converts rows → state.
   // dbReady is set in `finally`, so the app always leaves the splash screen.
   // ── Load all persisted data from Supabase on mount ───────────────────────────
+  // loadAll is also called after sign-in in Supabase sign-in mode (see login()),
+  // because the database only returns data once it knows who is asking.
+  const loadAllRef = useRef(null);
   useEffect(() => {
     async function loadAll() {
       try {
@@ -476,7 +489,7 @@ export default function App() {
           sb.from("dse_reports").select("*"),
           sb.from("dse_admin_responses").select("*"),
           sb.from("last_logins").select("*"),
-          sb.from("user_passwords").select("*"),
+          AUTH_MODE === "supabase" ? Promise.resolve({ data: [], error: null }) : sb.from("user_passwords").select("*"),   // old sign-in only
           sb.from("users").select("*"),
           sb.from("user_profiles").select("*"),
           sb.from("ext_certs").select("*"),
@@ -531,7 +544,7 @@ export default function App() {
         } else {
           // Normalise INIT_ASSIGN keys to strings
           const normalised = {};
-          Object.entries(INIT_ASSIGN).forEach(([k,v]) => { normalised[String(k)] = v; });
+          if (USE_SEED) Object.entries(INIT_ASSIGN).forEach(([k,v]) => { normalised[String(k)] = v; });
           setAssigns(normalised);
         }
 
@@ -631,7 +644,7 @@ export default function App() {
         const usersRows = rows(usersRes);
         if (usersRows && usersRows.length) {
           setAllUsers(usersRows.map(r => r.data));
-        } else {
+        } else if (USE_SEED) {
           // First run — seed the users table from the hardcoded USERS constant
           setAllUsers(USERS);
           try {
@@ -776,7 +789,7 @@ export default function App() {
         const ffrRows = rows(ffrRes);
         // Only override each sub-array if the DB returned rows for it.
         // If none of the tables have any rows yet (fresh install), keep seed data.
-        const anyFireData = [fwRows,fdRows,fatRows,fexRows,felRows,ffrRows].some(r=>r&&r.length>0);
+        const anyFireData = !USE_SEED || [fwRows,fdRows,fatRows,fexRows,felRows,ffrRows].some(r=>r&&r.length>0);
         setFireSafety({
           wardens:      fwRows  && fwRows.length  ? fwRows.map(r=>r.data)  : (anyFireData ? [] : INIT_FIRE_WARDENS),
           drills:       fdRows  && fdRows.length  ? fdRows.map(r=>r.data)  : (anyFireData ? [] : INIT_FIRE_DRILLS),
@@ -796,7 +809,8 @@ export default function App() {
         setDbReady(true);
       }
     }
-    loadAll();
+    loadAllRef.current = loadAll;
+    if (AUTH_MODE !== "supabase") loadAll();
   }, []);
 
   // Every risk assessment (seed RAs and admin-created ones, as loaded from
@@ -857,6 +871,7 @@ export default function App() {
   // saved in between, the two sets of changes are combined (investigationMerge.js)
   // instead of the last save silently wiping out the other.
   const investigationBaseRef = useRef(new Map());
+  const equipmentSavedRef = useRef(new Map());   // non-admin sessions: last saved copy of each equipment item
   const refreshBusyRef = useRef(false);
   // Once data has loaded, snapshot every audited record WITHOUT logging (lib/audit.js),
   // so only real changes from here on create audit-trail entries. Declared before the
@@ -871,6 +886,7 @@ export default function App() {
     primeAuditList("inspection", siteInspections);
     incidents.forEach(i => incidentSavedRef.current.set(String(i.id), stableJSON(i)));
     Object.entries(investigations).forEach(([id, d]) => { investigationSavedRef.current.set(String(id), stableJSON(d)); investigationBaseRef.current.set(String(id), d); });
+    equipment.forEach(e => equipmentSavedRef.current.set(String(e.id), stableJSON(e)));
     _ready.current = true;
   }, [dbReady]); // eslint-disable-line
 
@@ -956,15 +972,20 @@ export default function App() {
     if ((view === "admin" && atab === "incidents") || (view === "staff" && (stab === "incidents" || stab === "actions" || stab === "team"))) refreshSharedRecords();
   }, [view, atab, stab]); // eslint-disable-line
 
+  // Supabase sign-in: only admins may change shared registers, so other people's
+  // browsers don't try to save them back (the database would refuse anyway).
+  const writesAll = () => AUTH_MODE !== "supabase" || (user && user.role === "admin");
+
   useEffect(() => { if (!_ready.current) return;
-    Object.entries(dseReports).forEach(([uid, reports]) => {
+    Object.entries(dseReports).filter(([uid]) => writesAll() || String(uid) === String(user && user.id)).forEach(([uid, reports]) => {
       auditRecord("dse_report", uid, reports, auditNameOf(uid));
       dbSaveDseReport(Number(uid), reports);
     });
   }, [dseReports]); // eslint-disable-line
 
   useEffect(() => { if (!_ready.current) return;
-    Object.entries(adminResponses).forEach(([uid, keys]) => {
+    // Admins save any response; line managers only their team's (sign-offs); staff none.
+    Object.entries(adminResponses).filter(([uid]) => writesAll() || (user && user.role === "manager" && String(uid) !== String(user.id))).forEach(([uid, keys]) => {
       auditRecord("dse_response", uid, keys, auditNameOf(uid));
       Object.entries(keys).forEach(([key, rec]) => {
         const [ri, ii] = key.split("_").map(Number);
@@ -974,27 +995,37 @@ export default function App() {
   }, [adminResponses]); // eslint-disable-line
 
   useEffect(() => { if (!_ready.current) return;
+    if (!writesAll()) {
+      // e.g. an incident report adding a defect: save just that item.
+      equipment.forEach(e => {
+        const k = String(e.id), j = stableJSON(e);
+        if (equipmentSavedRef.current.get(k) === j) return;
+        equipmentSavedRef.current.set(k, j);
+        dbWrite(sb.from("equipment").upsert({ id: e.id, data: e }, { onConflict: "id" }), "equipment");
+      });
+      return;
+    }
     dbSaveEquipment(equipment);
   }, [equipment]); // eslint-disable-line
 
-  useEffect(() => { if (!_ready.current) return;
+  useEffect(() => { if (!_ready.current || !writesAll()) return;
     auditList("inspection", siteInspections, i => [i.date, (INSP_TYPES.find(t => t.id === i.type) || {}).label || i.type, i.location].filter(Boolean).join(" · "));
     dbSaveSiteInspections(siteInspections);
   }, [siteInspections]); // eslint-disable-line
 
-  useEffect(() => { if (!_ready.current) return;
+  useEffect(() => { if (!_ready.current || !writesAll()) return;
     dbSaveFireSafety(fireSafety);
   }, [fireSafety]); // eslint-disable-line
 
-  useEffect(() => { if (!_ready.current) return;
+  useEffect(() => { if (!_ready.current || !writesAll()) return;
     dbSaveFirstAidData(firstAidData);
   }, [firstAidData]); // eslint-disable-line
 
-  useEffect(() => { if (!_ready.current) return;
+  useEffect(() => { if (!_ready.current || !writesAll()) return;
     customModules.forEach(m => dbSaveCustomModule(m));
   }, [customModules]); // eslint-disable-line
 
-  useEffect(() => { if (!_ready.current) return;
+  useEffect(() => { if (!_ready.current || !writesAll()) return;
     customMachineTypes.forEach(m => dbSaveCustomMachineType(m));
   }, [customMachineTypes]); // eslint-disable-line
 
@@ -1683,7 +1714,9 @@ export default function App() {
   // ⚠⚠ EARLY RETURN — no React hooks may be declared below this line. ⚠⚠
   // (Uses the default dark tokens `Z` because the user's theme isn't known yet.)
   // ── Show loading screen until Supabase data is ready ────────────────────────
-  if (!dbReady) return (
+  // (Supabase sign-in: the login screen shows before any data is loaded — the data
+  //  is loaded after sign-in, with the person's token.)
+  if (!dbReady && !(AUTH_MODE === "supabase" && view === "login")) return (
     <div style={{minHeight:"100vh",background:Z.bg,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Barlow','Trebuchet MS',system-ui,sans-serif",flexDirection:"column",gap:20}}>
       <ZeusProtectLogo/>
       <div style={{color:Z.muted,fontSize:14,letterSpacing:1}}>CONNECTING TO DATABASE…</div>
@@ -1729,9 +1762,15 @@ export default function App() {
         return;
       }
       const m = authMeta(r.user);
-      const su = allUsers.find(x => String(x.id) === String(m.zp_id));
-      if (!su) { await signOut(); setErr("Your sign-in isn't linked to a staff record. Please contact your administrator."); return; }
-      if ((su.status||"active") === "leaver") { await signOut(); setErr("This account is no longer active. Please contact your administrator."); return; }
+      // The database now answers as this person: find their staff record, then load
+      // everything they're allowed to see.
+      setSigningIn(true);
+      const ures = await sb.from("users").select("*");
+      const su = (Array.isArray(ures.data) ? ures.data : []).map(x => x.data).find(x => x && String(x.id) === String(m.zp_id));
+      if (!su) { setSigningIn(false); await signOut(); setErr("Your sign-in isn't linked to a staff record. Please contact your administrator."); return; }
+      if ((su.status||"active") === "leaver") { setSigningIn(false); await signOut(); setErr("This account is no longer active. Please contact your administrator."); return; }
+      if (loadAllRef.current) await loadAllRef.current();
+      setSigningIn(false);
       setMustChangePw(!!m.must_change_password);
       finishLogin(su);
       return;
@@ -1806,7 +1845,12 @@ export default function App() {
   }
 
   // Clears the session (and, in Supabase sign-in mode, ends the server session too).
-  function logout() { if (AUTH_MODE === "supabase") signOut(); setMustChangePw(false); setUser(null); setView("login"); setMod(null); }
+  // In Supabase sign-in mode the page is reloaded after signing out, so nothing the
+  // last person could see stays in memory for the next person on this computer.
+  function logout() {
+    if (AUTH_MODE === "supabase") { signOut().finally(() => window.location.reload()); return; }
+    setMustChangePw(false); setUser(null); setView("login"); setMod(null);
+  }
 
   // Opens a module in the player and resets all per-attempt state.
   function startMod(m) { setMod(m); setStep(0); setQans({}); setQsub(false); setShowCelebration(false); setHotspotComplete({}); }
@@ -1889,8 +1933,8 @@ export default function App() {
               style={{width:"100%",marginTop:6,padding:"11px 14px",background:"rgba(0,0,0,0.3)",border:"1px solid rgba(255,255,255,0.12)",borderRadius:10,color:"#ffffff",fontSize:14,outline:"none",boxSizing:"border-box",fontFamily:font}}/>
           </div>
           {err && <p style={{color:"#f87171",fontSize:13,margin:0}}>{err}</p>}
-          <button onClick={login} style={{marginTop:4,background:"linear-gradient(135deg,#2563eb,#152370)",color:"#ffffff",border:"none",borderRadius:10,padding:"13px",fontWeight:800,fontSize:15,cursor:"pointer",letterSpacing:.5,fontFamily:font,boxShadow:"0 4px 20px rgba(37,99,235,.4)"}}>
-            Sign In →
+          <button onClick={login} disabled={signingIn} style={{opacity:signingIn?0.7:1,marginTop:4,background:"linear-gradient(135deg,#2563eb,#152370)",color:"#ffffff",border:"none",borderRadius:10,padding:"13px",fontWeight:800,fontSize:15,cursor:"pointer",letterSpacing:.5,fontFamily:font,boxShadow:"0 4px 20px rgba(37,99,235,.4)"}}>
+            {signingIn ? "Signing in…" : "Sign In →"}
           </button>
         </div>
 

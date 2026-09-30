@@ -19,6 +19,12 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App.jsx";
+import { startPrivateFiles } from "./lib/fileAccess";
+
+// New sign-in only: swap links to private files (documents, fire safety,
+// incident photos) for short-lived signed links as they appear on screen.
+// Does nothing with the old sign-in. See lib/fileAccess.js.
+startPrivateFiles();
 
 // ⚠ PWA NOTE: src/mobile/registerSW.js exports registerServiceWorker(), and its
 // comments say to call it from here — but it is NOT currently called anywhere.

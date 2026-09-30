@@ -271,4 +271,4 @@ async function dbWrite(promise, label, opts = {}) {
   return !error;
 }
 
-export { SUPABASE_URL, SUPABASE_ANON, sb, hashPassword, DEFAULT_HASH, dbWrite, setAccessToken };
+export { SUPABASE_URL, SUPABASE_ANON, sb, hashPassword, DEFAULT_HASH, dbWrite, setAccessToken, bearer };

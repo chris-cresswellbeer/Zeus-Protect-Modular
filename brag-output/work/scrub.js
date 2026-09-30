@@ -11,7 +11,7 @@ window.__scrub = (mapPairs) => {
     if (/^[A-Z]{2}$/.test(tr)) { lastInitials = n; if (n.__orig===undefined){ n.__orig=tr; if (initMap.has(tr)) n.nodeValue = n.nodeValue.replace(tr, initMap.get(tr)); } continue; }
     let hit = null;
     for (const [a,b] of map) if (t.includes(a)) { t = t.split(a).join(b); hit = b; }
-    if (!hit) for (const [a,b] of firstMap) { const re = new RegExp('\\b'+a+'\\b','g'); if (re.test(t) && a.length>2) { t = t.replace(re,b); } }
+    if (!hit) for (const [a,b] of firstMap) { const re = new RegExp('\\b'+a+'\\b','g'); if (!['Mark','Will','Grace','Rose','Hope','May','Bill','Frank','Jack'].includes(a) && re.test(t) && a.length>2) { t = t.replace(re,b); } }
     if (hit && lastInitials) { lastInitials.nodeValue = lastInitials.nodeValue.replace(/[A-Z]{2}/, hit.split(' ').map(s=>s[0]).join('').slice(0,2)); lastInitials = null; }
     if (t !== n.nodeValue) n.nodeValue = t;
   }

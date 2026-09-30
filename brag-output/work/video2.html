@@ -1,0 +1,255 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts/local.css">
+<style>
+  html,body{margin:0;background:#060d2e;overflow:hidden}
+  #stage{position:relative;width:1920px;height:1080px;overflow:hidden;font-family:'Barlow',sans-serif;color:#fff;background:#060d2e}
+  .abs{position:absolute;left:0;top:0}
+  .scene{position:absolute;inset:0;display:none}
+  #glow{position:absolute;inset:-100px;background:radial-gradient(1100px 700px at 75% 30%,rgba(37,99,235,.30),transparent 60%),radial-gradient(900px 600px at 10% 95%,rgba(21,35,112,.9),transparent 70%)}
+  .layer{position:absolute;left:0;top:0;width:1920px;height:1080px;overflow:hidden}
+  .layer > img.full{position:absolute;left:0;top:0;width:1920px}
+  .cursor{position:absolute;left:0;top:0;width:44px;height:44px;z-index:50;filter:drop-shadow(0 6px 10px rgba(0,0,0,.5))}
+  .ripple{position:absolute;width:70px;height:70px;margin:-35px 0 0 -35px;border-radius:50%;border:3px solid rgba(59,130,246,.95);background:rgba(59,130,246,.18);z-index:49}
+  .pill{position:absolute;left:50%;top:968px;padding:18px 38px;border-radius:999px;background:rgba(6,13,46,.9);border:1px solid rgba(255,255,255,.16);font-weight:800;font-size:46px;white-space:nowrap;box-shadow:0 20px 60px rgba(0,0,0,.55);z-index:60}
+  .shade{position:absolute;left:0;right:0;bottom:0;height:300px;background:linear-gradient(transparent,rgba(6,13,46,.9));z-index:55}
+  .row{position:absolute;left:170px;white-space:nowrap}
+  .num{font-weight:900;font-size:150px;letter-spacing:-4px;color:#3b82f6;display:inline-block;min-width:300px}
+  .lab{font-weight:800;font-size:64px;letter-spacing:-1px;margin-left:18px}
+  .win{position:absolute;border-radius:18px;overflow:hidden;box-shadow:0 50px 120px rgba(0,0,0,.65),0 0 0 1px rgba(255,255,255,.12)}
+  .win img{display:block;width:100%;height:100%}
+  .chip{display:inline-block;padding:10px 22px;border-radius:999px;background:rgba(245,158,11,.14);border:1px solid rgba(245,158,11,.5);color:#fbbf24;font-weight:800;font-size:30px;letter-spacing:1px;text-transform:uppercase}
+  .phone{position:absolute;width:394px;height:828px;border-radius:58px;background:#0b1220;padding:12px;box-sizing:border-box;box-shadow:0 60px 120px rgba(0,0,0,.6),0 0 0 2px rgba(255,255,255,.12)}
+  .screen{position:relative;width:370px;height:804px;border-radius:46px;overflow:hidden;background:#e9eef8}
+  .screen img{position:absolute;left:0;top:0;width:370px;height:801px}
+</style></head>
+<body><div id="stage">
+  <div id="glow"></div>
+
+  <!-- DASHBOARD layer (used by hook preview + scene 2) -->
+  <div class="scene" id="sDash" style="perspective:2200px">
+    <div class="layer" id="dash">
+      <img class="full" src="shots/d_dash_bare.png">
+      <div id="cards"></div>
+      <img class="cursor" id="cur1" src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M3 2l7.5 19 2.6-7.4L21 11z' fill='white' stroke='%23060d2e' stroke-width='1.6' stroke-linejoin='round'/%3E%3C/svg%3E">
+      <div class="ripple" id="rip1"></div>
+    </div>
+    <div class="shade" id="shade2"></div>
+    <div class="pill" id="pill2">Every overdue item, <span style="color:#f59e0b">one dashboard.</span></div>
+  </div>
+
+  <!-- 1 HOOK -->
+  <div class="scene" id="s1">
+    <div class="row" id="r1" style="top:120px"><span class="num" id="n1">0</span><span class="lab">staff</span></div>
+    <div class="row" id="r2" style="top:300px"><span class="num" id="n2">0</span><span class="lab">COSHH products</span></div>
+    <div class="row" id="r3" style="top:480px"><span class="num" id="n3">0</span><span class="lab">assets</span></div>
+    <div class="row" id="r4" style="top:720px;font-weight:900;font-size:150px;letter-spacing:-4px">One screen<span style="color:#f59e0b">.</span></div>
+  </div>
+
+  <!-- 3 EQUIPMENT -->
+  <div class="scene" id="s3">
+    <div class="layer" id="eq"><img class="full" id="eqImg" src="shots/x_equipment_full.png"></div>
+    <div class="shade"></div>
+    <div class="pill" id="pill3">Click through to <span style="color:#f59e0b">exactly what’s overdue.</span></div>
+  </div>
+
+  <!-- 4 RISK ASSESSMENT -->
+  <div class="scene" id="s4">
+    <div class="layer" id="ra">
+      <img class="full" id="raA"><img class="full" id="raB">
+      <img class="cursor" id="cur2" src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M3 2l7.5 19 2.6-7.4L21 11z' fill='white' stroke='%23060d2e' stroke-width='1.6' stroke-linejoin='round'/%3E%3C/svg%3E">
+      <div class="ripple" id="rip2"></div>
+    </div>
+    <div class="shade" id="shade4"></div>
+    <div class="pill" id="pill4a">Build a <span style="color:#3b82f6">risk assessment.</span></div>
+    <div class="pill" id="pill4b">Score it <span style="color:#ef4444">before</span> and <span style="color:#10b981">after</span> controls.</div>
+  </div>
+
+  <!-- 5 MONTAGE -->
+  <div class="scene" id="s5">
+    <div class="abs" id="head5" style="width:1920px;top:58px;text-align:center">
+      <div style="font-weight:900;font-size:78px;letter-spacing:-2px">One hub for the <span style="color:#3b82f6">whole</span> H&amp;S job.</div>
+    </div>
+    <div id="wins"></div>
+    <div class="abs" id="chip5" style="width:1920px;top:990px;text-align:center"><span class="chip" id="chipTxt"></span></div>
+  </div>
+
+  <!-- 6 PHONE CAMEO -->
+  <div class="scene" id="s6">
+    <div class="abs" id="cap6" style="left:170px;top:380px;width:900px">
+      <div style="font-weight:700;font-size:40px;color:#f59e0b">And on the shop floor?</div>
+      <div style="font-weight:900;font-size:92px;line-height:1;letter-spacing:-2.5px;margin-top:14px">Staff report hazards<br>from their phones.</div>
+    </div>
+    <div class="phone" id="phone6" style="left:1260px;top:126px"><div class="screen"><img src="shots/m_done.png"></div></div>
+  </div>
+
+  <!-- 7 OUTRO -->
+  <div class="scene" id="s7">
+    <img class="abs" id="logo" src="shots/icon.png" style="left:880px;top:250px;width:160px;height:160px;border-radius:36px;box-shadow:0 30px 80px rgba(37,99,235,.45),0 0 0 2px rgba(255,255,255,.15)">
+    <div class="abs" id="word" style="width:1920px;top:450px;text-align:center;font-weight:900;font-size:120px;letter-spacing:10px">ZEUS <span style="color:#3b82f6">PROTECT</span></div>
+    <div class="abs" id="sub" style="width:1920px;top:600px;text-align:center;font-weight:700;font-size:44px;letter-spacing:6px;color:#94a3b8;text-transform:uppercase">Health &amp; Safety Hub</div>
+    <div class="abs" id="tag" style="width:1920px;top:730px;text-align:center;font-weight:800;font-size:64px;letter-spacing:-1px">Every H&amp;S job. <span style="color:#f59e0b">One screen.</span></div>
+  </div>
+</div>
+<script>
+const clamp=(x,a=0,b=1)=>Math.min(b,Math.max(a,x));
+const lerp=(a,b,t)=>a+(b-a)*t;
+const eOut=t=>1-Math.pow(1-clamp(t),3);
+const eIn=t=>Math.pow(clamp(t),3);
+const eIO=t=>{t=clamp(t);return t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2};
+const eBack=t=>{t=clamp(t);const c1=1.70158,c3=c1+1;return 1+c3*Math.pow(t-1,3)+c1*Math.pow(t-1,2)};
+const prog=(t,a,d)=>clamp((t-a)/d);
+const $=id=>document.getElementById(id);
+const set=(el,o)=>{if(typeof el==='string')el=$(el);for(const k in o){if(k==='tf')el.style.transform=o.tf;else if(k==='op')el.style.opacity=o.op;else el.style[k]=o[k];}};
+const K=1.2; // app css px → video px
+
+// cursor path helper: keys [[t,x,y],...] (css px), eased between
+function cursorAt(keys,t){
+  if(t<=keys[0][0]) return [keys[0][1],keys[0][2]];
+  for(let i=0;i<keys.length-1;i++){const a=keys[i],b=keys[i+1]; if(t<=b[0]){const p=eIO((t-a[0])/(b[0]-a[0]));return [lerp(a[1],b[1],p),lerp(a[2],b[2],p)];}}
+  const l=keys[keys.length-1]; return [l[1],l[2]];
+}
+function clickFx(cur,rip,x,y,clicks,t){
+  let s=1,rop=0,rs=1;
+  for(const c of clicks){const d=t-c; if(d>-0.08&&d<0.12) s=0.82; if(d>=0&&d<0.45){rop=0.9*(1-d/0.45);rs=lerp(0.5,1.7,eOut(d/0.45));}}
+  set(cur,{left:(x*K-6)+'px',top:(y*K-4)+'px',tf:`scale(${s})`,transformOrigin:'10% 10%'});
+  set(rip,{left:x*K+'px',top:y*K+'px',op:rop,tf:`scale(${rs})`});
+}
+
+// ── dashboard cards
+const CARDS=[[250,192],[528.5,192],[807,192],[1085.5,192],[250,313],[528.5,313],[807,313],[1085.5,313],[250,434],[528.5,434],[807,434]];
+$('cards').innerHTML=CARDS.map((c,i)=>`<img id="card${i}" class="abs" src="shots/card_${i}.png" style="left:${(c[0]-3)*K}px;top:${(c[1]-3)*K}px;width:${270.5*K}px;height:${113*K}px;transform-origin:50% 50%">`).join('');
+const EQ=4; // "Equipment overdue" card index
+const eqC=[250+132,313+53]; // its centre (css)
+
+// ── RA timeline
+const RA=[[10.0,'shots/x_ra_list.png','none'],[10.85,'shots/ra_t0.png','slide']];
+for(let i=1;i<=6;i++) RA.push([10.95+i*0.11,`shots/ra_t${i}.png`,'cut']);
+RA.push([11.95,'shots/ra_step2.png','slide']);
+for(let i=0;i<=4;i++) RA.push([12.15+i*0.12,`shots/ra_d${i}.png`,'cut']);
+RA.push([12.8,'shots/ra_d_full.png','cut'],[13.3,'shots/ra_m1.png','cut'],[13.85,'shots/ra_m2.png','cut']);
+const raCursor=[[10.0,900,520],[10.6,1260,141],[10.9,1260,141],[11.2,760,420],[12.8,700,500],[13.25,489,597],[13.45,489,597],[13.8,939,673],[15.2,960,700]];
+const raClicks=[10.68,13.3,13.85];
+
+// ── montage
+const MON=[['d_tab_fire_safety','Fire Safety'],['d_sub_coshh_register','COSHH Register'],['d_tab_inspections','Site Inspections'],['d_sub_training_library','Training Library'],['d_sub_machinery_competence','Machinery Competence'],['d_sub_reports','Compliance Reports']];
+const M0=15.0, MD=0.5, WW=1440, WH=810;
+$('wins').innerHTML=MON.map((m,i)=>`<div class="win" id="win${i}" style="left:${(1920-WW)/2}px;top:158px;width:${WW}px;height:${WH}px;display:none"><img src="shots/${m[0]}.png"></div>`).join('');
+
+window.render=function(t){
+  const vis=(id,a,b)=>{$(id).style.display=(t>=a&&t<b)?'block':'none'};
+  vis('s1',0,3.2); vis('sDash',0,7.0); vis('s3',6.6,10.35); vis('s4',9.9,15.2); vis('s5',14.9,18.2); vis('s6',17.9,20.7); vis('s7',20.4,99);
+  set('glow',{tf:`translate(${Math.sin(t*0.35)*40}px,${Math.cos(t*0.3)*25}px)`});
+
+  // ── 1 HOOK: counters
+  {
+    const out=eIn(prog(t,2.45,0.35));
+    [['r1','n1',104,0.1],['r2','n2',117,0.35],['r3','n3',15,0.6]].forEach(([r,n,v,st])=>{
+      const p=eOut(prog(t,st,0.45)); set(r,{op:p*(1-out),tf:`translateX(${lerp(-60,0,p)-out*260}px)`});
+      $(n).textContent=Math.round(v*eOut(prog(t,st,0.7)));
+    });
+    const p4=eOut(prog(t,1.05,0.45)); set('r4',{op:p4*(1-out),tf:`translateY(${lerp(50,0,p4)}px) translateX(${-out*260}px)`,filter:`blur(${(1-p4)*8}px)`});
+  }
+
+  // ── DASH layer: tilted preview in hook → flat full frame
+  {
+    const f=eIO(prog(t,2.62,0.6)); // flatten
+    const pre=eOut(prog(t,0.2,0.9));
+    const zoomOut=eIn(prog(t,6.45,0.4));
+    const rx=lerp(-24,0,f), sc=lerp(0.52,1,f), tx=lerp(760+lerp(200,0,pre),0,f), ty=lerp(40,0,f);
+    const zo=lerp(1,2.4,zoomOut);
+    set('dash',{tf:`translate(${tx}px,${ty}px) rotateY(${rx}deg) scale(${sc*zo})`,transformOrigin:zoomOut>0?`${eqC[0]*K}px ${eqC[1]*K}px`:'50% 50%',op:lerp(0.55,1,f)*pre*(1-zoomOut),
+      borderRadius:lerp(22,0,f)+'px',boxShadow:`0 0 0 ${lerp(1,0,f)}px rgba(255,255,255,.2), 0 60px 140px rgba(0,0,0,${lerp(.6,0,f)})`});
+    // card glint sweep + hover on equipment card
+    for(let i=0;i<11;i++){
+      const g=prog(t,3.25+i*0.06,0.35); const pulse=Math.sin(Math.PI*g);
+      const hov=i===EQ?eOut(prog(t,5.75,0.25))*(1-prog(t,6.45,0.1)):0;
+      set('card'+i,{tf:`scale(${1+0.035*pulse+0.05*hov})`,filter:`brightness(${1+0.35*pulse+0.25*hov})`,boxShadow:hov?`0 0 0 ${3*hov}px rgba(245,158,11,.9), 0 20px 50px rgba(0,0,0,.5)`:'none',borderRadius:'14px',zIndex:hov?5:1});
+    }
+    const [cx,cy]=cursorAt([[4.3,1350,900],[5.8,eqC[0],eqC[1]]],t);
+    set('cur1',{op:clamp((t-4.3)/0.2)});
+    clickFx('cur1','rip1',cx,cy,[6.25],t);
+    const pp=eOut(prog(t,3.7,0.45)), po=eIn(prog(t,6.1,0.3));
+    set('pill2',{op:pp*(1-po),tf:`translateX(-50%) translateY(${lerp(40,0,pp)}px)`});
+    set('shade2',{op:f*(1-zoomOut)});
+  }
+
+  // ── 3 EQUIPMENT
+  {
+    const inP=eOut(prog(t,6.6,0.5)), outP=eIn(prog(t,9.9,0.4));
+    const sc=lerp(0.86,1,inP);
+    const scroll=lerp(0,-640,eIO(prog(t,7.6,2.0)));
+    set('eq',{op:inP*(1-outP),tf:`scale(${sc}) translateY(${-outP*80}px)`});
+    set('eqImg',{top:scroll+'px'});
+    const pp=eOut(prog(t,7.15,0.45)), po=eIn(prog(t,9.75,0.3));
+    set('pill3',{op:pp*(1-po),tf:`translateX(-50%) translateY(${lerp(40,0,pp)}px)`});
+  }
+
+  // ── 4 RISK ASSESSMENT
+  {
+    const inP=eOut(prog(t,10.0,0.45)), outP=eIn(prog(t,14.8,0.35));
+    let k=0; for(let i=0;i<RA.length;i++) if(t>=RA[i][0]) k=i;
+    const [ts,src,kind]=RA[k]; const prev=RA[Math.max(0,k-1)][1];
+    const A=$('raA'),B=$('raB');
+    if(A.getAttribute('src')!==prev) A.src=prev;
+    if(B.getAttribute('src')!==src) B.src=src;
+    if(kind==='slide'){const p=eIO(prog(t,ts,0.3));A.style.opacity=1-p;A.style.transform=`translateX(${-p*160}px)`;B.style.opacity=p;B.style.transform=`translateX(${(1-p)*220}px)`;}
+    else {A.style.opacity=0;B.style.opacity=1;B.style.transform='none';}
+    const zoom=eIO(prog(t,12.85,0.6));
+    set('ra',{op:inP*(1-outP),tf:`scale(${lerp(1,1.32,zoom)*lerp(0.92,1,inP)})`,transformOrigin:'690px 790px'});
+    const [cx,cy]=cursorAt(raCursor,t);
+    set('cur2',{op:clamp((t-10.05)/0.2)*(1-clamp((t-11.15)/0.15))+clamp((t-12.75)/0.2)});
+    clickFx('cur2','rip2',cx,cy,raClicks,t);
+    const a=eOut(prog(t,10.2,0.4)), ao=eIn(prog(t,11.75,0.25));
+    set('pill4a',{op:a*(1-ao),tf:`translateX(-50%) translateY(${lerp(40,0,a)}px)`});
+    const b=eOut(prog(t,12.25,0.4)), bo=eIn(prog(t,14.75,0.3));
+    set('pill4b',{op:b*(1-bo),tf:`translateX(-50%) translateY(${lerp(40,0,b)}px)`});
+    set('shade4',{op:inP*(1-outP)});
+  }
+
+  // ── 5 MONTAGE
+  {
+    const hin=eOut(prog(t,15.05,0.45)), hout=eIn(prog(t,17.8,0.3));
+    set('head5',{op:hin*(1-hout),tf:`translateY(${lerp(-30,0,hin)}px)`});
+    set('chip5',{op:hin*(1-hout)});
+    const idx=clamp(Math.floor((t-M0-0.1)/MD),0,MON.length-1);
+    $('chipTxt').textContent=MON[idx][1];
+    MON.forEach((m,i)=>{
+      const st=M0+i*MD, p=eOut(prog(t,st,0.3)), q=eIO(prog(t,st+MD,0.3));
+      const w=$('win'+i), last=i===MON.length-1;
+      if(t<st-0.01||(t>st+MD+0.3&&!last)){w.style.display='none';return;}
+      w.style.display='block';
+      const fin=last?eIn(prog(t,17.8,0.3)):0;
+      w.style.transform=`translateX(${lerp(620,0,p)-(last?0:q*520)}px) scale(${lerp(0.9,1,p)*(last?1:lerp(1,0.9,q))*lerp(1,0.94,fin)}) rotate(${lerp(2.5,0,p)-(last?0:q*2)}deg)`;
+      w.style.opacity=Math.min(clamp(p*1.8),last?1:1-q)*(1-fin);
+      w.style.zIndex=10+i;
+    });
+  }
+
+  // ── 6 PHONE CAMEO
+  {
+    const c=eOut(prog(t,18.05,0.45)), co=eIn(prog(t,20.2,0.3));
+    set('cap6',{op:c*(1-co),tf:`translateY(${lerp(40,0,c)}px)`});
+    const p=eOut(prog(t,18.0,0.6)), po=eIn(prog(t,20.2,0.3));
+    set('phone6',{op:1-po,tf:`translateY(${lerp(1100,0,p)+po*80}px) rotate(${lerp(5,0,p)}deg) scale(1.1)`});
+  }
+
+  // ── 7 OUTRO
+  {
+    const l=prog(t,20.55,0.6);
+    set('logo',{op:clamp(l*2.5),tf:`scale(${lerp(0.3,1,eBack(l))}) rotate(${lerp(-25,0,eOut(l))}deg)`});
+    const w=eOut(prog(t,20.8,0.55)); set('word',{op:w,tf:`translateY(${lerp(40,0,w)}px)`,letterSpacing:lerp(30,10,w)+'px'});
+    const s=eOut(prog(t,21.05,0.5)); set('sub',{op:s,tf:`translateY(${lerp(30,0,s)}px)`});
+    const g=eOut(prog(t,21.35,0.5)); set('tag',{op:g,tf:`translateY(${lerp(30,0,g)}px) scale(${lerp(0.96,1,g)})`});
+  }
+};
+window.DURATION=23.5;
+window.ready=(async()=>{
+  const srcs=[...new Set(RA.map(r=>r[1]))];
+  await Promise.all(srcs.map(s=>{const im=new Image();im.src=s;return im.decode().catch(()=>{})}));
+  await Promise.all([...document.images].map(i=>i.decode().catch(()=>{})));
+  for(const w of ['900 100px Barlow','800 40px Barlow','700 40px Barlow']) await document.fonts.load(w);
+  return true;
+})();
+</script>
+</body></html>

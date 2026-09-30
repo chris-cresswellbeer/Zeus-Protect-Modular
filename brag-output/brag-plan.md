@@ -24,3 +24,19 @@
 
 ## Sound
 A minor, 120 BPM: a soft pad and a pluck arpeggio (Am–F–C–G), with kick and bass coming in at the phone scene. Taps are soft pitched plucks in key, typing ticks sit low in the mix, whooshes are filtered noise on the cuts, and a bell chime in key plays on "Sent" and on the logo.
+
+---
+
+# Take 2: desktop cut (`brag-desktop.mp4`, 23.5s)
+
+The admin portal carries this cut, shown through cursor-driven click-throughs of real screens. The phone gets a short cameo.
+
+| # | Time | Scene |
+|---|---|---|
+| 1 Hook | 0.0–3.0 | Real counts from the app count up: **104** staff, **117** COSHH products, **15** assets, then "One screen." A tilted dashboard floats on the right. |
+| 2 Dashboard | 3.0–7.0 | The tilted dashboard flattens to full frame and a glint sweeps across the stat cards. The cursor goes to *Equipment overdue 15* and clicks. "Every overdue item, one dashboard." |
+| 3 Equipment | 7.0–10.0 | Zoom through the card into the Equipment Register, then scroll down the overdue service list. "Click through to exactly what's overdue." |
+| 4 Risk assessment | 10.0–15.0 | Click *+ New Risk Assessment*, type "Forklift Operations — Loading Bay", go to Hazards & Controls, and type "Pedestrian struck by reversing forklift". Zoom in on the matrices and click 16 (Very High) before controls, then 4 (Low) after. "Score it before and after controls." |
+| 5 Montage | 15.0–18.0 | Six cuts on the beat: Fire Safety, COSHH, Site Inspections, Training Library, Machinery Competence, Compliance Reports. |
+| 6 Cameo | 18.0–20.5 | "And on the shop floor? Staff report hazards from their phones." The phone shows the ✓ Sent screen. |
+| 7 Outro | 20.5–23.5 | Z icon, ZEUS PROTECT, Health & Safety Hub, "Every H&S job. One screen." |

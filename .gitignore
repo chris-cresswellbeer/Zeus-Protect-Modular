@@ -6,7 +6,7 @@ dist
 .DS_Store
 
 # /brag-slim intermediates (rendered frames, raw app captures, previews)
-brag-output/work/frames/
+brag-output/work/frames*/
 brag-output/work/shots/
 brag-output/work/stills/
 brag-output/work/fonts/

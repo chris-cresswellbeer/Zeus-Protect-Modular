@@ -190,8 +190,10 @@ function MobileApp({
   // Quick hazard reports this user still has to complete in the full (desktop) form.
   const quickToComplete = myIncompleteQuickReports(incidents, user.id);
 
+  // Recorded completions (training done before the portal, entered by an admin)
+  // have no portal certificate or score: they're listed in history only.
   const certificates = myMods
-    .filter((m) => myComps[m.id])
+    .filter((m) => myComps[m.id] && !myComps[m.id].recorded)
     .map((m) => {
       const c = myComps[m.id];
       const ex = m.renewalMonths ? getExpiryStatus(c.date, m.renewalMonths) : null;
@@ -211,15 +213,23 @@ function MobileApp({
   const openActions = myActions.filter((a) => a.status !== "complete" && a.status !== "closed");
   const closedActions = myActions.filter((a) => a.status === "complete" || a.status === "closed");
 
-  const historyEntries = certificates.map((c) => ({
-    date: (myComps[c.moduleId] || {}).date,
-    title: c.title,
-    lapsed: c.lapsed,
-    outcome: c.lapsed ? `Passed · ${c.score}% · now expired` : `Passed · ${c.score}%`,
-  })).sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  const recordedDone = myMods.filter((m) => myComps[m.id] && myComps[m.id].recorded).map((m) => {
+    const c = myComps[m.id];
+    const ex = m.renewalMonths ? getExpiryStatus(c.date, m.renewalMonths) : null;
+    return { date: c.date, title: m.title, lapsed: ex ? ex.status === "expired" : false };
+  });
+  const historyEntries = [
+    ...certificates.map((c) => ({
+      date: (myComps[c.moduleId] || {}).date,
+      title: c.title,
+      lapsed: c.lapsed,
+      outcome: c.lapsed ? `Passed · ${c.score}% · now expired` : `Passed · ${c.score}%`,
+    })),
+    ...recordedDone.map((r) => ({ ...r, outcome: r.lapsed ? "Completed before the portal · now expired" : "Completed before the portal" })),
+  ].sort((a, b) => String(b.date).localeCompare(String(a.date)));
 
   const historyStats = {
-    passed: certificates.length,
+    passed: certificates.length + recordedDone.length,
     average: certificates.length
       ? Math.round(certificates.reduce((s, c) => s + (c.score || 0), 0) / certificates.length)
       : 0,

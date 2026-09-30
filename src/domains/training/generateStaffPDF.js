@@ -1,3 +1,4 @@
+import { isPassed, scoreText } from "./completion";
 import { getExpiryStatus } from "../../lib/dates";
 import { EXT_CERT_TYPES } from "../../data/seedExtCerts";
 import { MACHINERY_TYPES } from "../../data/seedMachinery";
@@ -14,7 +15,7 @@ import { E } from "../../lib/emoji";
  * `Z` is accepted but unused (the report is always light/print-styled).
  *
  * NOTES
- *  • Pass mark here is hard-coded as score >= 70 — keep in step with App.jsx.
+ *  • Pass mark: isPassed() in completion.js (a recorded completion always counts).
  *  • Values are inserted into the HTML without escaping. Names/titles containing
  *    "<" or "&" could break the layout; escape them if free-text fields are added.
  *  • If a pop-up blocker stops window.open, `win` is null and this throws —
@@ -37,9 +38,9 @@ function generateStaffPDF(u, allModules, assigns, comps, docs, docAssignments, d
     const m = allModules.find(x=>x.id===mid);
     const c = userComps[mid];
     if (!m) return "";
-    const passed = c && c.score>=70;
-    const statusTxt = !c?"Not started":passed?"Passed":"Failed";
-    const score = c?`${c.score}%`:"—";
+    const passed = isPassed(c);
+    const statusTxt = !c?"Not started":c.recorded?"Completed (recorded)":passed?"Passed":"Failed";
+    const score = c?scoreText(c):"—";
     const date = c?c.date:"—";
     const certId = c?.certId||"—";
     let expiry = "—";

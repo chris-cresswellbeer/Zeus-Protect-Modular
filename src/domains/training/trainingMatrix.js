@@ -41,7 +41,7 @@ function cellFor(user, mod, assigns, comps) {
   return {
     status: ex ? (ex.status === "expired" ? "expired" : ex.status === "expiring" ? "expiring" : "valid") : "valid",
     assigned, completed: comp.date || "", expires: ex ? ex.expiryDate : "", daysLeft: ex ? ex.daysLeft : null,
-    score: comp.score, certId: comp.certId || "", version: comp.moduleVersion || null,
+    score: comp.recorded ? "Recorded" : comp.score, recorded: !!comp.recorded, certId: comp.certId || "", version: comp.moduleVersion || null,
   };
 }
 

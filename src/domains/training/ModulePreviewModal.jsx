@@ -3,6 +3,7 @@ import { Pill } from "../../shared/primitives";
 import { E } from "../../lib/emoji";
 import { sanitizeHtml } from "../../lib/sanitizeHtml";
 import { isHtmlContent, ensureRteStyles } from "./slideTextUtils";
+import { isPassed, scoreText, recordedText } from "./completion";
 
 /**
  * ModulePreviewModal — admin read-only preview of a training module
@@ -117,8 +118,8 @@ function ModulePreviewModal({ m, staff, assigns, comps, compHistory = [], module
             const hist = compHistory.filter(h=>String(h.module_id)===String(m.id));
             const nameOf = uid => (staff.find(u=>String(u.id)===String(uid))||{}).name || `User ${uid}`;
             const rows = [];
-            staff.forEach(u=>{ const c=(comps[u.id]||{})[m.id]; if(c) rows.push({uid:u.id,name:u.name,ver:c.moduleVersion||1,date:c.date,score:c.score,current:true}); });
-            hist.forEach(h=>{ if(!rows.some(r=>String(r.uid)===String(h.user_id)&&r.date===h.date&&r.ver===(h.module_version||1))) rows.push({uid:h.user_id,name:nameOf(h.user_id),ver:h.module_version||1,date:h.date,score:h.score,current:false}); });
+            staff.forEach(u=>{ const c=(comps[u.id]||{})[m.id]; if(c) rows.push({uid:u.id,name:u.name,ver:c.moduleVersion||1,date:c.date,score:c.score,recorded:c.recorded,current:true}); });
+            hist.forEach(h=>{ if(!rows.some(r=>String(r.uid)===String(h.user_id)&&r.date===h.date&&r.ver===(h.module_version||1))) rows.push({uid:h.user_id,name:nameOf(h.user_id),ver:h.module_version||1,date:h.date,score:h.score,recorded:h.recorded,current:false}); });
             rows.sort((a,b)=>String(b.date).localeCompare(String(a.date)));
             const cell = {padding:"7px 8px",borderBottom:`1px solid ${T.border}`,fontSize:12};
             return (
@@ -140,7 +141,7 @@ function ModulePreviewModal({ m, staff, assigns, comps, compHistory = [], module
                         <td style={{...cell,color:T.white,fontWeight:600}}>{r.name}</td>
                         <td style={{...cell,color:r.ver===curVer?T.green:T.gold,fontWeight:700}}>v{r.ver}</td>
                         <td style={{...cell,color:T.muted}}>{r.date}</td>
-                        <td style={{...cell,color:r.score>=70?T.green:T.amber,fontWeight:700}}>{r.score}%</td>
+                        <td title={r.recorded?recordedText(r):undefined} style={{...cell,color:isPassed(r)?T.green:T.amber,fontWeight:700}}>{scoreText(r)}</td>
                         <td style={{...cell,color:T.muted}}>{r.current?"Current":"Earlier"}</td>
                       </tr>))}</tbody>
                   </table>

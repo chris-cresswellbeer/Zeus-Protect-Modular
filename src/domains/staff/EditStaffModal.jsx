@@ -13,7 +13,10 @@ import { hashPassword } from "../../lib/supabase";
  * NB: renaming someone does not update investigation actions assigned to their old
  * name (actions store the owner's NAME).
  */
-function EditStaffModal({ staffUser, allUsers, setAllUsers, passwords, onSetPassword, onClose, onSaveProfile, Z, font }) {
+function EditStaffModal({ staffUser, allUsers, setAllUsers, passwords, onSetPassword, onSetTempPassword, onClose, onSaveProfile, Z, font }) {
+  // onSetTempPassword is given in Supabase sign-in mode (lib/auth.js): the new password is
+  // temporary, and the person must choose their own at next sign-in. Minimum 8 characters.
+  const minPw = onSetTempPassword ? 8 : 6;
   const isMobile = useWindowWidth() <= 1024;
   const [name,              setName]             = useState(staffUser.name);
   const [email,             setEmail]            = useState(staffUser.email);
@@ -33,11 +36,13 @@ function EditStaffModal({ staffUser, allUsers, setAllUsers, passwords, onSetPass
     if (!name.trim()) { setErr("Name is required."); return; }
     if (!email.trim() || !email.includes("@")) { setErr("Valid email is required."); return; }
     if (email !== staffUser.email && allUsers.find(u=>u.email===email.trim())) { setErr("That email is already in use."); return; }
-    if (resetPw && newPw.length < 6) { setErr("New password must be at least 6 characters."); return; }
+    if (resetPw && newPw.length < minPw) { setErr(`New password must be at least ${minPw} characters.`); return; }
     const updated = {...staffUser, name:name.trim(), email:email.trim(), jobTitle:jobTitle.trim(), manager:manager.trim(), role, isWarehouseWorker:isWarehouse, department:department.trim(), status};
     setAllUsers(p=>p.map(u=>u.id===staffUser.id ? updated : u));
     if (onSaveProfile) onSaveProfile(updated);
-    if (resetPw && newPw) {
+    if (resetPw && newPw && onSetTempPassword) {
+      onSetTempPassword(updated, newPw);
+    } else if (resetPw && newPw) {
       hashPassword(newPw).then(hashed => {
         // Saves this staff member's password only (App.jsx savePasswordFor).
         onSetPassword(staffUser.id, hashed);
@@ -137,7 +142,7 @@ function EditStaffModal({ staffUser, allUsers, setAllUsers, passwords, onSetPass
           </div>
           {resetPw && (
             <div>
-              <label style={labelStyle}>NEW PASSWORD (min. 6 characters)</label>
+              <label style={labelStyle}>{onSetTempPassword ? "TEMPORARY PASSWORD (min. 8 characters)" : "NEW PASSWORD (min. 6 characters)"}</label>
               <div style={{position:"relative"}}>
                 <input type={showPw?"text":"password"} value={newPw}
                   onChange={e=>{setNewPw(e.target.value);setErr("");setSaved(false);}}
@@ -148,6 +153,7 @@ function EditStaffModal({ staffUser, allUsers, setAllUsers, passwords, onSetPass
                   {showPw?"🙈":"👁"}
                 </button>
               </div>
+              {onSetTempPassword && <div style={{fontSize:11,color:Z.muted,marginTop:6}}>They'll be asked to choose their own password the next time they sign in. If they don't have a sign-in account yet, one is created.</div>}
             </div>
           )}
         </div>

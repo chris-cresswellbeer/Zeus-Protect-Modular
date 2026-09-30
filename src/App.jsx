@@ -118,6 +118,10 @@ import { getExpiryStatus, EXPIRY_WARNING_DAYS } from "./lib/dates";
 import { EmojiCtx, E, syncEmojiMode } from "./lib/emoji";
 import { startPlainSymbols, stopPlainSymbols } from "./lib/plainSymbols";
 import { sb, hashPassword, DEFAULT_HASH, dbWrite } from "./lib/supabase";
+import { AUTH_MODE, signIn, signOut, meta as authMeta, adminCall, makeTempPassword, checkPassword as authCheckPassword, changeOwnPassword } from "./lib/auth";
+import { ForcePasswordChange } from "./shared/ForcePasswordChange";
+import { TempPasswordsModal } from "./shared/TempPasswordsModal";
+import { SignInAccountsPanel } from "./domains/staff/SignInAccountsPanel";
 import { uploadPhotos, PHOTO_BUCKET } from "./lib/photos";
 import { HelpTip } from "./shared/HelpTip";
 import { ZeusLogo, ZeusProtectLogo, ZEUS_LOGO_LIGHT_SRC } from "./shared/Logo";
@@ -365,6 +369,10 @@ export default function App() {
   // protection this would need to be enforced server-side.
   const [loginAttempts, setLoginAttempts] = useState({}); // { email: { count, lockedUntil } }
   const inactivityTimer = React.useRef(null);
+  // Supabase sign-in mode (lib/auth.js): true while the person must replace a temporary password.
+  const [mustChangePw, setMustChangePw] = useState(false);
+  // Temporary passwords to show the admin once: { title, items:[{name,login,password}], failures:[{name,error}] }
+  const [tempPwNotice, setTempPwNotice] = useState(null);
   const INACTIVITY_MINUTES = 30;
   const MAX_LOGIN_ATTEMPTS = 5;
   const LOCKOUT_MINUTES = 15;
@@ -396,7 +404,8 @@ export default function App() {
     const reset = () => {
       clearTimeout(inactivityTimer.current);
       inactivityTimer.current = setTimeout(() => {
-        setUser(null); setView("login"); setMod(null);
+        if (AUTH_MODE === "supabase") signOut();
+        setUser(null); setView("login"); setMod(null); setMustChangePw(false);
         alert("You have been logged out due to 30 minutes of inactivity.");
       }, INACTIVITY_MINUTES * 60 * 1000);
     };
@@ -1377,11 +1386,28 @@ export default function App() {
 
   // users table: { id: TEXT, data: JSON user object }. `user` here shadows the logged-in user — it's the record being saved.
   async function dbSaveUser(user) {
-    await dbWrite(sb.from("users").upsert({ id: String(user.id), data: user }, { onConflict: "id" }), "user", { alertOnError: true });
+    const ok = await dbWrite(sb.from("users").upsert({ id: String(user.id), data: user }, { onConflict: "id" }), "user", { alertOnError: true });
+    // Supabase sign-in: copy login, role and leaver status onto their sign-in account.
+    if (ok && AUTH_MODE === "supabase") {
+      const r = await adminCall("sync", { userId: String(user.id) });
+      if (!r.ok) alert(`The staff record was saved, but their sign-in account wasn't updated:\n\n${r.error}`);
+    }
+    return ok;
+  }
+
+  // Supabase sign-in: set a temporary password (they choose their own at next sign-in).
+  // Creates the sign-in account if they don't have one yet.
+  async function setTempPasswordFor(u, password) {
+    const r = await adminCall("setPassword", { userId: String(u.id), password, temporary: true });
+    return r.ok ? { ok: true } : { ok: false, error: r.error };
   }
 
   async function dbDeleteUser(userId) {
     await dbWrite(sb.from("users").delete().eq("id", String(userId)), "user delete", { alertOnError: true });
+    if (AUTH_MODE === "supabase") {
+      const r = await adminCall("remove", { userId: String(userId) });
+      if (!r.ok) alert(`The staff record was removed, but their sign-in account wasn't:\n\n${r.error}`);
+    }
   }
 
   // ⚠ Writes the WHOLE user object into user_profiles.data — this overwrites any saved
@@ -1675,12 +1701,39 @@ export default function App() {
    */
   async function login() {
     const emailKey = email.toLowerCase().trim();
+    // Counts a failed attempt for this email; locks it after MAX_LOGIN_ATTEMPTS.
+    const registerFailure = () => setLoginAttempts(p => {
+      const cur = p[emailKey]||{count:0};
+      const count = cur.count + 1;
+      const lockedUntil = count >= MAX_LOGIN_ATTEMPTS ? Date.now() + LOCKOUT_MINUTES * 60000 : null;
+      setErr(count >= MAX_LOGIN_ATTEMPTS
+        ? `Too many failed attempts. Account locked for ${LOCKOUT_MINUTES} minutes.`
+        : `Invalid email or password. ${MAX_LOGIN_ATTEMPTS - count} attempt${MAX_LOGIN_ATTEMPTS - count!==1?"s":""} remaining.`);
+      return {...p, [emailKey]: {count, lockedUntil}};
+    });
 
     // Check lockout
     const attempt = loginAttempts[emailKey];
     if (attempt?.lockedUntil && Date.now() < attempt.lockedUntil) {
       const minsLeft = Math.ceil((attempt.lockedUntil - Date.now()) / 60000);
       setErr(`Too many failed attempts. Try again in ${minsLeft} minute${minsLeft!==1?"s":""}.`);
+      return;
+    }
+
+    // ── Supabase sign-in (lib/auth.js): Supabase checks the password and returns a
+    //    token; the account's app_metadata.zp_id links it to the staff record.
+    if (AUTH_MODE === "supabase") {
+      const r = await signIn(emailKey, pass);
+      if (!r.ok) {
+        if (r.error === "Invalid email or password.") registerFailure(); else setErr(r.error);
+        return;
+      }
+      const m = authMeta(r.user);
+      const su = allUsers.find(x => String(x.id) === String(m.zp_id));
+      if (!su) { await signOut(); setErr("Your sign-in isn't linked to a staff record. Please contact your administrator."); return; }
+      if ((su.status||"active") === "leaver") { await signOut(); setErr("This account is no longer active. Please contact your administrator."); return; }
+      setMustChangePw(!!m.must_change_password);
+      finishLogin(su);
       return;
     }
 
@@ -1730,8 +1783,14 @@ export default function App() {
       return;
     }
 
+    finishLogin(u);
+  }
+
+  // Shared end of a successful sign-in (both modes).
+  function finishLogin(u) {
+    const emailKey = String(u.email||"").toLowerCase().trim();
     // Success — clear attempts
-    setLoginAttempts(p => { const n={...p}; delete n[emailKey]; return n; });
+    setLoginAttempts(p => { const n={...p}; delete n[emailKey]; delete n[email.toLowerCase().trim()]; return n; });
     const ts = new Date().toISOString().slice(0,16).replace("T"," ");
     setLastLoginMap(p=>({...p, [u.id]: ts}));
     dbRecordLogin(u.id, ts);
@@ -1746,8 +1805,8 @@ export default function App() {
     setUser(u); setView(u.role==="admin"?"admin":"staff"); setErr("");
   }
 
-  // Clears the session in memory only (there is no server session to end).
-  function logout() { setUser(null); setView("login"); setMod(null); }
+  // Clears the session (and, in Supabase sign-in mode, ends the server session too).
+  function logout() { if (AUTH_MODE === "supabase") signOut(); setMustChangePw(false); setUser(null); setView("login"); setMod(null); }
 
   // Opens a module in the player and resets all per-attempt state.
   function startMod(m) { setMod(m); setStep(0); setQans({}); setQsub(false); setShowCelebration(false); setHotspotComplete({}); }
@@ -1851,6 +1910,11 @@ export default function App() {
   // Sits above every desktop view so a phone never falls through to the wide
   // layout. MobileApp is a view over the state below — it owns no domain data
   // and never touches Supabase directly, only the handlers passed in as `db`.
+  // Temporary password → must choose their own before using the portal (desktop and phone).
+  if (user && mustChangePw) return (
+    <ForcePasswordChange user={user} onDone={()=>setMustChangePw(false)} onSignOut={logout} Z={T} font={font}/>
+  );
+
   if (isPhone && user && !forceDesktop) {
     return (
       <MobileApp
@@ -2940,7 +3004,7 @@ export default function App() {
             </div>
           )}
 
-          {stab==="account" && <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}><LazyAccountTab user={user} passwords={passwords} onSetPassword={savePasswordFor} darkMode={darkMode} setDarkMode={setDarkMode} theme={theme} setTheme={setTheme} onSaveTheme={k=>dbSaveTheme(user.id,k)} emojiMode={emojiMode} onSaveEmojiMode={v=>{setEmojiMode(v);dbSaveEmojiMode(user.id,v);}} Z={T} font={font}/></React.Suspense>}
+          {stab==="account" && <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}><LazyAccountTab user={user} passwords={passwords} onSetPassword={savePasswordFor} authMode={AUTH_MODE} onChangeOwnPassword={async (oldPw,newPw)=>{ if (!(await authCheckPassword(user.email, oldPw))) return { ok:false, error:"Current password is incorrect." }; return changeOwnPassword(newPw); }} darkMode={darkMode} setDarkMode={setDarkMode} theme={theme} setTheme={setTheme} onSaveTheme={k=>dbSaveTheme(user.id,k)} emojiMode={emojiMode} onSaveEmojiMode={v=>{setEmojiMode(v);dbSaveEmojiMode(user.id,v);}} Z={T} font={font}/></React.Suspense>}
 
           {/* Floating hazard report button — mobile only */}
           {isMobile && stab!=="dashboard" && (
@@ -3231,15 +3295,27 @@ export default function App() {
     };
 
     // Manual "Add staff" form. id = Date.now() (a large number; the users table stores it as TEXT).
-    // New users log in with the default password (pass123) until changed.
+    // New users log in with the default password (pass123) until changed — or, in
+    // Supabase sign-in mode, with a temporary password shown once to the admin.
     const addStaff = () => {
       if (!newName.trim()) { setAddErr("Name is required."); return; }
       if (!newEmail.trim() || !newEmail.includes("@")) { setAddErr("Valid email is required."); return; }
       if (allUsers.find(u=>u.email===newEmail.trim())) { setAddErr("Email already exists."); return; }
       const id = Date.now();
-      const newUser = { id, name:newName.trim(), email:newEmail.trim(), role:newRole, jobTitle:newJobTitle.trim(), manager:newManager.trim(), isWarehouseWorker:newIsWarehouse };
+      const newUser = { id, name:newName.trim(), email:newEmail.trim(), role:newRole, jobTitle:newJobTitle.trim(), manager:newManager.trim(), isWarehouseWorker:newIsWarehouse, department:newDepartment.trim(), status:newStatus };
       setAllUsers(p=>[...p, newUser]);
-      dbSaveUser(newUser);
+      if (AUTH_MODE === "supabase") {
+        // Save the record, then create their sign-in account with a temporary password.
+        (async () => {
+          await dbSaveUser(newUser);
+          if ((newUser.status||"active") === "leaver") return;
+          const pw = makeTempPassword();
+          const r = await setTempPasswordFor(newUser, pw);
+          setTempPwNotice(r.ok
+            ? { title: `Sign-in account created for ${newUser.name}`, items: [{ name: newUser.name, login: newUser.email.toLowerCase(), password: pw }], failures: [] }
+            : { title: "Sign-in account not created", items: [], failures: [{ name: newUser.name, error: r.error }] });
+        })();
+      } else dbSaveUser(newUser);
       dbSaveUserProfile(newUser);
       setNewName(""); setNewEmail(""); setNewJobTitle(""); setNewManager(""); setNewRole("staff"); setNewIsWarehouse(false); setNewDepartment(""); setNewStatus("active"); setAddErr(""); setShowAddStaff(false);
     };
@@ -3277,10 +3353,15 @@ export default function App() {
             staffUser={editingStaff}
             allUsers={allUsers} setAllUsers={setAllUsers} onSaveProfile={u=>{dbSaveUser(u);dbSaveUserProfile(u);}}
             passwords={passwords} onSetPassword={savePasswordFor}
+            onSetTempPassword={AUTH_MODE==="supabase" ? async (su, pw) => {
+              const r = await setTempPasswordFor(su, pw);
+              if (!r.ok) setTempPwNotice({ title: "Password not changed", items: [], failures: [{ name: su.name, error: r.error }] });
+            } : null}
             onClose={()=>setEditingStaff(null)}
             Z={T} font={font}
           />
         )}
+        {tempPwNotice && <TempPasswordsModal {...tempPwNotice} onClose={()=>setTempPwNotice(null)} Z={T} font={font}/>}
         {/* Nav */}
         <div style={{background:`linear-gradient(90deg,${T.navyDk},${T.navyMd})`,borderBottom:`1px solid ${T.border}`,padding:isMobile?"0 12px":"0 28px",display:"flex",alignItems:"center",position:"relative"}}>
           <div style={{marginRight:isMobile?8:28,padding:"12px 0",flexShrink:0}}><ZeusLogo darkMode={darkMode}/></div>
@@ -3826,6 +3907,9 @@ export default function App() {
                 );
               })()}
 
+              {/* Sign-in accounts (Supabase sign-in mode only) */}
+              {AUTH_MODE==="supabase" && <SignInAccountsPanel users={allUsers} onShowPasswords={setTempPwNotice} Z={T} font={font}/>}
+
               {/* Bulk Password Reset Panel */}
               {showBulkReset && (
                 <div style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:16,padding:24,marginBottom:20,border:"1px solid rgba(239,68,68,0.3)"}}>
@@ -3871,17 +3955,28 @@ export default function App() {
                         <label style={{color:T.muted,fontSize:11,fontWeight:700,letterSpacing:.5,display:"block",marginBottom:6}}>NEW PASSWORD</label>
                         <input value={bulkResetPw} onChange={e=>setBulkResetPw(e.target.value)} placeholder="Enter new password for selected staff"
                           style={{width:"100%",background:T.overlay,border:`1px solid ${T.borderMd}`,borderRadius:10,padding:"10px 14px",color:T.white,fontSize:13,outline:"none",fontFamily:font,boxSizing:"border-box",marginBottom:8}}/>
-                        {bulkResetPw && bulkResetPw.length < 6 && <div style={{fontSize:11,color:"#f87171",marginBottom:8}}>Password must be at least 6 characters</div>}
+                        {bulkResetPw && bulkResetPw.length < (AUTH_MODE==="supabase"?8:6) && <div style={{fontSize:11,color:"#f87171",marginBottom:8}}>Password must be at least {AUTH_MODE==="supabase"?8:6} characters</div>}
                         <div style={{fontSize:11,color:T.muted,marginBottom:14}}>
                           This will reset passwords for <strong style={{color:T.white}}>{bulkResetScope==="all"?staff.length:bulkResetSelected.length} staff member{(bulkResetScope==="all"?staff.length:bulkResetSelected.length)!==1?"s":""}</strong>.
                         </div>
                         <button
-                          disabled={!bulkResetPw||bulkResetPw.length<6||(bulkResetScope==="selected"&&bulkResetSelected.length===0)}
+                          disabled={!bulkResetPw||bulkResetPw.length<(AUTH_MODE==="supabase"?8:6)||(bulkResetScope==="selected"&&bulkResetSelected.length===0)}
                           onClick={async()=>{
                             const targets = bulkResetScope==="all" ? staff.map(u=>u.id) : bulkResetSelected;
+                            if (AUTH_MODE === "supabase") {
+                              // Temporary password on each sign-in account; leavers are skipped.
+                              const failures = [];
+                              for (const id of targets) {
+                                const su = allUsers.find(x=>x.id===id); if (!su || (su.status||"active")==="leaver") continue;
+                                const r = await setTempPasswordFor(su, bulkResetPw);
+                                if (!r.ok) failures.push({ name: su.name, error: r.error });
+                              }
+                              if (failures.length) setTempPwNotice({ title: "Some passwords weren't reset", items: [], failures });
+                            } else {
                             const hashed = await hashPassword(bulkResetPw);
                             // One write per selected user (savePasswordFor updates state + that row only).
                             await Promise.all(targets.map(id=>savePasswordFor(id, hashed)));
+                            }
                             setBulkResetDone(true);
                             setBulkResetPw("");
                           }}
@@ -3948,10 +4043,26 @@ export default function App() {
                         const toAdd=csvPreview.filter(r=>!existingEmails.has(r.email.toLowerCase()));
                         const skipped=csvPreview.length-toAdd.length;
                         if(toAdd.length===0){setCsvError("All emails already exist in the system.");return;}
-                        const hashed=await hashPassword("pass123");
+                        const hashed = AUTH_MODE==="supabase" ? null : await hashPassword("pass123");
                         // Imported users get sequential numeric ids after the current max id.
                         const maxId=Math.max(0,...allUsers.map(u=>u.id));
-                        const newUsers=toAdd.map((r,i)=>({id:maxId+i+1,name:r.name.trim(),email:r.email.trim().toLowerCase(),jobTitle:r.jobTitle,manager:r.manager,department:r.department,role:["admin","manager"].includes(r.role)?r.role:"staff",isWarehouseWorker:false,status:"active",password:hashed}));
+                        const newUsers=toAdd.map((r,i)=>({id:maxId+i+1,name:r.name.trim(),email:r.email.trim().toLowerCase(),jobTitle:r.jobTitle,manager:r.manager,department:r.department,role:["admin","manager"].includes(r.role)?r.role:"staff",isWarehouseWorker:false,status:"active",...(hashed?{password:hashed}:{})}));
+                        if (AUTH_MODE === "supabase") {
+                          // Save the records, then give each person a sign-in account with a temporary password.
+                          setAllUsers(p=>[...p,...newUsers]);
+                          newUsers.forEach(u=>dbSaveUserProfile(u));
+                          await Promise.all(newUsers.map(u=>dbSaveUser(u)));
+                          const passwords = Object.fromEntries(newUsers.map(u=>[String(u.id), makeTempPassword()]));
+                          const r = await adminCall("createMissing", { passwords });
+                          const byId = Object.fromEntries(newUsers.map(u=>[String(u.id), u]));
+                          const results = r.ok ? (r.results||[]) : newUsers.map(u=>({ userId:String(u.id), ok:false, error:r.error }));
+                          setTempPwNotice({ title: `Imported ${toAdd.length} staff${skipped>0?` (${skipped} skipped: email already exists)`:""}`,
+                            items: results.filter(x=>x.ok).map(x=>({ name: byId[x.userId].name, login: byId[x.userId].email, password: passwords[x.userId] })),
+                            failures: results.filter(x=>!x.ok).map(x=>({ name: (byId[x.userId]||{}).name, error: x.error })) });
+                          setCsvPreview([]);
+                          setShowCsvImport(false);
+                          return;
+                        }
                         newUsers.forEach(u=>{
                           setAllUsers(p=>[...p,u]);
                           dbSaveUser(u);
@@ -4041,7 +4152,9 @@ export default function App() {
                       style={{background:`linear-gradient(135deg,${T.green},#059669)`,color:T.white,border:"none",borderRadius:10,padding:"10px 24px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:14,boxShadow:"0 4px 14px rgba(16,185,129,0.4)"}}>
                       ✓ Create Account
                     </button>
-                    <p style={{color:T.muted,fontSize:12,margin:0}}>Default password: <code style={{color:T.gold,background:"rgba(245,158,11,0.1)",padding:"2px 8px",borderRadius:4}}>pass123</code></p>
+                    {AUTH_MODE==="supabase"
+                      ? <p style={{color:T.muted,fontSize:12,margin:0}}>A temporary password is created and shown once. They choose their own at first sign-in.</p>
+                      : <p style={{color:T.muted,fontSize:12,margin:0}}>Default password: <code style={{color:T.gold,background:"rgba(245,158,11,0.1)",padding:"2px 8px",borderRadius:4}}>pass123</code></p>}
                   </div>
                   {addErr && <p style={{color:"#f87171",fontSize:13,margin:"10px 0 0"}}>{addErr}</p>}
                 </div>
@@ -4755,7 +4868,7 @@ export default function App() {
           )}
           {atab==="account" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
-            <LazyAccountTab user={user} passwords={passwords} onSetPassword={savePasswordFor} darkMode={darkMode} setDarkMode={setDarkMode} theme={theme} setTheme={setTheme} onSaveTheme={k=>dbSaveTheme(user.id,k)} emojiMode={emojiMode} onSaveEmojiMode={v=>{setEmojiMode(v);dbSaveEmojiMode(user.id,v);}} Z={T} font={font}/>
+            <LazyAccountTab user={user} passwords={passwords} onSetPassword={savePasswordFor} authMode={AUTH_MODE} onChangeOwnPassword={async (oldPw,newPw)=>{ if (!(await authCheckPassword(user.email, oldPw))) return { ok:false, error:"Current password is incorrect." }; return changeOwnPassword(newPw); }} darkMode={darkMode} setDarkMode={setDarkMode} theme={theme} setTheme={setTheme} onSaveTheme={k=>dbSaveTheme(user.id,k)} emojiMode={emojiMode} onSaveEmojiMode={v=>{setEmojiMode(v);dbSaveEmojiMode(user.id,v);}} Z={T} font={font}/>
             </React.Suspense>
           )}
         </div>

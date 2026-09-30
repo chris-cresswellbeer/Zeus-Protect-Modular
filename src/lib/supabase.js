@@ -43,8 +43,22 @@
  */
 
 // Project URL and public anon key — from Supabase dashboard → Project Settings → API.
-const SUPABASE_URL  = "https://aoahugfyswgcisfiosyn.supabase.co";
-const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFvYWh1Z2Z5c3dnY2lzZmlvc3luIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk5NjY1NzMsImV4cCI6MjA5NTU0MjU3M30.9mlm3pVxqwTgCdrdVF2ek1mBHro28P-MTaVjdAUvCIs";
+// A Netlify site can point the portal at a different project (e.g. the staging copy)
+// by setting VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in Site configuration →
+// Environment variables, then redeploying. Without them the live project is used.
+const LIVE_SUPABASE_URL  = "https://aoahugfyswgcisfiosyn.supabase.co";
+const LIVE_SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFvYWh1Z2Z5c3dnY2lzZmlvc3luIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk5NjY1NzMsImV4cCI6MjA5NTU0MjU3M30.9mlm3pVxqwTgCdrdVF2ek1mBHro28P-MTaVjdAUvCIs";
+const ENV = (typeof import.meta !== "undefined" && import.meta.env) || {};
+const SUPABASE_URL  = String(ENV.VITE_SUPABASE_URL || LIVE_SUPABASE_URL).replace(/\/+$/, "");
+const SUPABASE_ANON = ENV.VITE_SUPABASE_ANON_KEY || LIVE_SUPABASE_ANON;
+
+// Signed-in session token (Supabase Auth). When set, every request is made AS that
+// person, so the database's row-level security rules apply to them. Until then
+// (and always in the old "legacy" sign-in mode) the public anon key is used.
+// lib/auth.js calls setAccessToken() after sign-in / token refresh / sign-out.
+let accessToken = null;
+function setAccessToken(t) { accessToken = t || null; }
+const bearer = () => `Bearer ${accessToken || SUPABASE_ANON}`;
 
 // A request that never resolves used to hang the whole app: loadAll() awaits
 // Promise.allSettled over 34 reads and only flips dbReady in its finally block,
@@ -74,7 +88,7 @@ async function fetchWithTimeout(url, options = {}, ms = REQUEST_TIMEOUT_MS) {
  */
 const sb = (() => {
   // Standard headers Supabase requires on every REST call.
-  const h = { "Content-Type": "application/json", "apikey": SUPABASE_ANON, "Authorization": `Bearer ${SUPABASE_ANON}` };
+  const h = { "Content-Type": "application/json", "apikey": SUPABASE_ANON };
   // PostgREST exposes each table at /rest/v1/<table_name>.
   const rest = (table) => `${SUPABASE_URL}/rest/v1/${table}`;
 
@@ -97,7 +111,7 @@ const sb = (() => {
     if (filter) filters.push(filter);
     if (method === "POST" && upsertOn) filters.push(`on_conflict=${encodeURIComponent(upsertOn)}`);
     if (filters.length) url += "?" + filters.join("&");
-    const headers = { ...h };
+    const headers = { ...h, "Authorization": bearer() };
     // "Prefer" tells PostgREST how to behave:
     //   resolution=merge-duplicates → turn the INSERT into an UPSERT (update on key clash)
     //   return=minimal              → don't send the saved rows back (faster; we don't use them)
@@ -184,7 +198,7 @@ const sb = (() => {
         method: "POST",
         headers: {
           "apikey": SUPABASE_ANON,
-          "Authorization": `Bearer ${SUPABASE_ANON}`,
+          "Authorization": bearer(),
           "Content-Type": contentType,
           "x-upsert": "true",
           "Cache-Control": "3600",
@@ -199,7 +213,7 @@ const sb = (() => {
     remove: async (bucket, paths) => {
       const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${bucket}`, {
         method: "DELETE",
-        headers: { "apikey": SUPABASE_ANON, "Authorization": `Bearer ${SUPABASE_ANON}`, "Content-Type": "application/json" },
+        headers: { "apikey": SUPABASE_ANON, "Authorization": bearer(), "Content-Type": "application/json" },
         body: JSON.stringify({ prefixes: paths }),
       });
       return { error: res.ok ? null : await res.text() };
@@ -257,4 +271,4 @@ async function dbWrite(promise, label, opts = {}) {
   return !error;
 }
 
-export { SUPABASE_URL, SUPABASE_ANON, sb, hashPassword, DEFAULT_HASH, dbWrite };
+export { SUPABASE_URL, SUPABASE_ANON, sb, hashPassword, DEFAULT_HASH, dbWrite, setAccessToken };

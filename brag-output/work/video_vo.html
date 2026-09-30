@@ -1,0 +1,203 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts/local.css">
+<style>
+  html,body{margin:0;background:#060d2e;overflow:hidden}
+  #stage{position:relative;width:1920px;height:1080px;overflow:hidden;font-family:'Barlow',sans-serif;color:#fff;background:#060d2e}
+  .abs{position:absolute;left:0;top:0;will-change:transform,opacity}
+  .scene{position:absolute;inset:0}
+  .word{display:inline-block;margin-right:.24em}
+  #glow{position:absolute;inset:0;background:radial-gradient(1200px 700px at 70% 30%,rgba(37,99,235,.28),transparent 60%),radial-gradient(900px 600px at 15% 90%,rgba(21,35,112,.9),transparent 70%)}
+  .tape{position:absolute;height:34px;width:2600px;left:-300px;background:repeating-linear-gradient(-45deg,#f59e0b 0 34px,#111 34px 68px);box-shadow:0 10px 40px rgba(0,0,0,.5)}
+  .hook{position:absolute;left:180px;font-weight:900;font-size:150px;line-height:1.02;letter-spacing:-4px}
+  .phone{position:absolute;width:394px;height:828px;border-radius:58px;background:#0b1220;padding:12px;box-sizing:border-box;box-shadow:0 60px 120px rgba(0,0,0,.6),0 0 0 2px rgba(255,255,255,.12),inset 0 0 0 2px rgba(255,255,255,.06)}
+  .screen{position:relative;width:370px;height:804px;border-radius:46px;overflow:hidden;background:#e9eef8}
+  .screen img{position:absolute;left:0;top:0;width:370px;height:801px}
+  .tap{position:absolute;width:64px;height:64px;margin:-32px 0 0 -32px;border-radius:50%;border:3px solid rgba(37,99,235,.9);background:rgba(37,99,235,.18)}
+  .cap-s{font-weight:700;font-size:40px;color:#f59e0b;letter-spacing:.5px}
+  .cap-b{font-weight:900;font-size:92px;line-height:1.0;letter-spacing:-2.5px}
+  .quote{font-weight:800;font-size:66px;line-height:1.08;letter-spacing:-1.5px}
+  .pill{position:absolute;left:50%;padding:22px 40px;border-radius:999px;background:rgba(6,13,46,.88);border:1px solid rgba(255,255,255,.14);font-weight:800;font-size:48px;white-space:nowrap;box-shadow:0 20px 60px rgba(0,0,0,.5);backdrop-filter:blur(8px)}
+  .win{position:absolute;border-radius:18px;overflow:hidden;box-shadow:0 50px 120px rgba(0,0,0,.65),0 0 0 1px rgba(255,255,255,.12)}
+  .win img{display:block;width:100%;height:100%}
+  .chip{display:inline-block;padding:10px 22px;border-radius:999px;background:rgba(245,158,11,.14);border:1px solid rgba(245,158,11,.5);color:#fbbf24;font-weight:800;font-size:30px;letter-spacing:1px;text-transform:uppercase}
+</style></head>
+<body><div id="stage">
+  <div id="glow"></div>
+
+  <!-- 1 HOOK -->
+  <div class="scene" id="s1">
+    <div class="tape" id="tape1" style="top:170px;transform:rotate(-4deg)"></div>
+    <div class="hook" id="hookL1" style="top:380px"></div>
+    <div class="hook" id="hookL2" style="top:535px;color:#f59e0b"></div>
+    <div class="tape" id="tape2" style="top:880px;transform:rotate(-4deg)"></div>
+  </div>
+
+  <!-- 2 PHONE -->
+  <div class="scene" id="s2">
+    <div class="phone" id="phone" style="left:330px;top:126px">
+      <div class="screen" id="screen">
+        <img id="scrA"><img id="scrB">
+        <div class="tap" id="tap"></div>
+      </div>
+    </div>
+    <div class="abs" id="cap1" style="left:900px;top:360px;width:960px">
+      <div class="cap-s">Spot a hazard?</div>
+      <div class="cap-b" style="margin-top:14px">Report it from<br>your phone.</div>
+    </div>
+    <div class="abs" id="cap2" style="left:900px;top:350px;width:960px">
+      <div class="cap-b">What. Where.<br>How urgent.</div>
+      <div style="margin-top:26px;font-size:40px;font-weight:700;color:#10b981">✓ Sent to the portal</div>
+    </div>
+  </div>
+
+  <!-- 3 DASHBOARD -->
+  <div class="scene" id="s3">
+    <div class="abs" id="dash" style="width:1920px;height:1080px">
+      <img src="shots/d_dash_bare.png" style="width:1920px;height:1080px;display:block">
+      <div id="cards"></div>
+    </div>
+    <div id="dashShade" style="position:absolute;left:0;right:0;bottom:0;height:360px;background:linear-gradient(transparent,rgba(6,13,46,.92))"></div>
+    <div class="pill" id="pill3" style="top:900px">…and it lands on the <span style="color:#f59e0b">H&amp;S manager’s dashboard.</span></div>
+  </div>
+
+  <!-- 4 MONTAGE -->
+  <div class="scene" id="s4">
+    <div class="abs" id="head4" style="left:0;width:1920px;top:58px;text-align:center">
+      <div style="font-weight:900;font-size:78px;letter-spacing:-2px">One hub for the <span style="color:#3b82f6">whole</span> H&amp;S job.</div>
+    </div>
+    <div id="wins"></div>
+    <div class="abs" id="chip4" style="left:0;width:1920px;top:990px;text-align:center"><span class="chip" id="chipTxt"></span></div>
+  </div>
+
+  <!-- 5 OUTRO -->
+  <div class="scene" id="s5">
+    <img class="abs" id="logo" src="shots/icon.png" style="left:880px;top:250px;width:160px;height:160px;border-radius:36px;box-shadow:0 30px 80px rgba(37,99,235,.45),0 0 0 2px rgba(255,255,255,.15)">
+    <div class="abs" id="word" style="left:0;width:1920px;top:450px;text-align:center;font-weight:900;font-size:120px;letter-spacing:10px">ZEUS <span style="color:#3b82f6">PROTECT</span></div>
+    <div class="abs" id="sub" style="left:0;width:1920px;top:600px;text-align:center;font-weight:700;font-size:44px;letter-spacing:6px;color:#94a3b8;text-transform:uppercase">Health &amp; Safety Hub</div>
+    <div class="abs" id="tag" style="left:0;width:1920px;top:730px;text-align:center;font-weight:800;font-size:64px;letter-spacing:-1px">Spot it. Report it. <span style="color:#f59e0b">Sorted.</span></div>
+  </div>
+</div>
+<script>
+const clamp=(x,a=0,b=1)=>Math.min(b,Math.max(a,x));
+const lerp=(a,b,t)=>a+(b-a)*t;
+const eOut=t=>1-Math.pow(1-clamp(t),3);
+const eIn=t=>Math.pow(clamp(t),3);
+const eIO=t=>{t=clamp(t);return t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2};
+const eBack=t=>{t=clamp(t);const c1=1.70158,c3=c1+1;return 1+c3*Math.pow(t-1,3)+c1*Math.pow(t-1,2)};
+const prog=(t,a,d)=>clamp((t-a)/d);
+const $=id=>document.getElementById(id);
+const set=(el,o)=>{if(typeof el==='string')el=$(el);for(const k in o){if(k==='tf')el.style.transform=o.tf;else if(k==='op')el.style.opacity=o.op;else el.style[k]=o[k];}};
+
+// ── hook words
+const H1=["Someone’s","climbing"],H2=["the","racking."];
+$('hookL1').innerHTML=H1.map(w=>`<span class="word">${w}</span>`).join('');
+$('hookL2').innerHTML=H2.map(w=>`<span class="word">${w}</span>`).join('');
+const hookWords=[...document.querySelectorAll('#s1 .word')];
+
+// ── phone timeline (seconds, absolute) ── [time, image, transition]
+const P0=2.3;
+const typing=[...Array(10).keys()].map(i=>`shots/m_type_${String(i).padStart(2,'0')}.png`);
+const phoneTL=[[0,'shots/m_today.png','none'],[P0+1.0,typing[0],'slide']];
+for(let i=1;i<=9;i++) phoneTL.push([P0+1.25+i*0.16,typing[i],'cut']);
+phoneTL.push([P0+3.2,'shots/m_where_0.png','slide'],[P0+3.75,'shots/m_where_1.png','cut'],[P0+4.15,'shots/m_urg_0.png','slide'],[P0+4.6,'shots/m_urg_1.png','cut'],[P0+5.1,'shots/m_done.png','slide']);
+const S=370/390; // css px → phone screen px
+const taps=[[P0+0.75,195,406],[P0+3.0,195,415],[P0+3.6,195,726],[P0+4.45,195,352],[P0+4.95,195,435]];
+
+// ── dashboard cards
+const L={"cards":[[250,192],[528.5,192],[807,192],[1085.5,192],[250,313],[528.5,313],[807,313],[1085.5,313],[250,434],[528.5,434],[807,434]]};
+$('cards').innerHTML=L.cards.map((c,i)=>`<img id="card${i}" class="abs" src="shots/card_${i}.png" style="left:${(c[0]-3)*1.2}px;top:${(c[1]-3)*1.2}px;width:${270.5*1.2}px;height:${113*1.2}px">`).join('');
+
+// ── montage
+const MON=[['d_sub_training_library','Training Library'],['d_tab_fire_safety','Fire Safety'],['d_sub_coshh_register','COSHH Register'],['d_tab_risk_assessments','Risk Assessments'],['d_sub_equipment_register','Equipment Register'],['d_tab_inspections','Site Inspections'],['d_sub_machinery_competence','Machinery Competence'],['d_sub_reports','Compliance Reports']];
+const M0=12.5, MD=0.5, WW=1440, WH=810;
+$('wins').innerHTML=MON.map((m,i)=>`<div class="win" id="win${i}" style="left:${(1920-WW)/2}px;top:158px;width:${WW}px;height:${WH}px"><img src="shots/${m[0]}.png"></div>`).join('');
+
+window.render=function(t){
+  // visibility per scene
+  const vis=(id,a,b)=>{$(id).style.display=(t>=a&&t<b)?'block':'none'};
+  vis('s1',0,2.75); vis('s2',2.35,8.6); vis('s3',8.35,12.75); vis('s4',12.35,17.75); vis('s5',17.4,99);
+
+  // glow drift
+  set('glow',{tf:`translate(${Math.sin(t*0.35)*40}px,${Math.cos(t*0.3)*25}px)`});
+
+  // ── 1 HOOK
+  {
+    const out=eIn(prog(t,2.12,0.36));
+    set('tape1',{tf:`rotate(-4deg) translateX(${lerp(-900,0,eOut(prog(t,0,0.7)))+t*40}px)`,op:1-out});
+    set('tape2',{tf:`rotate(-4deg) translateX(${lerp(900,0,eOut(prog(t,0.1,0.7)))-t*40}px)`,op:1-out});
+    hookWords.forEach((w,i)=>{const p=eOut(prog(t,0.12+i*0.14,0.42));w.style.opacity=p*(1-out);w.style.transform=`translateY(${lerp(70,0,p)-out*120}px)`;w.style.filter=`blur(${(1-p)*10}px)`});
+  }
+
+  // ── 2 PHONE
+  {
+    const inP=eOut(prog(t,2.5,0.65)), outP=eIO(prog(t,8.1,0.4));
+    set('phone',{tf:`translateY(${lerp(1100,0,inP)}px) scale(${1.2*lerp(1,0.7,outP)}) rotate(${lerp(4,0,inP)}deg)`,op:1-eIn(prog(t,8.1,0.35))});
+    // current & previous screen
+    let k=0; for(let i=0;i<phoneTL.length;i++) if(t>=phoneTL[i][0]) k=i;
+    const [ts,src,kind]=phoneTL[k]; const prev=phoneTL[Math.max(0,k-1)][1];
+    const A=$('scrA'),B=$('scrB');
+    if(A.getAttribute('src')!==prev) A.src=prev;
+    if(B.getAttribute('src')!==src) B.src=src;
+    if(kind==='slide'){const p=eIO(prog(t,ts,0.28));A.style.transform=`translateX(${-p*120}px)`;A.style.opacity=1-p;B.style.transform=`translateX(${(1-p)*370}px)`;B.style.opacity=1;}
+    else {A.style.opacity=0;B.style.transform='none';B.style.opacity=1;}
+    // taps
+    let tapOp=0,tapS=1,tx=0,ty=0;
+    for(const [tt,x,y] of taps){const p=(t-tt)/0.42; if(p>=-0.35&&p<1){tx=x*S;ty=y*S; if(p<0){tapOp=0.9*(1+p/0.35);tapS=1;} else {tapOp=0.9*(1-p);tapS=lerp(0.7,1.8,eOut(p));}}}
+    set('tap',{left:tx+'px',top:ty+'px',op:tapOp,tf:`scale(${tapS})`});
+    // captions
+    const c1=eOut(prog(t,2.8,0.5)), c1o=eIn(prog(t,5.45,0.3));
+    set('cap1',{op:c1*(1-c1o),tf:`translateY(${lerp(40,0,c1)-c1o*40}px)`});
+    const c2=eOut(prog(t,5.75,0.5)), c2o=eIn(prog(t,7.95,0.3));
+    set('cap2',{op:c2*(1-c2o),tf:`translateY(${lerp(40,0,c2)-c2o*40}px)`});
+  }
+
+  // ── 3 DASHBOARD
+  {
+    const inP=eOut(prog(t,8.5,0.7)), outP=eIn(prog(t,12.35,0.3));
+    const push=lerp(1.0,1.04,prog(t,8.55,4));
+    set('dash',{op:inP*(1-outP),tf:`scale(${lerp(1.1,1,inP)*push}) translateY(${-outP*60}px)`,transformOrigin:'50% 35%'});
+    for(let i=0;i<11;i++){const p=prog(t,9.0+i*0.085,0.45);set('card'+i,{op:clamp(p*3),tf:`scale(${lerp(0.6,1,eBack(p))}) translateY(${(1-eOut(p))*30}px)`})}
+    set('dashShade',{op:inP*(1-outP)});
+    const pp=eOut(prog(t,9.75,0.45)), po=eIn(prog(t,12.3,0.3));
+    set('pill3',{op:pp*(1-po),tf:`translateX(-50%) translateY(${lerp(40,0,pp)}px) scale(${lerp(0.94,1,pp)})`});
+  }
+
+  // ── 4 MONTAGE
+  {
+    const hin=eOut(prog(t,12.55,0.45)), hout=eIn(prog(t,17.3,0.3));
+    set('head4',{op:hin*(1-hout),tf:`translateY(${lerp(-30,0,hin)}px)`});
+    set('chip4',{op:hin*(1-hout)});
+    const idx=clamp(Math.floor((t-M0-0.1)/MD),0,MON.length-1);
+    $('chipTxt').textContent=MON[idx][1];
+    MON.forEach((m,i)=>{
+      const st=M0+i*MD, p=eOut(prog(t,st,0.3)), q=eIO(prog(t,st+MD,0.3));
+      const w=$('win'+i);
+      if(t<st-0.01||(t>st+MD+0.3&&i<MON.length-1)){w.style.display='none';return;}
+      w.style.display='block';
+      const last=i===MON.length-1, fin=last?eIn(prog(t,17.3,0.3)):0;
+      const qq=last?0:q; const x=lerp(620,0,p)-qq*520, s=lerp(0.9,1,p)*lerp(1,0.9,qq)*lerp(1,0.94,fin);
+      w.style.transform=`translateX(${x}px) scale(${s}) rotate(${lerp(2.5,0,p)-qq*2}deg)`;
+      w.style.opacity=Math.min(clamp(p*1.8),last?1:1-q)*(1-fin);
+      w.style.zIndex=10+i;
+    });
+  }
+
+  // ── 5 OUTRO
+  {
+    const l=prog(t,17.55,0.6);
+    set('logo',{op:clamp(l*2.5),tf:`scale(${lerp(0.3,1,eBack(l))}) rotate(${lerp(-25,0,eOut(l))}deg)`});
+    const w=eOut(prog(t,17.8,0.55)); set('word',{op:w,tf:`translateY(${lerp(40,0,w)}px)`,letterSpacing:lerp(30,10,w)+'px'});
+    const s=eOut(prog(t,18.05,0.5)); set('sub',{op:s,tf:`translateY(${lerp(30,0,s)}px)`});
+    const g=eOut(prog(t,18.35,0.5)); set('tag',{op:g,tf:`translateY(${lerp(30,0,g)}px) scale(${lerp(0.96,1,g)})`});
+  }
+};
+window.ready=Promise.all([document.fonts.ready,...[...document.images].map(i=>i.decode().catch(()=>{}))]).then(async()=>{
+  // preload all phone screens
+  await Promise.all(phoneTL.map(([,s])=>{const im=new Image();im.src=s;return im.decode().catch(()=>{})}));
+  await document.fonts.load('900 100px Barlow');await document.fonts.load('700 40px Barlow');await document.fonts.load('800 40px Barlow');await document.fonts.load('600 30px Barlow');
+  return true;
+});
+window.DURATION=21.0;
+</script>
+</body></html>

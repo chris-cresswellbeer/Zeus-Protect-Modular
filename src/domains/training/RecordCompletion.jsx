@@ -232,4 +232,127 @@ function ImportPriorTrainingModal({ users, modules, comps, onImport, onClose, Z,
   );
 }
 
-export { RecordCompletionModal, ImportPriorTrainingModal };
+
+// ── Group session / toolbox talk ─────────────────────────────────────────────
+/**
+ * GroupSessionModal — a supervisor (admin, or a line manager for their own team)
+ * records that a group of people completed a module together, e.g. a toolbox
+ * talk or classroom session. Each attendee gets a recorded completion dated the
+ * day of the session (see completion.js), with who led it and where.
+ * A result OLDER than the session is replaced (a refresher renews it); a newer
+ * one is left alone. "Print sign-in sheet" gives a paper list to sign on the day.
+ *
+ * props: people (who can be ticked), modules, comps, leaderName,
+ *        onSave(items) → Promise<{saved, skipped}>, onClose, Z, font
+ */
+function GroupSessionModal({ people, modules, comps, leaderName, onSave, onClose, Z, font }) {
+  const [mid, setMid] = useState(modules[0] ? modules[0].id : "");
+  const [date, setDate] = useState(todayIso());
+  const [leader, setLeader] = useState(leaderName || "");
+  const [where, setWhere] = useState("");
+  const [picked, setPicked] = useState({});
+  const [q, setQ] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(null);
+  const m = modules.find(x => String(x.id) === String(mid));
+  const list = people.filter(u => !q || `${u.name} ${u.jobTitle || ""} ${u.manager || ""}`.toLowerCase().includes(q.toLowerCase()))
+    .sort((a, b) => String(a.manager || "").localeCompare(String(b.manager || "")) || a.name.localeCompare(b.name));
+  const chosen = people.filter(u => picked[u.id]);
+  const statusOf = u => {
+    const c = (comps[u.id] || comps[String(u.id)] || {})[mid];
+    if (!c) return { text: "Not done", newer: false };
+    const ex = m && m.renewalMonths ? getExpiryStatus(c.date, m.renewalMonths) : null;
+    const iso = parseCompletionDate(date);
+    return { text: `${c.recorded ? "Recorded" : `${c.score}%`} · ${fmt(c.date)}${ex && ex.status === "expired" ? " · expired" : ""}`, newer: !!(iso && c.date >= iso) };
+  };
+  const toggleAll = on => setPicked(p => { const n = { ...p }; list.forEach(u => { n[u.id] = on; }); return n; });
+
+  function printSheet() {
+    const who = chosen.length ? chosen : list;
+    const esc = t => String(t == null ? "" : t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    const w = window.open("", "_blank");
+    if (!w) { alert("Allow pop-ups for this site to print the sheet."); return; }
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Sign-in sheet — ${esc(m ? m.title : "")}</title>
+      <style>body{font-family:Arial,sans-serif;padding:28px;color:#0f172a}h1{font-size:20px;margin:0 0 4px}p{font-size:13px;color:#334155;margin:2px 0}
+      table{border-collapse:collapse;width:100%;margin-top:16px;font-size:13px}th,td{border:1px solid #94a3b8;padding:10px 8px;text-align:left}
+      th{background:#0d1f5c;color:#fff}td.sig{width:38%}tr{page-break-inside:avoid}</style></head><body>
+      <h1>Training sign-in sheet</h1>
+      <p><b>Module:</b> ${esc(m ? m.title : "")}</p><p><b>Date:</b> ${esc(fmt(parseCompletionDate(date) || date))}</p>
+      <p><b>Led by:</b> ${esc(leader)}${where ? ` &nbsp; <b>Where:</b> ${esc(where)}` : ""}</p>
+      <table><tr><th style="width:4%">#</th><th>Name</th><th>Job title</th><th>Signature</th></tr>
+      ${who.map((u, i) => `<tr><td>${i + 1}</td><td>${esc(u.name)}</td><td>${esc(u.jobTitle || "")}</td><td class="sig"></td></tr>`).join("")}
+      ${Array.from({ length: 3 }, (_, i) => `<tr><td>${who.length + i + 1}</td><td></td><td></td><td class="sig"></td></tr>`).join("")}
+      </table><p style="margin-top:18px">Leader's signature: ______________________________</p>
+      <script>window.onload=()=>window.print()<\/script></body></html>`);
+    w.document.close();
+  }
+  async function save() {
+    const iso = parseCompletionDate(date);
+    if (!m) { setErr("Choose the module that was covered."); return; }
+    if (!iso) { setErr("Enter the session date. It can't be in the future."); return; }
+    if (!leader.trim()) { setErr("Enter who led the session."); return; }
+    if (!chosen.length) { setErr("Tick everyone who attended."); return; }
+    setBusy(true); setErr("");
+    const note = `Group session${where.trim() ? ` at ${where.trim()}` : ""}, led by ${leader.trim()}`;
+    const r = await onSave(chosen.map(u => ({ userId: u.id, moduleId: m.id, date: iso, note, session: { leader: leader.trim(), where: where.trim() } })));
+    setBusy(false); setDone(r); if (r && r.saved) setPicked({});
+  }
+  const cell = { padding: "7px 8px", borderBottom: `1px solid ${Z.border}`, fontSize: 12.5 };
+  return (
+    <Shell title="Record a group session or toolbox talk" onClose={onClose} Z={Z} font={font} wide>
+      <p style={{ margin: "0 0 6px", fontSize: 13, color: Z.muted, lineHeight: 1.6 }}>
+        For training delivered to a group in person. Everyone you tick is recorded as having completed the module on the session date, with no quiz score. It renews older results, and the module is assigned to them if needed.
+      </p>
+      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
+        <div><label style={label(Z)} htmlFor="gs-mod">Module covered *</label>
+          <select id="gs-mod" value={mid} onChange={e => { setMid(e.target.value); setDone(null); }} style={input(Z)}>
+            {modules.map(x => <option key={x.id} value={x.id}>{x.title}</option>)}
+          </select></div>
+        <div><label style={label(Z)} htmlFor="gs-date">Session date *</label>
+          <input id="gs-date" type="date" max={todayIso()} value={date} onChange={e => { setDate(e.target.value); setErr(""); }} style={input(Z)} /></div>
+        <div><label style={label(Z)} htmlFor="gs-lead">Led by *</label>
+          <input id="gs-lead" value={leader} onChange={e => setLeader(e.target.value)} style={input(Z)} /></div>
+        <div><label style={label(Z)} htmlFor="gs-where">Where (optional)</label>
+          <input id="gs-where" value={where} onChange={e => setWhere(e.target.value)} placeholder="e.g. Goods-in, 7am briefing" style={input(Z)} /></div>
+      </div>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", margin: "16px 0 8px", flexWrap: "wrap" }}>
+        <b style={{ fontSize: 13 }}>Who attended</b>
+        <span style={{ fontSize: 12, color: Z.muted }}>{chosen.length} ticked</span>
+        <input aria-label="Search staff" value={q} onChange={e => setQ(e.target.value)} placeholder="Search name, job or manager" style={{ ...input(Z), width: 240, padding: "7px 12px", fontSize: 12.5, marginLeft: "auto" }} />
+        <button onClick={() => toggleAll(true)} style={{ ...btn(Z, false), padding: "7px 12px", fontSize: 12 }}>Tick all shown</button>
+        <button onClick={() => toggleAll(false)} style={{ ...btn(Z, false), padding: "7px 12px", fontSize: 12 }}>Clear</button>
+      </div>
+      <div style={{ maxHeight: 300, overflowY: "auto", border: `1px solid ${Z.border}`, borderRadius: 10 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead><tr>{["", "Name", "Job title", "Line manager", "This module now"].map(h => <th key={h} style={{ ...cell, textAlign: "left", color: Z.muted, fontSize: 11, position: "sticky", top: 0, background: Z.navyMd }}>{h}</th>)}</tr></thead>
+          <tbody>
+            {list.map(u => { const st = statusOf(u); return (
+              <tr key={u.id} onClick={() => setPicked(p => ({ ...p, [u.id]: !p[u.id] }))} style={{ cursor: "pointer", background: picked[u.id] ? "rgba(16,185,129,0.08)" : "transparent" }}>
+                <td style={{ ...cell, width: 30 }}><input type="checkbox" aria-label={u.name} checked={!!picked[u.id]} onChange={() => {}} /></td>
+                <td style={{ ...cell, fontWeight: 700 }}>{u.name}</td>
+                <td style={{ ...cell, color: Z.muted }}>{u.jobTitle || ""}</td>
+                <td style={{ ...cell, color: Z.muted }}>{u.manager || ""}</td>
+                <td style={{ ...cell, color: st.newer ? Z.muted : Z.white }}>{st.text}{st.newer ? " (newer — kept)" : ""}</td>
+              </tr>); })}
+            {!list.length && <tr><td colSpan={5} style={{ ...cell, color: Z.muted }}>Nobody matches.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      {err && <div role="alert" style={{ color: Z.red || "#f87171", fontWeight: 700, fontSize: 13, marginTop: 12 }}>{err}</div>}
+      {done && (
+        <div role="status" style={{ marginTop: 12, padding: "10px 14px", borderRadius: 12, background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.3)", fontSize: 13 }}>
+          <b style={{ color: Z.green }}>✓ {done.saved} attendee{done.saved !== 1 ? "s" : ""} recorded.</b>
+          {done.skipped && done.skipped.length > 0 && <span style={{ color: Z.muted }}> {done.skipped.length} not recorded: {done.skipped.map(x => `${(people.find(u => String(u.id) === String(x.userId)) || {}).name || x.userId} (${x.reason})`).join("; ")}.</span>}
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
+        <button onClick={save} disabled={busy} style={btn(Z, true)}>{busy ? "Saving…" : `✓ Record attendance${chosen.length ? ` for ${chosen.length}` : ""}`}</button>
+        <button onClick={printSheet} style={btn(Z, false)}>{E("🖨 ", "")}Print sign-in sheet</button>
+        <button onClick={onClose} style={{ ...btn(Z, false), marginLeft: "auto" }}>Close</button>
+      </div>
+    </Shell>
+  );
+}
+
+export { RecordCompletionModal, ImportPriorTrainingModal, GroupSessionModal };

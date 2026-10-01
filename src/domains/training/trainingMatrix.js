@@ -19,6 +19,7 @@
  * a filterable one-row-per-person-per-module detail list, and a per-module summary.
  * Pure JS — no React — so it can be tested on its own.
  */
+import { isPassed } from "./completion";
 import { getExpiryStatus, EXPIRY_WARNING_DAYS } from "../../lib/dates";
 import { buildXlsx, downloadBlob, colName } from "../../lib/xlsxWriter";
 
@@ -36,7 +37,7 @@ const fmtLong = d => { if (!d) return ""; const [y, m, day] = String(d).slice(0,
 function cellFor(user, mod, assigns, comps) {
   const assigned = (assigns[user.id] || []).map(String).includes(String(mod.id));
   const comp = (comps[user.id] || {})[mod.id];
-  if (!comp) return { status: assigned ? "missing" : "na", assigned };
+  if (!comp || !isPassed(comp, mod)) return { status: assigned ? "missing" : "na", assigned };
   const ex = mod.renewalMonths ? getExpiryStatus(comp.date, mod.renewalMonths) : null;
   return {
     status: ex ? (ex.status === "expired" ? "expired" : ex.status === "expiring" ? "expiring" : "valid") : "valid",

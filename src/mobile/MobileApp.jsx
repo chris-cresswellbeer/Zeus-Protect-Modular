@@ -218,7 +218,7 @@ function MobileApp({
   const recordedDone = myMods.filter((m) => myComps[m.id] && myComps[m.id].recorded).map((m) => {
     const c = myComps[m.id];
     const ex = m.renewalMonths ? getExpiryStatus(c.date, m.renewalMonths) : null;
-    return { date: c.date, title: m.title, lapsed: ex ? ex.status === "expired" : false };
+    return { date: c.date, title: m.title, lapsed: ex ? ex.status === "expired" : false, session: !!(c.recorded && c.recorded.session) };
   });
   const historyEntries = [
     ...certificates.map((c) => ({
@@ -227,7 +227,8 @@ function MobileApp({
       lapsed: c.lapsed,
       outcome: c.lapsed ? `Passed · ${c.score}% · now expired` : `Passed · ${c.score}%`,
     })),
-    ...recordedDone.map((r) => ({ ...r, outcome: r.lapsed ? "Completed before the portal · now expired" : "Completed before the portal" })),
+    ...recordedDone.map((r) => { const how = r.session ? "Completed in a group session" : "Completed before the portal";
+      return { ...r, outcome: r.lapsed ? `${how} · now expired` : how }; }),
   ].sort((a, b) => String(b.date).localeCompare(String(a.date)));
 
   const historyStats = {

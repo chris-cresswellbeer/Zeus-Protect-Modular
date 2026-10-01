@@ -10,10 +10,18 @@
  * other), but have no score, no answers and no portal certificate.
  */
 
-export const PASS_MARK = 70;
+export const PASS_MARK = 70;   // the default; each module can set its own (passMark, 50–100)
 
-/** Completed and passed (a recorded completion always counts). */
-export const isPassed = c => !!c && (!!c.recorded || Number(c.score) >= PASS_MARK);
+/** A module's pass mark (%): its own setting if valid, otherwise 70. */
+export const passMarkOf = m => { const n = Number(m && m.passMark); return n >= 50 && n <= 100 ? Math.round(n) : PASS_MARK; };
+
+/**
+ * Completed and passed. A recorded completion always counts, and so does any
+ * result with a certificate (a certificate is only issued on a pass, so a result
+ * stays passed if the module's pass mark is raised later). Older results without
+ * a certificate id are judged against the module's pass mark (default 70%).
+ */
+export const isPassed = (c, m) => !!c && (!!c.recorded || !!c.certId || Number(c.score) >= passMarkOf(m));
 
 /** "85%" for a quiz result, "Recorded" for a recorded completion. */
 export const scoreText = c => !c ? "—" : c.recorded ? "Recorded" : `${c.score}%`;

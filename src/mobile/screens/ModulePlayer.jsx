@@ -4,7 +4,7 @@
 //
 // The single meaningful departure from the desktop player in App.jsx is the
 // quiz: the desktop stacks every question on one scroll, which does not survive
-// a phone. Scoring is unchanged — 70% to pass, unlimited retakes, answer review.
+// a phone. Scoring uses the module's pass mark (70% unless set otherwise), unlimited retakes, answer review.
 //
 // Slide progress is reported upward on every step so it can be persisted and
 // resumed after the app is killed.
@@ -16,7 +16,7 @@ import { isHtmlContent, ensureRteStyles } from "../../domains/training/slideText
 import { useFileUrl } from "../../lib/fileAccess";
 
 // Must match the desktop pass mark in App.jsx submitQuiz (also 70).
-const PASS_MARK = 70;
+import { PASS_MARK, passMarkOf } from "../../domains/training/completion";
 
 function ModulePlayer({
   mod, user, initialSlide = 0, offline,
@@ -25,6 +25,7 @@ function ModulePlayer({
 }) {
   const slides = mod.content || [];
   const quiz = mod.quiz || [];
+  const passMark = passMarkOf(mod);   // this module's pass mark (default 70%)
 
   // stage: "intro" | "slide" | "quiz" | "result"
   const [stage, setStage] = React.useState(initialSlide > 0 ? "slide" : "intro");
@@ -56,7 +57,7 @@ function ModulePlayer({
       let correct = 0;
       quiz.forEach((q, i) => { if (next[i] === q.answer) correct++; });
       const pct = Math.round((correct / quiz.length) * 100);
-      const passed = pct >= PASS_MARK;
+      const passed = pct >= passMark;
       const record = {
         moduleId: mod.id,
         score: pct,
@@ -100,7 +101,7 @@ function ModulePlayer({
             }}>
               <p style={{ margin: 0, color: Z.slate, lineHeight: 1.7, fontSize: 13.5 }}>
                 Take your time — each slide saves as you go. You need{" "}
-                <strong style={{ color: Z.green }}>{PASS_MARK}% or above</strong> on the knowledge
+                <strong style={{ color: Z.green }}>{passMark}% or above</strong> on the knowledge
                 check to earn your Zeus certificate, and you can retake it as many times as you need.
               </p>
             </div>
@@ -242,8 +243,8 @@ function ModulePlayer({
             <p style={{ color: Z.muted, margin: "0 0 20px", fontSize: 13.5 }}>
               {result.correct} of {result.total} correct
               {result.passed
-                ? ` — comfortably above the ${PASS_MARK}% pass mark.`
-                : ` — you need ${PASS_MARK}% to pass. Have another go whenever you're ready.`}
+                ? ` — comfortably above the ${passMark}% pass mark.`
+                : ` — you need ${passMark}% to pass. Have another go whenever you're ready.`}
             </p>
 
             {result.passed && (

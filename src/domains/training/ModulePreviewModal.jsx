@@ -3,7 +3,7 @@ import { Pill } from "../../shared/primitives";
 import { E } from "../../lib/emoji";
 import { sanitizeHtml } from "../../lib/sanitizeHtml";
 import { isHtmlContent, ensureRteStyles } from "./slideTextUtils";
-import { isPassed, scoreText, recordedText } from "./completion";
+import { isPassed, scoreText, recordedText, passMarkOf } from "./completion";
 
 /**
  * ModulePreviewModal — admin read-only preview of a training module
@@ -15,8 +15,7 @@ import { isPassed, scoreText, recordedText } from "./completion";
  * Field-name tolerance: older modules may use `slides` instead of `content`,
  * `body` instead of `text`, `imageData`/`videoUrl` instead of `image`/`video` —
  * the fallbacks below handle both shapes.
- * NOTE: "Pass Mark" shows m.passMark||70, but the module player always uses 70%
- * (see submitQuiz in App.jsx) — a per-module pass mark is not yet enforced.
+ * "Pass Mark" is the module's own pass mark (passMarkOf: default 70%), used by both quiz players.
  */
 function ModulePreviewModal({ m, staff, assigns, comps, compHistory = [], moduleVersions = [], isMobile, setAtab, onClose, T, font }) {
   React.useEffect(() => { ensureRteStyles(); }, []);
@@ -60,7 +59,7 @@ function ModulePreviewModal({ m, staff, assigns, comps, compHistory = [], module
             <div>
               {m.description && <p style={{color:T.muted,fontSize:14,marginBottom:20,lineHeight:1.6}}>{m.description}</p>}
               <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:12,marginBottom:20}}>
-                {[{label:"Category",value:m.category||"—"},{label:"Duration",value:m.duration||"—"},{label:"Level",value:m.level||"—"},{label:"Pass Mark",value:`${m.passMark||70}%`},{label:"Renewal",value:m.renewalMonths?`Every ${m.renewalMonths} months`:"Not required"},{label:"Questions",value:`${quiz.length} multiple choice`}].map((row,i)=>(
+                {[{label:"Category",value:m.category||"—"},{label:"Duration",value:m.duration||"—"},{label:"Level",value:m.level||"—"},{label:"Pass Mark",value:`${passMarkOf(m)}%`},{label:"Renewal",value:m.renewalMonths?`Every ${m.renewalMonths} months`:"Not required"},{label:"Questions",value:`${quiz.length} multiple choice`}].map((row,i)=>(
                   <div key={i} style={{background:T.overlay,borderRadius:10,padding:"10px 14px",border:`1px solid ${T.border}`}}>
                     <div style={{fontSize:10,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:.5,marginBottom:3}}>{row.label}</div>
                     <div style={{fontSize:13,fontWeight:600,color:T.white}}>{row.value}</div>

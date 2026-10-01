@@ -55,7 +55,7 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
     renewalMonths: editingModule.renewalMonths||12,
     passMark: editingModule.passMark||70,
     description: editingModule.description||"",
-  } : { title:"", category:"General H&S", level:"Mandatory", duration:"30 min", icon:"📋", renewalMonths:12 });
+  } : { title:"", category:"General H&S", level:"Mandatory", duration:"30 min", icon:"📋", renewalMonths:12, passMark:70 });
   const [slides, setSlides] = useState(editingModule ? (editingModule.slides||editingModule.content||[]).map(s=>({
     heading: s.heading||"",
     text: s.text||s.body||"",
@@ -138,6 +138,7 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
       id: editingModule ? editingModule.id : `custom_${Date.now()}`,
       ...details,
       renewalMonths: Number(details.renewalMonths)||12,
+      passMark: Math.min(100, Math.max(50, Math.round(Number(details.passMark)) || 70)),
       content: cleanSlides,
       quiz: quiz.map(q=>({...q, answer:Number(q.answer)})),
       _custom: true,
@@ -202,7 +203,7 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
                 </select>
               </div>
             </div>
-            <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:14,marginBottom:18}}>
+            <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr 1fr",gap:14,marginBottom:18}}>
               <div>
                 <label style={lbl}>Est. Duration</label>
                 <input value={details.duration} onChange={e=>setDetails(p=>({...p,duration:e.target.value}))} placeholder="e.g. 30 min" style={inp}/>
@@ -210,6 +211,11 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
               <div>
                 <label style={lbl}>Renewal (months)</label>
                 <input type="number" min="1" max="120" value={details.renewalMonths} onChange={e=>setDetails(p=>({...p,renewalMonths:e.target.value}))} style={inp}/>
+              </div>
+              <div>
+                <label style={lbl} htmlFor="cm-pass">Pass mark (%)</label>
+                {/* 50–100. Results already passed keep their pass if this is raised later (completion.js isPassed). */}
+                <input id="cm-pass" type="number" min="50" max="100" step="5" value={details.passMark??70} onChange={e=>setDetails(p=>({...p,passMark:e.target.value}))} style={inp}/>
               </div>
             </div>
             <div>
@@ -454,7 +460,7 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
               <span style={{fontSize:48}}>{details.icon}</span>
               <div>
                 <h3 style={{margin:"0 0 4px",fontSize:20,fontWeight:900}}>{details.title}</h3>
-                <div style={{color:Z.muted,fontSize:13}}>{details.category} · {details.level} · {details.duration} · Renewal: {details.renewalMonths} months</div>
+                <div style={{color:Z.muted,fontSize:13}}>{details.category} · {details.level} · {details.duration} · Renewal: {details.renewalMonths} months · Pass mark: {details.passMark??70}%</div>
               </div>
             </div>
             <div style={{marginBottom:16}}>

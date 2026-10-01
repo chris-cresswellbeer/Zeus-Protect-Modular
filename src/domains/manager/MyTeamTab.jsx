@@ -3,6 +3,7 @@ import { isPassed, scoreText } from "../training/completion";
 import { HelpTip } from "../../shared/HelpTip";
 import { getExpiryStatus } from "../../lib/dates";
 import { teamOf, normName } from "./team";
+import { E } from "../../lib/emoji";
 
 /**
  * MyTeamTab — the "My Team" tab for users with role "manager".
@@ -161,7 +162,7 @@ function MemberDetail({ u, s, allModules, assigned, onAssign, onSignOffDse, onSi
   );
 }
 
-function MyTeamTab({ manager, users, allModules, assigns, comps, docs, docAssignments, docAcknowledgements, dseReports, adminResponses, investigations, onAssign, onSignOffDse, onSignOffAction, Z, font }) {
+function MyTeamTab({ manager, users, allModules, assigns, comps, docs, docAssignments, docAcknowledgements, dseReports, adminResponses, investigations, onAssign, onSignOffDse, onSignOffAction, onGroupSession, Z, font }) {
   const [openId, setOpenId] = useState(null);
   const team = teamOf(manager, users);
   const ctx = { allModules, assigns, comps, docs, docAssignments, docAcknowledgements, dseReports, adminResponses, investigations };
@@ -180,7 +181,14 @@ function MyTeamTab({ manager, users, allModules, assigns, comps, docs, docAssign
   return (
     <div>
       <h2 style={{ fontSize: 22, fontWeight: 900, letterSpacing: -.5, margin: "0 0 4px" }}>My Team <HelpTip dark={true} text="Everyone whose Line Manager is set to your name. You can see their training, required reading, DSE and corrective actions, assign them training, and sign off DSE issues and corrective actions. Every assignment and sign-off is recorded in the audit trail." /></h2>
-      <p style={{ color: Z.muted, fontSize: 13, margin: "0 0 20px" }}>Your team's H&S compliance. Click a person to see details, assign training or sign things off.</p>
+      <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", margin: "0 0 20px" }}>
+        <p style={{ color: Z.muted, fontSize: 13, margin: 0, flex: 1, minWidth: 240 }}>Your team's H&S compliance. Click a person to see details, assign training or sign things off.</p>
+        {onGroupSession && team.length > 0 && (
+          <button onClick={onGroupSession} style={{ background: "rgba(37,99,235,0.12)", color: Z.accentLt, border: `1px solid ${Z.accent}55`, borderRadius: 10, padding: "8px 16px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: font }}>
+            {E("👥 ", "")}Record a group session
+          </button>
+        )}
+      </div>
       {team.length === 0 ? (
         <div style={{ background: cardBg, border: `1px solid ${Z.border}`, borderRadius: 16, padding: 24, color: Z.muted, fontSize: 13 }}>
           Nobody has <b style={{ color: Z.white }}>{manager.name}</b> as their Line Manager yet. Ask an administrator to set it on your team members' staff records.

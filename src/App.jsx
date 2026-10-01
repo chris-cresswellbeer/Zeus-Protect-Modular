@@ -1129,16 +1129,40 @@ export default function App() {
 
   // Replaces the assignment list for each user in `newAssigns` ({userId:[moduleIds]}).
   // Delete-then-insert (not atomic) — pass ONLY the users that changed.
+  // Saves each person's full list of assigned modules. Only the differences are
+  // written: modules newly assigned are added, unassigned ones removed. (It used to
+  // clear the person's list and write it again, so a refused write — e.g. a staff id
+  // too long for an "integer" column, see user_id_text_columns.sql — silently lost
+  // ALL their assignments.) If anything is refused, the admin is told why and the
+  // screen goes back to what is really stored.
   async function dbSaveAssigns(newAssigns) {
     Object.keys(newAssigns).forEach(uid => markWrite(`a:${uid}`));
+    const failed = [];
     for (const [uid, mids] of Object.entries(newAssigns)) {
-      await dbWrite(sb.from("training_assigns").delete().eq("user_id", String(uid)), "training assignments clear");
-      if (mids && mids.length) {
-        const rows = mids.map(mid => ({ user_id: String(uid), module_id: String(mid) }));
-        const { error } = await sb.from("training_assigns").insert(rows);
-        if (error) console.error("training_assigns insert error:", error);
+      const suid = String(uid);
+      const want = [...new Set((mids || []).map(String))];
+      const { data, error: readErr } = await sb.from("training_assigns").query(`select=user_id,module_id&user_id=eq.${encodeURIComponent(suid)}`);
+      if (readErr) { failed.push({ uid: suid, error: readErr }); continue; }
+      const have = new Set((data || []).filter(r => String(r.user_id) === suid).map(r => String(r.module_id)));
+      const add = want.filter(m => !have.has(m));
+      const drop = [...have].filter(m => !want.includes(m));
+      if (add.length) {
+        const { error } = await sb.from("training_assigns").insert(add.map(m => ({ user_id: suid, module_id: m })));
+        if (error) failed.push({ uid: suid, error });
+      }
+      for (const m of drop) {
+        const { error } = await sb.from("training_assigns").delete().match({ user_id: suid, module_id: m });
+        if (error) failed.push({ uid: suid, error });
       }
     }
+    if (failed.length) {
+      console.error("training_assigns save error:", failed);
+      failed.forEach(f => recentWriteRef.current.delete(`a:${f.uid}`));   // let the next refresh show what is really stored
+      const names = [...new Set(failed.map(f => auditNameOf(f.uid)))].join(", ");
+      alert(`Training assignments for ${names} could not be saved.\n\n${String(failed[0].error).slice(0, 300)}\n\nIf this mentions "out of range for type integer", run user_id_text_columns.sql in the Supabase SQL Editor.`);
+      refreshSharedRecords();
+    }
+    return failed.length === 0;
   }
 
   // One row per (user, module). Retaking a module overwrites the previous result.

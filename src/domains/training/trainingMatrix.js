@@ -13,6 +13,7 @@
  * A module completed WITHOUT being assigned still shows its real status (flag
  * `assigned:false`) — it just doesn't count towards that person's compliance.
  * Compliance = assigned modules that are valid or expiring ÷ assigned modules.
+ * Hidden modules (_hidden, retired in the Training Library) are never shown or counted.
  * (A major new module version clears completions, so those show as "missing".)
  *
  * exportTrainingMatrixXlsx() writes a 3-sheet workbook: the coloured matrix,
@@ -60,13 +61,15 @@ function buildTrainingMatrix({ staff, modules, assigns, comps, filter = {} }) {
     (!q || [u.name, u.jobTitle, u.manager, u.department].some(v => String(v || "").toLowerCase().includes(q))));
 
   // Columns: modules assigned to / completed by anyone shown (or every module).
+  // Hidden (retired) modules are left out entirely — they don't count towards
+  // anyone's compliance. Unhide a module in the Training Library to bring it back.
   const used = new Set();
   people.forEach(u => {
     (assigns[u.id] || []).forEach(id => used.add(String(id)));
     Object.keys(comps[u.id] || {}).forEach(id => used.add(String(id)));
   });
   const cols = (modules || [])
-    .filter(m => filter.allModules || used.has(String(m.id)))
+    .filter(m => !m._hidden && (filter.allModules || used.has(String(m.id))))
     .sort((a, b) => String(a.category || "").localeCompare(String(b.category || "")) || String(a.title).localeCompare(String(b.title)));
 
   let rows = people.map(u => {

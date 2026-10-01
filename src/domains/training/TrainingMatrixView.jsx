@@ -156,7 +156,7 @@ function TrainingMatrixView({ staff, modules, assigns, comps, Z, font }) {
         </div>
       )}
       <p style={{ fontSize: 11, color: Z.muted, marginTop: 10 }}>
-        Compliance = assigned modules that are complete and in date ÷ assigned modules. Faded cells were completed without being assigned and don't count. Hover a cell for dates and scores.
+        Compliance = assigned modules that are complete and in date ÷ assigned modules. Faded cells were completed without being assigned and don't count. Hidden modules aren't shown or counted. Hover a cell for dates and scores.
       </p>
     </div>
   );

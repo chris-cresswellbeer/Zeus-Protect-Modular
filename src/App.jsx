@@ -89,8 +89,11 @@ import { ExternalCertsSection } from "./domains/documents/ExternalCertsSection";
 import { PreviewModal } from "./domains/documents/PreviewModal";
 import { openFile } from "./lib/fileAccess";
 import { ScrollNav } from "./shared/ScrollNav";
-import { RecordCompletionModal, ImportPriorTrainingModal } from "./domains/training/RecordCompletion";
-import { isPassed, scoreText, recordedText } from "./domains/training/completion";
+import { BackupPanel, BACKUP_DUE_DAYS } from "./domains/audit/BackupPanel";
+import { lastBackupAt } from "./lib/backup";
+import { RecordCompletionModal, ImportPriorTrainingModal, GroupSessionModal } from "./domains/training/RecordCompletion";
+import { teamOf } from "./domains/manager/team";
+import { isPassed, scoreText, recordedText, passMarkOf } from "./domains/training/completion";
 import { DSEAssessment } from "./domains/dse/DSEAssessment";
 const LazyStaffDSETab = React.lazy(() => import("./domains/dse/StaffDSETab").then(m => ({ default: m.StaffDSETab })));
 const LazyEquipmentTrackerTab = React.lazy(() => import("./domains/equipment/EquipmentTrackerTab").then(m => ({ default: m.EquipmentTrackerTab })));
@@ -138,7 +141,6 @@ import { NewVersionModal } from "./shared/NewVersionModal";
 import { CertificateModal } from "./domains/training/CertificateModal";
 import { applyLightThemeFix, isLightTheme } from "./lib/lightThemeFix";
 import { mergeInvestigation, changedSince } from "./domains/incidents/investigationMerge";
-import { teamOf } from "./domains/manager/team";
 import { setAuditUser, primeAudit, primeAuditList, primeAuditMap, auditRecord, auditList, auditDelete, auditEvent } from "./lib/audit";
 
 // Wraps a dashboard stat card to make it draggable. Only the small handle in
@@ -207,6 +209,52 @@ const incidentAuditLabel = (inc) => inc ? [inc.date, INCIDENT_TYPE_LABELS[inc.ty
 
 // Incident fields that have their own column in the `incidents` table.
 // Everything else on an incident record is stored in the jsonb `details` column.
+// ── Row → state mappers for training and reading records (used by loadAll and
+// by the 30-second refresh, so both build exactly the same shapes) ──
+function mapAssignRows(rows) {
+  const map = {};
+  (rows || []).forEach(r => { const uid = String(r.user_id); (map[uid] = map[uid] || []).push(String(r.module_id)); });
+  return map;
+}
+function mapCompRows(rows) {
+  const map = {};
+  (rows || []).forEach(r => {
+    // Older versions also saved FAILED attempts here (no certificate, under 70%). A
+    // failed attempt isn't a completion — those are listed under Quiz Failures.
+    if (!r.recorded && !r.cert_id && r.score !== null && r.score !== undefined && Number(r.score) < 70) return;
+    const uid = String(r.user_id); map[uid] = map[uid] || {};
+    map[uid][String(r.module_id)] = { score: r.score, date: r.date, certId: r.cert_id, answers: r.answers, moduleVersion: r.module_version || 1, ...(r.recorded ? { recorded: r.recorded } : {}) };
+  });
+  return map;
+}
+function mapAckRows(rows) {
+  const map = {};
+  (rows || []).forEach(r => { const uid = String(r.user_id), did = String(r.doc_id); map[uid] = map[uid] || {}; map[uid][did] = { date: r.date, version: r.version || 1 }; });
+  return map;
+}
+// Merge freshly-read {person: {item: record}} into what's on screen. Records this
+// browser changed in the last minute keep the on-screen version (its save may still
+// be on its way); everything else takes the database's version.
+const RECENT_MS = 60000;
+function mergeNested(cur, fresh, recent, prefix) {
+  const next = {}; Object.entries(fresh).forEach(([u, m]) => { next[u] = { ...m }; });
+  const now = Date.now();
+  recent.forEach((t, key) => {
+    if (now - t > RECENT_MS || !key.startsWith(prefix + ":")) return;
+    const [, u, k] = key.split(":");
+    const local = cur[u] && cur[u][k];
+    if (local) { next[u] = next[u] || {}; next[u][k] = local; } else if (next[u]) delete next[u][k];
+  });
+  return stableJSON(next) === stableJSON(cur) ? cur : next;
+}
+function mergeAssigns(cur, fresh, recent) {
+  const next = { ...fresh }; const now = Date.now();
+  recent.forEach((t, key) => { if (now - t <= RECENT_MS && key.startsWith("a:")) { const u = key.slice(2); if (cur[u]) next[u] = cur[u]; else delete next[u]; } });
+  Object.keys(next).forEach(u => { if (!next[u] || !next[u].length) delete next[u]; });
+  const norm = o => stableJSON(Object.fromEntries(Object.entries(o).filter(([, v]) => v && v.length).map(([k, v]) => [k, [...v].sort()])));
+  return norm(next) === norm(cur) ? cur : next;
+}
+
 const INCIDENT_CORE_KEYS = new Set([
   "id","date","type","accidentCode","numberCode","location","reportedBy",
   "description","injuryType","riddor","closed","photos",
@@ -373,6 +421,8 @@ export default function App() {
   const [bulkTarget, setBulkTarget] = useState("individual");
   const [recordFor, setRecordFor] = useState(null);          // Assign Training: { uid, mid } → "Record as completed" window
   const [showImportPrior, setShowImportPrior] = useState(false); // Assign Training: import prior training (CSV)
+  const [groupSessionFor, setGroupSessionFor] = useState(null); // "all" (admin) | "team" (line manager) → group session window
+  const [lastBackup, setLastBackup] = useState(undefined);   // admin: when the last full backup was downloaded (null = never)
   const [bulkManager, setBulkManager] = useState("");
   // ── Session safety ──
   const [dbReady, setDbReady] = useState(false); // true once initial Supabase load is complete
@@ -540,13 +590,7 @@ export default function App() {
         // Training assigns
         const aRows = rows(aRes);
         if (aRows && aRows.length) {
-          const map = {};
-          aRows.forEach(r => {
-            const uid = String(r.user_id);
-            map[uid] = map[uid] || [];
-            map[uid].push(String(r.module_id));
-          });
-          setAssigns(map);
+          setAssigns(mapAssignRows(aRows));
         } else {
           // Normalise INIT_ASSIGN keys to strings
           const normalised = {};
@@ -557,12 +601,7 @@ export default function App() {
         // Training completions
         const cRows = rows(cRes);
         if (cRows && cRows.length) {
-          const map = {};
-          cRows.forEach(r => {
-            const tc_uid=String(r.user_id); map[tc_uid] = map[tc_uid] || {};
-            map[tc_uid][String(r.module_id)] = { score: r.score, date: r.date, certId: r.cert_id, answers: r.answers, moduleVersion: r.module_version || 1, ...(r.recorded ? { recorded: r.recorded } : {}) };
-          });
-          setComps(map);
+          setComps(mapCompRows(cRows));
         }
 
         // Incidents
@@ -582,9 +621,7 @@ export default function App() {
         // Doc acknowledgements
         const ackRows = rows(ackRes);
         if (ackRows && ackRows.length) {
-          const map = {};
-          ackRows.forEach(r => { const auid=String(r.user_id); const adid=String(r.doc_id); map[auid] = map[auid] || {}; map[auid][adid] = { date: r.date, version: r.version || 1 }; });
-          setDocAcknowledgements(map);
+          setDocAcknowledgements(mapAckRows(ackRows));
         }
 
         // Doc assignments
@@ -879,6 +916,9 @@ export default function App() {
   const investigationBaseRef = useRef(new Map());
   const equipmentSavedRef = useRef(new Map());   // non-admin sessions: last saved copy of each equipment item
   const refreshBusyRef = useRef(false);
+  // Training/reading records this browser just changed: key → time ("c:uid:mid", "k:uid:docId", "a:uid").
+  const recentWriteRef = useRef(new Map());
+  const markWrite = key => recentWriteRef.current.set(key, Date.now());
   // Once data has loaded, snapshot every audited record WITHOUT logging (lib/audit.js),
   // so only real changes from here on create audit-trail entries. Declared before the
   // auto-sync effects below so the snapshots exist before their first re-save.
@@ -929,7 +969,23 @@ export default function App() {
     if (!_ready.current || refreshBusyRef.current) return;
     refreshBusyRef.current = true;
     try {
-      const [iRes, invRes] = await Promise.all([sb.from("incidents").select("*"), sb.from("investigations").select("*")]);
+      const [iRes, invRes, cRes, ackRes, aRes, hRes] = await Promise.all([sb.from("incidents").select("*"), sb.from("investigations").select("*"),
+        sb.from("training_completions").select("*"), sb.from("doc_acknowledgements").select("*"), sb.from("training_assigns").select("*"),
+        sb.from("training_completion_history").select("*")]);
+      // Training completions, assignments and document confirmations made elsewhere
+      // (a member of staff finishing a module, a manager assigning one) appear here
+      // without a reload. With the old sign-in an empty table means "use the demo data".
+      const okRows = r => !r.error && Array.isArray(r.data) && (r.data.length > 0 || !USE_SEED);
+      const recent = recentWriteRef.current;
+      if (okRows(cRes)) setComps(cur => mergeNested(cur, mapCompRows(cRes.data), recent, "c"));
+      if (okRows(ackRes)) setDocAcknowledgements(cur => mergeNested(cur, mapAckRows(ackRes.data), recent, "k"));
+      if (okRows(aRes)) setAssigns(cur => mergeAssigns(cur, mapAssignRows(aRes.data), recent));
+      if (okRows(hRes)) setCompHistory(cur => {
+        const now = Date.now();
+        const pending = cur.filter(h => h.at && now - new Date(h.at).getTime() < RECENT_MS && !hRes.data.some(r => String(r.user_id) === String(h.user_id) && String(r.module_id) === String(h.module_id) && r.date === h.date));
+        const next = [...hRes.data, ...pending];
+        return stableJSON(next) === stableJSON(cur) ? cur : next;
+      });
       if (!iRes.error && Array.isArray(iRes.data)) {
         const fresh = iRes.data.map(mapIncidentRow);
         setIncidents(cur => {
@@ -974,6 +1030,14 @@ export default function App() {
     document.addEventListener("visibilitychange", tick);
     return () => { clearInterval(iv); window.removeEventListener("focus", tick); document.removeEventListener("visibilitychange", tick); };
   }, [dbReady, user]); // eslint-disable-line
+
+  // Admins: when was the last full backup downloaded? (drives the bell reminder)
+  useEffect(() => {
+    if (!dbReady || !user || user.role !== "admin") return;
+    let live = true;
+    lastBackupAt().then(at => { if (live) setLastBackup(at); });
+    return () => { live = false; };
+  }, [dbReady, user && user.id, user && user.role]); // eslint-disable-line
   useEffect(() => {
     if ((view === "admin" && atab === "incidents") || (view === "staff" && (stab === "incidents" || stab === "actions" || stab === "team"))) refreshSharedRecords();
   }, [view, atab, stab]); // eslint-disable-line
@@ -1045,6 +1109,7 @@ export default function App() {
   // Replaces the assignment list for each user in `newAssigns` ({userId:[moduleIds]}).
   // Delete-then-insert (not atomic) — pass ONLY the users that changed.
   async function dbSaveAssigns(newAssigns) {
+    Object.keys(newAssigns).forEach(uid => markWrite(`a:${uid}`));
     for (const [uid, mids] of Object.entries(newAssigns)) {
       await dbWrite(sb.from("training_assigns").delete().eq("user_id", String(uid)), "training assignments clear");
       if (mids && mids.length) {
@@ -1060,6 +1125,7 @@ export default function App() {
   // module version they were for) are kept when a retake or a major new version
   // replaces the current row.
   async function dbSaveCompletion(userId, moduleId, rec) {
+    markWrite(`c:${userId}:${moduleId}`);
     const moduleVersion = rec.moduleVersion || (allModules.find(m => String(m.id) === String(moduleId)) || {}).version || 1;
     // `recorded` (admin-recorded prior training, see completion.js) is only sent when
     // present, so ordinary quiz results never depend on that column existing.
@@ -1089,11 +1155,15 @@ export default function App() {
     const skipped = [], toSave = [];
     items.forEach(it => {
       const uid = String(it.userId), mid = String(it.moduleId);
-      if ((comps[uid] || {})[mid]) { skipped.push({ ...it, reason: "already has a result for this module" }); return; }
+      // A group session (it.session) renews an OLDER result; anything else never overwrites one.
+      const existing = (comps[uid] || {})[mid];
+      if (existing && !(it.session && String(existing.date || "") < it.date)) {
+        skipped.push({ ...it, reason: it.session ? "already has a result from that date or later" : "already has a result for this module" }); return;
+      }
       if (toSave.some(x => x.uid === uid && x.mid === mid)) { skipped.push({ ...it, reason: "listed twice" }); return; }
       const mod = allModules.find(m => String(m.id) === mid);
       toSave.push({ uid, mid, rec: { score: null, date: it.date, certId: null, answers: null, moduleVersion: (mod && mod.version) || 1,
-        recorded: { by, byId, at, ...(it.note ? { note: String(it.note).slice(0, 300) } : {}) } } });
+        recorded: { by, byId, at, ...(it.note ? { note: String(it.note).slice(0, 300) } : {}), ...(it.session ? { session: it.session } : {}) } } });
     });
     if (!toSave.length) return { saved: 0, skipped };
     // assignments first (one write per person), then the completions
@@ -1108,7 +1178,7 @@ export default function App() {
       setComps(p => ({ ...p, [uid]: { ...(p[uid] || {}), [mid]: rec } }));
       const who = (allUsers.find(u => String(u.id) === uid) || {}).name || uid;
       const title = (allModules.find(m => String(m.id) === mid) || {}).title || mid;
-      auditEvent("training_completion", uid, "record", `Recorded as completed on ${rec.date}: ${title}${rec.recorded.note ? ` — ${rec.recorded.note}` : ""}`,
+      auditEvent("training_completion", uid, "record", `${rec.recorded.session ? "Group session" : "Recorded as completed"} on ${rec.date}: ${title}${rec.recorded.note ? ` — ${rec.recorded.note}` : ""}`,
         { module: { from: null, to: title }, completed: { from: null, to: rec.date } }, who);
     }
     return { saved, skipped };
@@ -1118,6 +1188,7 @@ export default function App() {
     const uid = String(userId), mid = String(moduleId);
     const c = (comps[uid] || {})[mid];
     if (!c || !c.recorded) return;
+    markWrite(`c:${uid}:${mid}`);
     const ok = await dbWrite(sb.from("training_completions").delete().match({ user_id: uid, module_id: mid }), "recorded completion delete", { alertOnError: true });
     if (!ok) return;
     dbWrite(sb.from("training_completion_history").delete().match({ user_id: uid, module_id: mid, date: c.date }), "recorded completion history delete");
@@ -1233,6 +1304,7 @@ export default function App() {
   // Records which VERSION was read, and appends to doc_ack_history so earlier reads
   // are kept when a major new version clears the current acknowledgements.
   async function dbAcknowledgeDoc(userId, docId, date) {
+    markWrite(`k:${userId}:${docId}`);
     const version = (docs.find(d => String(d.id) === String(docId)) || {}).version || 1;
     const hist = { user_id: String(userId), doc_id: String(docId), version, date, at: new Date().toISOString() };
     setDocAckHistory(p => [...p, hist]);
@@ -1383,10 +1455,10 @@ export default function App() {
       ...p,
       [userId]: { ...(p[userId] || {}), [r.moduleId]: { score: r.score, date: r.date, certId: r.certId } },
     })),
-    optimisticDocAck: (userId, docId, date) => setDocAcknowledgements(p => ({
+    optimisticDocAck: (userId, docId, date) => (markWrite(`k:${userId}:${docId}`), setDocAcknowledgements(p => ({
       ...p,
       [userId]: { ...(p[userId] || {}), [docId]: { date, version: (docs.find(d => String(d.id) === String(docId)) || {}).version || 1 } },
-    })),
+    }))),
     optimisticIncident: (rec) => setIncidents(p => [rec, ...p]),
     optimisticDseReport: (userId, report) => setDseReports(p => ({
       ...p,
@@ -1516,6 +1588,21 @@ export default function App() {
   // theme/emojiMode for that user. Only called on create/edit of staff records.
   async function dbSaveUserProfile(user) {
     await dbWrite(sb.from("user_profiles").upsert({ user_id: String(user.id), data: user }, { onConflict: "user_id" }), "user profile");
+  }
+
+  // Remove (not Leaver): delete everything the portal holds about one person, so
+  // nothing is left behind. Incidents they reported, investigations, inspections and
+  // the Audit Trail are company records and are kept. Returns the rows deleted per table.
+  const PERSON_TABLES = ["training_assigns", "training_completions", "training_completion_history", "doc_assignments",
+    "doc_acknowledgements", "doc_ack_history", "dse_reports", "dse_admin_responses", "ext_certs", "machine_completions",
+    "last_logins", "user_profiles", "dashboard_layout"];
+  async function dbDeletePersonRecords(userId) {
+    const uid = String(userId);
+    const results = await Promise.all([
+      ...PERSON_TABLES.map(t => dbWrite(sb.from(t).delete().eq("user_id", uid), `${t} delete`)),
+      dbWrite(sb.from("quiz_failures").delete().eq("data->>userId", uid), "quiz failures delete"),
+    ]);
+    return results.every(Boolean);
   }
 
   async function dbDeleteUserProfile(userId) {
@@ -1664,16 +1751,24 @@ export default function App() {
       setCustomModules(p => p.find(x => x.id === m.id) ? p.map(x => x.id === m.id ? upd : x) : [...p, upd]);
       dbSaveCustomModule(upd);
     }
-    let cleared = 0;
-    if (change === "major") {
-      const affected = Object.keys(comps).filter(uid => comps[uid] && comps[uid][m.id]);
-      cleared = affected.length;
-      setComps(p => { const n = { ...p }; affected.forEach(uid => { n[uid] = { ...n[uid] }; delete n[uid][m.id]; }); return n; });
-      affected.forEach(uid => dbWrite(sb.from("training_completions").delete().match({ user_id: String(uid), module_id: String(m.id) }), "completion clear (new module version)"));
-    }
-    auditEvent("module", m.id, "new_version",
+    const logVersion = cleared => auditEvent("module", m.id, "new_version",
       `Version ${newVer} (${change === "major" ? `major — ${cleared} ${cleared === 1 ? "person" : "people"} must redo it` : "minor — completions kept"})${note ? `: ${note}` : ""}`,
       { version: { from: prevVer, to: newVer }, change: { from: null, to: change } }, m.title || "");
+    if (change === "major") {
+      // Clear EVERY current completion of this module, as the database has them —
+      // not just the ones on this screen, which may be missing someone who finished
+      // it after you signed in. Their earlier results stay in the history.
+      (async () => {
+        const mid = String(m.id);
+        const { data, error } = await sb.from("training_completions").query(`select=user_id&module_id=eq.${encodeURIComponent(mid)}`);
+        const affected = [...new Set([...(error ? [] : (data || []).map(r => String(r.user_id))),
+          ...Object.keys(comps).filter(uid => comps[uid] && comps[uid][m.id])])];
+        affected.forEach(uid => markWrite(`c:${uid}:${mid}`));
+        setComps(p => { const n = { ...p }; affected.forEach(uid => { if (n[uid]) { n[uid] = { ...n[uid] }; delete n[uid][m.id]; } }); return n; });
+        await dbWrite(sb.from("training_completions").delete().eq("module_id", mid), "completion clear (new module version)", { alertOnError: true });
+        logVersion(affected.length);
+      })();
+    } else logVersion(0);
     setPendingModuleSave(null);
     setEditingModule(null);
     setAtab("modules");
@@ -1926,22 +2021,26 @@ export default function App() {
   // Opens a module in the player and resets all per-attempt state.
   function startMod(m) { setMod(m); setStep(0); setQans({}); setQsub(false); setShowCelebration(false); setHotspotComplete({}); }
 
-  // Scores the quiz. PASS MARK = 70% — this number is repeated in several places in
-  // the module player UI (and in mobile/screens/ModulePlayer.jsx). If you change it,
-  // search for "70" in both files and update them together.
-  // A pass creates a certificate id "ZSL-XXXXXXXX"; a fail is logged to quiz_failures.
+  // Scores the quiz against the module's own pass mark (passMarkOf: default 70%,
+  // set per module in Create/Edit Module). The phone player does the same.
+  // A pass creates a certificate id "ZSL-XXXXXXXX" and becomes their result. A fail
+  // is logged to quiz_failures only — it never replaces an earlier pass, and it
+  // doesn't count as completed.
   function submitQuiz() {
     let score=0;
     mod.quiz.forEach((q,i)=>{ if(qans[i]===q.answer) score++; });
     const pct=Math.round(score/mod.quiz.length*100);
+    const mark = passMarkOf(mod);
     setQsub(true);
-    const certId = pct>=70 ? "ZSL-" + (user.id.toString(36) + mod.id + Date.now().toString(36)).toUpperCase().slice(-8) : null;
-    if (pct>=70) setShowCelebration(true);
-    const rec = {score:pct, date:new Date().toISOString().slice(0,10), answers:{...qans}, certId, moduleVersion: mod.version||1};
-    setComps(p=>({...p,[user.id]:{...p[user.id],[mod.id]:rec}}));
-    dbSaveCompletion(user.id, mod.id, rec);
+    const certId = pct>=mark ? "ZSL-" + (user.id.toString(36) + mod.id + Date.now().toString(36)).toUpperCase().slice(-8) : null;
+    if (pct>=mark) {
+      setShowCelebration(true);
+      const rec = {score:pct, date:new Date().toISOString().slice(0,10), answers:{...qans}, certId, moduleVersion: mod.version||1};
+      setComps(p=>({...p,[user.id]:{...p[user.id],[mod.id]:rec}}));
+      dbSaveCompletion(user.id, mod.id, rec);
+    }
     // Record failure for admin visibility
-    if (pct < 70) {
+    if (pct < mark) {
       const failure = {
         id: "qf_" + Date.now(),
         userId: user.id,
@@ -1951,6 +2050,7 @@ export default function App() {
         score: pct,
         date: new Date().toISOString().slice(0,10),
         acknowledged: false,
+        passMark: mark,
       };
       setQuizFailures(p=>[...p, failure]);
       dbSaveQuizFailure(failure);
@@ -2097,7 +2197,7 @@ export default function App() {
     if (qsub) {
       mod.quiz.forEach((q,i)=>{ if(qans[i]===q.answer) qScore++; });
       qPct = Math.round(qScore/mod.quiz.length*100);
-      passed = qPct>=70;
+      passed = qPct>=passMarkOf(mod);
     }
 
     return (
@@ -2231,7 +2331,7 @@ export default function App() {
               <h1 style={{fontSize:32,fontWeight:900,letterSpacing:-1,marginBottom:6}}>{mod.title}</h1>
               <p style={{color:T.muted,fontSize:15,marginBottom:28}}>{mod.category} · {mod.duration} · <span style={{color:mod.level==="Mandatory"?"#f87171":T.accentLt}}>{mod.level}</span> · {totalSlides} slides · {mod.quiz.length} quiz questions</p>
               <div style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:16,padding:28,textAlign:"left",border:`1px solid ${T.border}`}}>
-                <p style={{margin:0,color:T.slate,lineHeight:1.8,fontSize:15}}>Read through each slide carefully, then complete the knowledge check. A score of <strong style={{color:T.green}}>70% or above</strong> is required to pass and receive your Zeus certificate.</p>
+                <p style={{margin:0,color:T.slate,lineHeight:1.8,fontSize:15}}>Read through each slide carefully, then complete the knowledge check. A score of <strong style={{color:T.green}}>{passMarkOf(mod)}% or above</strong> is required to pass and receive your Zeus certificate.</p>
               </div>
               <button onClick={()=>{setStep(1);window.scrollTo({top:0,behavior:"smooth"});}} style={{marginTop:32,background:`linear-gradient(135deg,${T.accent},${T.blue})`,color:T.white,border:"none",borderRadius:12,padding:"14px 44px",fontWeight:800,fontSize:16,cursor:"pointer",fontFamily:font,boxShadow:`0 6px 24px ${T.accent}55`,letterSpacing:.5}}>
                 Begin Module →
@@ -2324,7 +2424,7 @@ export default function App() {
           {isQuiz && !qsub && (
             <div>
               <h2 style={{fontSize:24,fontWeight:900,marginBottom:4,letterSpacing:-.5}}>Knowledge Check</h2>
-              <p style={{color:T.muted,marginBottom:28,fontSize:14}}>{mod.quiz.length} questions · 70% needed to pass</p>
+              <p style={{color:T.muted,marginBottom:28,fontSize:14}}>{mod.quiz.length} questions · {passMarkOf(mod)}% needed to pass</p>
               {mod.quiz.map((q,qi)=>(
                 <div key={qi} style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:16,padding:24,marginBottom:14,border:`1px solid ${T.border}`}}>
                   <p style={{fontWeight:700,marginBottom:16,fontSize:15}}><span style={{color:T.accentLt}}>Q{qi+1}.</span> {q.q}</p>
@@ -2350,7 +2450,7 @@ export default function App() {
                 <h2 style={{fontSize:36,fontWeight:900,color:passed?T.green:T.amber,letterSpacing:-1}}>{passed?"Passed!":"Not Quite"}</h2>
                 <div style={{fontSize:60,fontWeight:900,color:T.white,margin:"8px 0",fontFamily:"'Barlow Condensed',sans-serif"}}>{qPct}%</div>
                 <p style={{color:T.muted}}>{qScore} of {mod.quiz.length} correct</p>
-                {!passed && <p style={{color:T.amber,marginTop:6}}>You need 70% to pass. Review the slides and try again.</p>}
+                {!passed && <p style={{color:T.amber,marginTop:6}}>You need {passMarkOf(mod)}% to pass. Review the slides and try again.</p>}
                 <div style={{display:"flex",gap:12,justifyContent:"center",marginTop:28,flexWrap:"wrap"}}>
                   {passed && (
                     <button onClick={()=>setCert({module:mod,score:qPct,date:(comps[user.id]||{})[mod.id]?.date||new Date().toISOString().slice(0,10),certId:(comps[user.id]||{})[mod.id]?.certId||null})}
@@ -2861,7 +2961,7 @@ export default function App() {
                             <Bar pct={myC[m.id].recorded?100:myC[m.id].score} color={isPassed(myC[m.id])?T.green:T.amber}/>
                             <span style={{color:isPassed(myC[m.id])?T.green:T.amber,fontWeight:700,fontSize:13}}>{scoreText(myC[m.id])}</span>
                           </div>
-                          <p style={{color:T.muted,fontSize:11,margin:"0 0 6px"}}>Completed {myC[m.id].date}{myC[m.id].recorded?" · from your earlier training records":""}</p>
+                          <p style={{color:T.muted,fontSize:11,margin:"0 0 6px"}}>Completed {myC[m.id].date}{myC[m.id].recorded?(myC[m.id].recorded.session?" · in a group session":" · from your earlier training records"):""}</p>
                           {m.renewalMonths && (() => {
                             const ex = getExpiryStatus(myC[m.id].date, m.renewalMonths);
                             if (!ex) return null;
@@ -3168,7 +3268,10 @@ export default function App() {
               docs={docs} docAssignments={docAssignments} docAcknowledgements={docAcknowledgements}
               dseReports={dseReports} adminResponses={adminResponses} investigations={investigations}
               onAssign={managerAssign} onSignOffDse={managerSignOffDse} onSignOffAction={managerSignOffAction}
+              onGroupSession={()=>setGroupSessionFor("team")}
               Z={T} font={font}/>
+            {groupSessionFor==="team" && <GroupSessionModal people={teamOf(user, allUsers)} modules={allModules.filter(m=>!m._hidden)} comps={comps}
+              leaderName={user.name} onSave={recordCompletions} onClose={()=>setGroupSessionFor(null)} Z={T} font={font}/>}
             </React.Suspense>
           )}
 
@@ -3441,16 +3544,31 @@ export default function App() {
       setNewName(""); setNewEmail(""); setNewJobTitle(""); setNewManager(""); setNewRole("staff"); setNewIsWarehouse(false); setNewDepartment(""); setNewStatus("active"); setAddErr(""); setShowAddStaff(false);
     };
 
-    // Deletes the user + profile rows. NOTE: training/doc/DSE rows for that user are
-    // removed from local state only and remain in their Supabase tables.
-    const removeStaff = (uid) => {
+    // Remove = delete the staff record, their sign-in account and ALL their personal
+    // records (training, reading, DSE, certificates, machinery, preferences). Incidents,
+    // investigations, inspections and the Audit Trail are kept. For people who leave,
+    // use the Leaver status instead (keeps everything for audit).
+    const removeStaff = async (uid) => {
       const u = allUsers.find(x=>x.id===uid);
-      if (!window.confirm(`Are you sure you want to remove ${u?.name||"this staff member"}?\n\nThis will permanently delete their account, training assignments, and all associated records. This cannot be undone.`)) return;
+      const sid = String(uid);
+      const n = {
+        results: Object.keys(comps[sid]||{}).length, assigned: (assigns[sid]||[]).length,
+        docs: Object.keys(docAcknowledgements[sid]||{}).length, dse: (dseReports[sid]||dseReports[uid]||[]).length,
+        certs: Object.keys(extCerts[sid]||extCerts[uid]||{}).length,
+      };
+      const detail = [`${n.results} training result${n.results!==1?"s":""}`, `${n.assigned} assigned module${n.assigned!==1?"s":""}`,
+        `${n.docs} document confirmation${n.docs!==1?"s":""}`, `${n.dse} DSE assessment${n.dse!==1?"s":""}`, `${n.certs} external certificate${n.certs!==1?"s":""}`].join(", ");
+      if (!window.confirm(`Remove ${u?.name||"this staff member"} completely?\n\nThis permanently deletes their staff record, sign-in account and personal records: ${detail}, plus their training and reading history, machinery competences and preferences. It can't be undone.\n\nIncidents they reported, investigations and the Audit Trail are kept.\n\nIf they have left the company, cancel and set their status to Leaver instead — that keeps their training record for audits.`)) return;
       setAllUsers(p=>p.filter(u=>u.id!==uid));
-      dbDeleteUser(uid);
-      dbDeleteUserProfile(uid);
-      setAssigns(p=>{ const n={...p}; delete n[uid]; return n; });
-      setComps(p=>{ const n={...p}; delete n[uid]; return n; });
+      const strip = o => { const c={...o}; delete c[sid]; delete c[uid]; return c; };
+      setAssigns(strip); setComps(strip); setDocAcknowledgements(strip); setDseReports(strip); setAdminResponses(strip); setExtCerts(strip); setMachineComps(strip);
+      setDocAssignments(p=>Object.fromEntries(Object.entries(p).map(([d,ids])=>[d,(ids||[]).filter(x=>String(x)!==sid)])));
+      setCompHistory(p=>p.filter(h=>String(h.user_id)!==sid)); setDocAckHistory(p=>p.filter(h=>String(h.user_id)!==sid));
+      setQuizFailures(p=>p.filter(f=>String(f.userId)!==sid));
+      await dbDeleteUser(uid);
+      const ok = await dbDeletePersonRecords(uid);
+      auditEvent("staff", sid, "remove", `Removed staff member and their records (${detail})${ok ? "" : " — some records could not be deleted"}`, {}, u?.name || sid);
+      if (!ok) alert("The staff member was removed, but some of their records couldn't be deleted. Try again later or check the Audit Trail.");
     };
 
     return (
@@ -3537,6 +3655,9 @@ export default function App() {
               // Thresholds used: training/certificates expiring ≤EXPIRY_WARNING_DAYS (lib/dates.js), RA/doc review ≤30d, drill >365d,
               // fire warden cert default 36 months.
               const notifications = [];
+              // Full backup reminder (Audit Trail → Download full backup)
+              if (lastBackup !== undefined && (lastBackup === null || (Date.now() - new Date(lastBackup).getTime()) / 86400000 >= BACKUP_DUE_DAYS))
+                notifications.push({type:"report",urgent:false,title:lastBackup?"A full backup is due":"Download a first full backup",detail:lastBackup?`Last one ${Math.floor((Date.now()-new Date(lastBackup).getTime())/86400000)} days ago — Documents ▼ → Audit Trail`:"Keeps a copy of every record — Documents ▼ → Audit Trail",nav:{tab:"audit"}});
               // Staff with overdue mandatory modules
               const overdueStaff = staff.filter(u=>{
                 const mandatory = allModules.filter(m=>m.level==="Mandatory"&&(assigns[u.id]||[]).includes(m.id));
@@ -4425,11 +4546,17 @@ export default function App() {
               <h2 style={{fontSize:22,fontWeight:900,letterSpacing:-.5,marginBottom:6}}>Assign Training <HelpTip dark={false} text="Tick modules to assign them to staff. Assigned modules appear on the staff member's dashboard as required training. Use bulk assignment to push modules to an entire team at once."/></h2>
               <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",marginBottom:20}}>
                 <p style={{color:T.muted,fontSize:13,margin:0,flex:1,minWidth:240}}>Assign modules to individuals, teams, or all staff at once.</p>
+                <button onClick={()=>setGroupSessionFor("all")}
+                  style={{background:"rgba(37,99,235,0.12)",color:T.accentLt,border:`1px solid ${T.accent}55`,borderRadius:10,padding:"8px 16px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font}}>
+                  {E("👥 ","")}Record a group session
+                </button>
                 <button onClick={()=>setShowImportPrior(true)}
                   style={{background:"rgba(16,185,129,0.1)",color:T.green,border:"1px solid rgba(16,185,129,0.3)",borderRadius:10,padding:"8px 16px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font}}>
                   {E("📥 ","")}Import training done before the portal
                 </button>
               </div>
+              {groupSessionFor==="all" && <GroupSessionModal people={allUsers.filter(u=>(u.status||"active")!=="leaver")} modules={allModules.filter(m=>!m._hidden)} comps={comps}
+                leaderName={user.name} onSave={recordCompletions} onClose={()=>setGroupSessionFor(null)} Z={T} font={font}/>}
               {showImportPrior && <ImportPriorTrainingModal users={allUsers.filter(u=>(u.status||"active")!=="leaver")} modules={allModules} comps={comps}
                 onImport={recordCompletions} onClose={()=>setShowImportPrior(false)} Z={T} font={font}/>}
               {recordFor && (()=>{ const pu=allUsers.find(u=>String(u.id)===String(recordFor.uid)); const pm=allModules.find(m=>m.id===recordFor.mid);
@@ -4937,6 +5064,7 @@ export default function App() {
 
           {atab==="audit" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
+            <BackupPanel user={user} onBackedUp={setLastBackup} Z={T} font={font}/>
             <LazyAuditTrailTab Z={T} font={font}/>
             </React.Suspense>
           )}

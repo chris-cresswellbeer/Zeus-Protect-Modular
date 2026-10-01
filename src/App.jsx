@@ -88,6 +88,7 @@ import { DocCard } from "./domains/documents/DocCard";
 import { ExternalCertsSection } from "./domains/documents/ExternalCertsSection";
 import { PreviewModal } from "./domains/documents/PreviewModal";
 import { openFile } from "./lib/fileAccess";
+import { ScrollNav } from "./shared/ScrollNav";
 import { RecordCompletionModal, ImportPriorTrainingModal } from "./domains/training/RecordCompletion";
 import { isPassed, scoreText, recordedText } from "./domains/training/completion";
 import { DSEAssessment } from "./domains/dse/DSEAssessment";
@@ -2508,6 +2509,8 @@ export default function App() {
       <div style={{minHeight:"100vh",background:T.bg,fontFamily:font,color:T.white}}>
         <CertModal/>
         <PreviewModal doc={previewDoc} onClose={()=>setPreviewDoc(null)} Z={T} font={font}/>
+        {/* ▲/▼ top-of-page / bottom-of-page buttons on long screens (shared/ScrollNav.jsx) */}
+        <ScrollNav bottom={isMobile && stab!=="dashboard" ? 92 : 24} Z={T} font={font}/>
         {/* Nav */}
         <div style={{background:`linear-gradient(90deg,${T.navyDk},${T.navyMd})`,borderBottom:`1px solid ${T.border}`,padding:"0 24px",display:"flex",alignItems:"center",position:"relative"}}>
           <div style={{marginRight:20,padding:"10px 0",flexShrink:0}}><ZeusLogo darkMode={darkMode}/></div>
@@ -3460,6 +3463,8 @@ export default function App() {
           </div>
         )}
         <PreviewModal doc={previewDoc} onClose={()=>setPreviewDoc(null)} Z={T} font={font}/>
+        {/* ▲/▼ top-of-page / bottom-of-page buttons on long screens (shared/ScrollNav.jsx) */}
+        <ScrollNav bottom={24} Z={T} font={font}/>
         {pendingModuleSave && (
           <NewVersionModal kind="module" title={pendingModuleSave.m.title || "Training module"}
             fromVersion={pendingModuleSave.prev.version || 1}

@@ -32,6 +32,7 @@ import { Inspections, InspectionRun } from "./screens/Inspection";
 import { Permits, PermitDetail } from "./screens/Permits";
 import { INSP_TYPES } from "../data/seedInspections";
 import { myIncompleteQuickReports } from "../domains/incidents/quickReportStatus";
+import { ScrollNav } from "../shared/ScrollNav";
 
 const FONT = "'Barlow','Trebuchet MS',system-ui,sans-serif";
 const PROGRESS_KEY = "zeus.mobile.progress";
@@ -109,6 +110,7 @@ function MobileApp({
   const isAdmin = user.role === "admin";
   const [tab, setTab] = React.useState("today");
   const [screen, setScreen] = React.useState("today");
+  const mainRef = React.useRef(null);   // the scrolling <main>, for ScrollNav
   const [activeModule, setActiveModule] = React.useState(null);
   const [activeInspection, setActiveInspection] = React.useState(null);
   const [activePermit, setActivePermit] = React.useState(null);
@@ -391,7 +393,7 @@ function MobileApp({
 
       {(!online || queue.length > 0) && <OfflineBanner queueCount={queue.length} Z={T} />}
 
-      <main style={{ flex: 1, overflow: "auto", WebkitOverflowScrolling: "touch" }}>
+      <main ref={mainRef} style={{ flex: 1, overflow: "auto", WebkitOverflowScrolling: "touch" }}>
         {screen === "today" && (
           <Today
             user={user} myMods={myMods} myComps={myComps} unreadDocs={unreadDocs}
@@ -541,6 +543,8 @@ function MobileApp({
         )}
 
       </main>
+      {/* ▲/▼ on long screens, above the tab bar (shared/ScrollNav.jsx) */}
+      <ScrollNav scrollRef={mainRef} watchKey={screen} bottom="calc(env(safe-area-inset-bottom, 8px) + 84px)" Z={T} font={FONT} />
 
       <TabBar tabs={tabs} active={activeTab} onSelect={(id) => go(id)} Z={T} font={FONT} />
     </div>

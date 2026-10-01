@@ -144,15 +144,28 @@ const sb = (() => {
    * Values passed to eq/neq/etc. are URL-encoded here, so callers pass raw values.
    * Remember all user_id columns are TEXT — pass String(id) to be safe.
    */
+  const PAGE_ROWS = 1000;   // Supabase's default "Max rows" per request
   const from = (table) => ({
     // select() fires the "all rows" GET immediately and returns that promise.
     // .eq()/.neq() are bolted onto the same promise object and fire a SECOND,
     // filtered GET — so `select().eq(...)` makes two requests (the unfiltered one
     // is simply ignored). Harmless for small tables; worth fixing (lazy request)
     // if a large table is ever queried this way.
+    // Supabase answers at most 1000 rows per request (Settings → API → Max rows), so
+    // the "all rows" read fetches page after page until a short page comes back.
+    // Without this, tables past 1000 rows silently lost their newest records on
+    // every load and refresh (e.g. training assignments for recently added staff).
     select: (cols = "*") => {
-      const base = { filter: `select=${cols}` };
-      const promise = q("GET", table, base);
+      const promise = (async () => {
+        const all = [];
+        for (let offset = 0; ; offset += PAGE_ROWS) {
+          const r = await q("GET", table, { filter: `select=${cols}&limit=${PAGE_ROWS}&offset=${offset}` });
+          if (r.error) return offset === 0 ? r : { data: all, error: r.error };
+          const rows = Array.isArray(r.data) ? r.data : [];
+          all.push(...rows);
+          if (rows.length < PAGE_ROWS || offset > 2000000) return { data: all, error: null };
+        }
+      })();
       promise.eq  = (col, val) => q("GET", table, { filter: `select=${cols}&${col}=eq.${encodeURIComponent(val)}` });
       promise.neq = (col, val) => q("GET", table, { filter: `select=${cols}&${col}=neq.${encodeURIComponent(val)}` });
       return promise;

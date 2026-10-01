@@ -86,6 +86,7 @@ const LazyAuditTrailTab = React.lazy(() => import("./domains/audit/AuditTrailTab
 const LazyCoshhTab = React.lazy(() => import("./domains/coshh/CoshhTab").then(m => ({ default: m.CoshhTab })));
 import { DocCard } from "./domains/documents/DocCard";
 import { DocBundles, MyBundles } from "./domains/documents/DocBundles";
+import { SlideVideo } from "./shared/SlideVideo";
 import { mapBundleRows, bundleRow, addAssignments, removeAssignments, bundlesFor, bundleNamesOf, withoutDoc, withoutMember } from "./domains/documents/bundles";
 import { ExternalCertsSection } from "./domains/documents/ExternalCertsSection";
 import { PreviewModal } from "./domains/documents/PreviewModal";
@@ -2504,9 +2505,12 @@ export default function App() {
                 {((slide.images||[]).length>0 || slide.image?.data || slide.image?.url) && !(slide.hotspots&&slide.hotspots.length>0) && (
                   <div style={{marginBottom:20,display:"flex",flexWrap:"wrap",gap:10,justifyContent:"center"}}>
                     {/* new images[] array */}
+                    {/* deck: a whole PowerPoint slide imported from a PDF — shown full width */}
                     {(slide.images||[]).map((img,ii)=>(
-                      <img key={ii} src={img.url||img.data} alt={img.name||""} onClick={()=>{setLightboxSrc(img.url||img.data);setLightboxZoomed(false);}}
-                        style={{maxWidth:"100%",flex:"1 1 220px",maxHeight:360,borderRadius:12,border:`1px solid ${T.borderMd}`,objectFit:"contain",cursor:"zoom-in"}}/>
+                      <img key={ii} src={img.url||img.data} alt={img.deck ? (slide.heading||"Slide") : (img.name||"")} onClick={()=>{setLightboxSrc(img.url||img.data);setLightboxZoomed(false);}}
+                        style={img.deck
+                          ? {width:"100%",maxHeight:"70vh",borderRadius:12,border:`1px solid ${T.borderMd}`,objectFit:"contain",cursor:"zoom-in",background:"#fff"}
+                          : {maxWidth:"100%",flex:"1 1 220px",maxHeight:360,borderRadius:12,border:`1px solid ${T.borderMd}`,objectFit:"contain",cursor:"zoom-in"}}/>
                     ))}
                     {/* backwards compat: old single image field */}
                     {(slide.images||[]).length===0 && (slide.image?.data||slide.image?.url) && (
@@ -2515,14 +2519,8 @@ export default function App() {
                     )}
                   </div>
                 )}
-                {slide.video && (
-                  <div style={{marginBottom:20,borderRadius:12,overflow:"hidden",background:"#000",border:`1px solid ${T.borderMd}`}}>
-                    {slide.video.uploading
-                      ? <div style={{padding:32,textAlign:"center",color:"#aaa",fontSize:13}}>⏳ Uploading video…</div>
-                      : <video src={slide.video.url||slide.video.data} controls style={{width:"100%",maxHeight:360,display:"block"}}/>
-                    }
-                  </div>
-                )}
+                {/* uploaded file, or a YouTube / Vimeo / Stream link (shared/SlideVideo.jsx) */}
+                {slide.video && <SlideVideo video={slide.video} Z={T} style={{marginBottom:20}}/>}
                 {/* Rich (HTML) text is ALWAYS passed through sanitizeHtml before rendering. Plain text is split on ". " and lines like "Step 2: ..." become numbered badges. */}
                 {slide.text && (
                   isHtmlContent(slide.text) ? (

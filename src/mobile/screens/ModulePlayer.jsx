@@ -14,6 +14,7 @@ import { Screen, PrimaryButton, GhostButton } from "../ui";
 import { sanitizeHtml } from "../../lib/sanitizeHtml";
 import { isHtmlContent, ensureRteStyles } from "../../domains/training/slideTextUtils";
 import { useFileUrl } from "../../lib/fileAccess";
+import { videoSource } from "../../lib/videoLink";
 
 // Must match the desktop pass mark in App.jsx submitQuiz (also 70).
 import { PASS_MARK, passMarkOf } from "../../domains/training/completion";
@@ -342,6 +343,19 @@ function SlideVideo({ src: stored, Z }) {
   );
 }
 
+// A YouTube / Vimeo / Stream link (lib/videoLink.js) — embedded player, 16:9.
+function SlideVideoEmbed({ src, title, Z }) {
+  return (
+    <div data-testid="slide-video-embed" style={{ marginTop: 16, borderRadius: 14, overflow: "hidden", background: "#000", border: `1px solid ${Z.borderMd}` }}>
+      <div style={{ position: "relative", paddingTop: "56.25%" }}>
+        <iframe src={src} title={title || "Training video"} loading="lazy" allowFullScreen
+          allow="autoplay; encrypted-media; picture-in-picture; fullscreen" referrerPolicy="strict-origin-when-cross-origin"
+          style={{ position: "absolute", inset: 0, width: "100%", height: "100%", border: 0 }} />
+      </div>
+    </div>
+  );
+}
+
 function MediaFallback({ kind, src, Z }) {
   const canOpen = src && !String(src).startsWith("data:");
   return (
@@ -367,7 +381,9 @@ function SlideCard({ slide, Z, font, onHotspotStatus }) {
 
   const images = slideImages(slide);
   const isHotspot = !!(slide.hotspots && slide.hotspots.length > 0);
-  const videoSrc = slide.video && (slide.video.url || slide.video.data);
+  const deckFirst = !!((slide.images || [])[0] && slide.images[0].deck) && images.length > 0;
+  const vs = videoSource(slide.video);                // uploaded file, direct link, or embed
+  const videoSrc = vs && vs.src;
 
   return (
     <div style={{
@@ -383,14 +399,33 @@ function SlideCard({ slide, Z, font, onHotspotStatus }) {
           {slide.heading}
         </h2>
       )}
-      {slide.text && <SlideBody text={slide.text} Z={Z} />}
-
-      {videoSrc && (
-        <SlideVideo src={videoSrc} Z={Z} />
+      {/* A whole PowerPoint slide (imported from PDF) comes first, like the desktop player. */}
+      {!isHotspot && deckFirst && (
+        <div style={{ display: "grid", gap: 10, marginBottom: slide.text || videoSrc ? 16 : 0 }}>
+          {images.map((src, i) => (
+            <button
+              key={i}
+              onClick={() => setZoom(src)}
+              aria-label="View full size"
+              style={{
+                padding: 0, border: `1px solid ${Z.borderMd}`, borderRadius: 14,
+                overflow: "hidden", background: Z.overlay, cursor: "zoom-in", lineHeight: 0,
+              }}
+            >
+              <SlideImage src={src} Z={Z} />
+            </button>
+          ))}
+        </div>
       )}
 
+      {slide.text && <SlideBody text={slide.text} Z={Z} />}
+
+      {vs && vs.kind === "embed" && <SlideVideoEmbed src={vs.src} title={slide.video.name} Z={Z} />}
+      {vs && vs.kind === "file" && <SlideVideo src={vs.src} Z={Z} />}
+      {vs && vs.kind === "unknown" && <div style={{ marginTop: 16 }}><MediaFallback kind="video" src={vs.src} Z={Z} /></div>}
+
       {/* Plain images are hidden on a hotspot slide — the activity owns the image. */}
-      {!isHotspot && images.length > 0 && (
+      {!isHotspot && images.length > 0 && !deckFirst && (
         <div style={{ display: "grid", gap: 10, marginTop: slide.text || videoSrc ? 16 : 0 }}>
           {images.map((src, i) => (
             <button
@@ -407,6 +442,7 @@ function SlideCard({ slide, Z, font, onHotspotStatus }) {
           ))}
         </div>
       )}
+
 
       {isHotspot && images.length > 0 && (
         <MobileHotspot

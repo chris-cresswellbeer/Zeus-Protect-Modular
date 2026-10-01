@@ -3,6 +3,7 @@ import { Pill } from "../../shared/primitives";
 import { E } from "../../lib/emoji";
 import { sanitizeHtml } from "../../lib/sanitizeHtml";
 import { isHtmlContent, ensureRteStyles } from "./slideTextUtils";
+import { SlideVideo } from "../../shared/SlideVideo";
 import { isPassed, scoreText, recordedText, passMarkOf } from "./completion";
 
 /**
@@ -101,7 +102,9 @@ function ModulePreviewModal({ m, staff, assigns, comps, compHistory = [], module
                       )}
                     </div>
                   )}
-                  {slides[previewSlide].videoUrl && <video controls style={{width:"100%",borderRadius:10,marginTop:12}}><source src={slides[previewSlide].videoUrl}/></video>}
+                  {slides[previewSlide].video
+                    ? <SlideVideo video={slides[previewSlide].video} Z={T} style={{marginTop:12}}/>
+                    : slides[previewSlide].videoUrl && <video controls style={{width:"100%",borderRadius:10,marginTop:12}}><source src={slides[previewSlide].videoUrl}/></video>}
                 </div>
                 <div style={{display:"flex",gap:6,marginTop:12,overflowX:"auto",paddingBottom:4}}>
                   {slides.map((_,i)=>(<button key={i} onClick={()=>setPreviewSlide(i)} style={{flexShrink:0,width:44,height:32,borderRadius:6,border:`2px solid ${previewSlide===i?T.accent:T.border}`,background:previewSlide===i?"rgba(37,99,235,0.15)":T.overlay,cursor:"pointer",fontSize:10,color:previewSlide===i?T.accentLt:T.muted,fontWeight:previewSlide===i?700:400}}>{i+1}</button>))}

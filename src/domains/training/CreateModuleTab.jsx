@@ -7,6 +7,9 @@ import { RichTextEditor } from "./RichTextEditor";
 import { HotspotEditor } from "./HotspotEditor";
 import { sanitizeHtml } from "../../lib/sanitizeHtml";
 import { htmlToPlainText } from "./slideTextUtils";
+import { SlideImportPanel } from "./SlideImportPanel";
+import { MAX_UPLOAD_MB } from "./slideImport";
+import { parseVideoLink } from "../../lib/videoLink";
 
 /**
  * CreateModuleTab — admin 4-step wizard to create or edit a training module.
@@ -30,6 +33,12 @@ import { htmlToPlainText } from "./slideTextUtils";
  *     _custom:true }
  *   `url` and `data` hold the SAME storage URL (older code read `data`, newer reads `url`).
  *
+ * IMPORT: "Import slides from PowerPoint" (SlideImportPanel) turns a PDF export of a
+ * deck into slides (one picture per slide, images[0].deck = true), with optional
+ * speaker notes / titles / embedded videos from the .pptx.
+ * VIDEO LINKS: instead of uploading, a slide's video can be a YouTube / Vimeo /
+ * Microsoft Stream link: video = { name, link:true, provider, url, data } (lib/videoLink.js).
+ * Uploads over MAX_UPLOAD_MB (the Supabase free-plan limit) are refused up front.
  * MEDIA: images/videos upload immediately on selection to the "documents" bucket
  * (slideimg_<ts>_<name> / video_<ts>_<name>) and are held as {uploading:true}
  * placeholders until done. Saving is blocked while any upload is in progress.
@@ -67,6 +76,9 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
   })) : [{ heading:"", text:"", video:null, images:[], hotspots:null, hotspotInstructions:"" }]);
   const [quiz, setQuiz] = useState(editingModule ? (editingModule.quiz||[]).map(q=>({...q, options:[...q.options]})) : [{ q:"", options:["","","",""], answer:0 }]);
   const [err, setErr] = useState("");
+  const [showImport, setShowImport] = useState(false);
+  const [linkDraft, setLinkDraft] = useState({});     // slide index → pasted video link
+  const [linkErr, setLinkErr] = useState({});         // slide index → message
   const videoInputRefs = useRef({});
   const imageInputRefs = useRef({});
 
@@ -86,6 +98,20 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
     });
   }
 
+  // Slides from "Import slides from PowerPoint". Replacing drops the current slides;
+  // adding puts them after (an untouched blank first slide is replaced either way).
+  const slideHasContent = s => !!(s.heading.trim() || htmlToPlainText(s.text).trim() || (s.images||[]).length || s.video);
+  function importSlides(newSlides, mode) {
+    setSlides(p => mode === "replace" || !p.some(slideHasContent) ? newSlides : [...p, ...newSlides]);
+    setErr("");
+  }
+  function addVideoLink(i) {
+    const r = parseVideoLink(linkDraft[i]);
+    if (r.error) { setLinkErr(p => ({ ...p, [i]: r.error })); return; }
+    updateSlide(i, "video", { name: `${r.provider} video`, type: "", link: true, provider: r.provider, url: r.src, data: r.src });
+    setLinkDraft(p => ({ ...p, [i]: "" })); setLinkErr(p => ({ ...p, [i]: "" }));
+  }
+
   function addQuestion() { setQuiz(p=>[...p, {...BLANK_Q, options:["","","",""]}]); }
   function removeQuestion(i) { if(quiz.length>1) setQuiz(p=>p.filter((_,idx)=>idx!==i)); }
   function updateQ(i,k,v) { setQuiz(p=>p.map((q,idx)=>idx===i?{...q,[k]:v}:q)); }
@@ -99,7 +125,7 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
     }
     if(step==="slides") {
       if(slides.some(s=>!s.heading.trim())) { setErr("All slides must have a heading."); return; }
-      if(slides.some(s=>!htmlToPlainText(s.text).trim()&&!s.video)) { setErr("Each slide must have either content text or a video."); return; }
+      if(slides.some(s=>!htmlToPlainText(s.text).trim()&&!s.video&&!(s.images||[]).length)) { setErr("Each slide needs content text, an image or a video."); return; }
       if(slides.some(s=>s.hotspots && s.hotspots.length>0 && !s.hotspots.some(h=>h.correct))) { setErr("Each hotspot activity needs at least one marker set as a hazard."); return; }
       if(slides.some(s=>s.hotspots && s.hotspots.some(h=>!h.label.trim()))) { setErr("Every hotspot marker needs a short label."); return; }
     }
@@ -128,10 +154,11 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
       ...s,
       text: sanitizeHtml(s.text||""),
       video: s.video && (s.video.url || s.video.data)
-        ? { name: s.video.name, type: s.video.type, url: s.video.url || s.video.data, data: s.video.url || s.video.data }
+        ? { name: s.video.name, type: s.video.type, url: s.video.url || s.video.data, data: s.video.url || s.video.data,
+            ...(s.video.link ? { link: true, provider: s.video.provider || "" } : {}) }
         : null,
       images: (s.images||[]).filter(img=>img.url||img.data).map(img=>({
-        name: img.name, type: img.type, url: img.url||img.data, data: img.url||img.data,
+        name: img.name, type: img.type, url: img.url||img.data, data: img.url||img.data, ...(img.deck ? { deck: true } : {}),
       })),
     }));
     const newModule = {
@@ -242,6 +269,14 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
       {/* ── STEP 2: Slides ── */}
       {step==="slides" && (
         <div>
+          {!showImport ? (
+            <button onClick={()=>setShowImport(true)} data-testid="open-import"
+              style={{width:"100%",background:"rgba(37,99,235,0.08)",border:`2px dashed ${Z.accent}66`,borderRadius:12,padding:"13px",cursor:"pointer",color:Z.accentLt,fontSize:13,fontWeight:700,fontFamily:font,marginBottom:16}}>
+              📥 Import slides from PowerPoint
+            </button>
+          ) : (
+            <SlideImportPanel hasContent={slides.some(slideHasContent)} onImport={importSlides} onClose={()=>setShowImport(false)} Z={Z} font={font}/>
+          )}
           {slides.map((s,i)=>(
             <div key={i} style={{...cardStyle,border:`1px solid ${Z.borderMd}`}}>
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
@@ -354,7 +389,7 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
                     <span style={{fontSize:20}}>🎬</span>
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{fontSize:12,fontWeight:700,color:Z.white,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.video.name}</div>
-                      <div style={{fontSize:10,color:Z.muted,marginTop:2}}>{s.video.uploading ? "Uploading…" : (s.video.url || s.video.data) ? "✓ Uploaded" : ""}</div>
+                      <div style={{fontSize:10,color:Z.muted,marginTop:2}}>{s.video.uploading ? "Uploading…" : s.video.link ? `🔗 Linked (${s.video.provider||"video link"}) — plays inside the slide` : (s.video.url || s.video.data) ? "✓ Uploaded" : ""}</div>
                     </div>
                     <button onClick={()=>updateSlide(i,"video",null)} style={{background:"rgba(239,68,68,0.1)",color:"#f87171",border:"1px solid rgba(239,68,68,0.25)",borderRadius:7,padding:"5px 10px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font}}>Remove</button>
                   </div>
@@ -364,6 +399,12 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
                       style={{display:"none"}}
                       onChange={async e=>{
                         const file=e.target.files[0]; if(!file) return;
+                        e.target.value="";
+                        if (file.size > MAX_UPLOAD_MB*1024*1024) {
+                          setLinkErr(p=>({...p,[i]:`That video is ${Math.round(file.size/1048576)} MB. Uploads can be up to ${MAX_UPLOAD_MB} MB. Put it on YouTube (unlisted), Vimeo or Microsoft Stream and paste the link below instead.`}));
+                          return;
+                        }
+                        setLinkErr(p=>({...p,[i]:""}));
                         const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
                         const path = `video_${Date.now()}_${safeName}`;
                         updateSlide(i,"video",{name:file.name,type:file.type,data:null,uploading:true});
@@ -381,13 +422,20 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
                       onMouseLeave={e=>e.currentTarget.style.borderColor=Z.borderMd}>
                       <div style={{fontSize:24,marginBottom:4}}>🎬</div>
                       <div style={{fontSize:12,fontWeight:700,color:Z.white,marginBottom:2}}>Upload Video</div>
-                      <div style={{fontSize:11,color:Z.muted}}>Click to browse · MP4, MOV, WebM</div>
+                      <div style={{fontSize:11,color:Z.muted}}>Click to browse · MP4, MOV, WebM · up to {MAX_UPLOAD_MB} MB</div>
                     </div>
+                    <div style={{display:"flex",gap:8,marginTop:8}}>
+                      <input value={linkDraft[i]||""} onChange={e=>setLinkDraft(p=>({...p,[i]:e.target.value}))} aria-label={`Video link for slide ${i+1}`}
+                        onKeyDown={e=>{ if(e.key==="Enter") addVideoLink(i); }}
+                        placeholder="…or paste a YouTube, Vimeo or Microsoft Stream link / embed code" style={{...inp,flex:1}}/>
+                      <button onClick={()=>addVideoLink(i)} style={{background:Z.overlay,color:Z.accentLt,border:`1px solid ${Z.borderMd}`,borderRadius:10,padding:"0 16px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font,whiteSpace:"nowrap"}}>🔗 Add link</button>
+                    </div>
+                    {linkErr[i] && <div role="alert" style={{fontSize:11.5,color:"#f87171",marginTop:6,lineHeight:1.5}}>{linkErr[i]}</div>}
                   </>
                 )}
               </div>
               <div>
-                <label style={lbl}>Slide Content {s.video?"(optional — shown below video)":"*"}</label>
+                <label style={lbl}>Slide Content {s.video?"(optional — shown below video)":(s.images||[]).length?"(optional)":"*"}</label>
                 <RichTextEditor
                   value={s.text}
                   onChange={html=>updateSlide(i,"text",html)}
@@ -472,7 +520,7 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
                     {s.video && <span style={{fontSize:10,fontWeight:700,color:"#a78bfa",background:"rgba(167,139,250,0.12)",border:"1px solid rgba(167,139,250,0.3)",borderRadius:6,padding:"2px 7px"}}>🎬 VIDEO</span>}
                     {s.hotspots && s.hotspots.length>0 && <span style={{fontSize:10,fontWeight:700,color:Z.green,background:"rgba(16,185,129,0.12)",border:"1px solid rgba(16,185,129,0.3)",borderRadius:6,padding:"2px 7px"}}>🎯 HOTSPOT</span>}
                   </div>
-                  {s.video && <div style={{fontSize:11,color:Z.muted,marginBottom:4}}>📎 {s.video.name}</div>}
+                  {s.video && <div style={{fontSize:11,color:Z.muted,marginBottom:4}}>{s.video.link?"🔗":"📎"} {s.video.name}</div>}
                   {htmlToPlainText(s.text) && <div style={{fontSize:12,color:Z.muted,lineHeight:1.5,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>{htmlToPlainText(s.text)}</div>}
                 </div>
               ))}

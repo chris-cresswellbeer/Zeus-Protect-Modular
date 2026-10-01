@@ -33,6 +33,7 @@ import { Permits, PermitDetail } from "./screens/Permits";
 import { INSP_TYPES } from "../data/seedInspections";
 import { myIncompleteQuickReports } from "../domains/incidents/quickReportStatus";
 import { ScrollNav } from "../shared/ScrollNav";
+import { bundlesFor } from "../domains/documents/bundles";
 
 const FONT = "'Barlow','Trebuchet MS',system-ui,sans-serif";
 const PROGRESS_KEY = "zeus.mobile.progress";
@@ -91,7 +92,7 @@ function MobileApp({
   // identity
   user, onSignOut, onSwitchToDesktop, onCompleteQuickReport,
   // domain state, straight from App.jsx
-  allModules, assigns, comps, docs, docAssignments, docAcknowledgements,
+  allModules, assigns, comps, docs, docAssignments, docAcknowledgements, docBundles = [],
   dseReports, incidents, investigations, allUsers = [],
   siteInspections = [], permits = [],
   // theme
@@ -442,6 +443,7 @@ function MobileApp({
         {screen === "documents" && (
           <Documents
             docs={docs} required={requiredDocs} acknowledgements={myAcks}
+            bundles={bundlesFor(docBundles, user.id)} userId={String(user.id)}
             onAcknowledge={acknowledgeDoc}
             onPreview={(d) => db.previewDoc && db.previewDoc(d)}
             Z={T} font={FONT}

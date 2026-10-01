@@ -85,6 +85,8 @@ const LazyMyTeamTab = React.lazy(() => import("./domains/manager/MyTeamTab").the
 const LazyAuditTrailTab = React.lazy(() => import("./domains/audit/AuditTrailTab").then(m => ({ default: m.AuditTrailTab })));
 const LazyCoshhTab = React.lazy(() => import("./domains/coshh/CoshhTab").then(m => ({ default: m.CoshhTab })));
 import { DocCard } from "./domains/documents/DocCard";
+import { DocBundles, MyBundles } from "./domains/documents/DocBundles";
+import { mapBundleRows, bundleRow, addAssignments, removeAssignments, bundlesFor, bundleNamesOf, withoutDoc, withoutMember } from "./domains/documents/bundles";
 import { ExternalCertsSection } from "./domains/documents/ExternalCertsSection";
 import { PreviewModal } from "./domains/documents/PreviewModal";
 import { openFile } from "./lib/fileAccess";
@@ -216,6 +218,11 @@ function mapAssignRows(rows) {
   (rows || []).forEach(r => { const uid = String(r.user_id); (map[uid] = map[uid] || []).push(String(r.module_id)); });
   return map;
 }
+function mapDocAssignRows(rows) {
+  const map = {};
+  (rows || []).forEach(r => { const did = String(r.doc_id); (map[did] = map[did] || []).push(String(r.user_id)); });
+  return map;
+}
 function mapCompRows(rows) {
   const map = {};
   (rows || []).forEach(r => {
@@ -247,9 +254,10 @@ function mergeNested(cur, fresh, recent, prefix) {
   });
   return stableJSON(next) === stableJSON(cur) ? cur : next;
 }
-function mergeAssigns(cur, fresh, recent) {
+// Also used for document assignments ({docId: [userId]}, prefix "d").
+function mergeAssigns(cur, fresh, recent, prefix = "a") {
   const next = { ...fresh }; const now = Date.now();
-  recent.forEach((t, key) => { if (now - t <= RECENT_MS && key.startsWith("a:")) { const u = key.slice(2); if (cur[u]) next[u] = cur[u]; else delete next[u]; } });
+  recent.forEach((t, key) => { if (now - t <= RECENT_MS && key.startsWith(prefix + ":")) { const u = key.slice(prefix.length + 1); if (cur[u]) next[u] = cur[u]; else delete next[u]; } });
   Object.keys(next).forEach(u => { if (!next[u] || !next[u].length) delete next[u]; });
   const norm = o => stableJSON(Object.fromEntries(Object.entries(o).filter(([, v]) => v && v.length).map(([k, v]) => [k, [...v].sort()])));
   return norm(next) === norm(cur) ? cur : next;
@@ -308,6 +316,8 @@ export default function App() {
   const [docName, setDocName] = useState("");
   const [previewDoc, setPreviewDoc] = useState(null);
   const [docAssignments, setDocAssignments] = useState({}); // { docId: [userId, ...] }
+  const [docBundles, setDocBundles] = useState([]);         // document bundles (domains/documents/bundles.js)
+  const [docView, setDocView] = useState("docs");           // admin Documents tab: docs | bundles
   const [docAcknowledgements, setDocAcknowledgements] = useState({}); // { userId: { docId: { date, version } } }
   // ── Versioning history (append-only tables, see audit_manager_versioning.sql) ──
   const [docAckHistory, setDocAckHistory] = useState([]);   // every "I've read this": { user_id, doc_id, version, date }
@@ -533,7 +543,7 @@ export default function App() {
           llRes, pwRes, usersRes, upRes, ecRes, qfRes, conRes, conIndRes,
           conCertRes, conVisitRes, permitRes, raRes, cmRes, mcRes, eqRes,
           siRes, msdsRes, ccRes, fwRes, fdRes, fatRes, fexRes, felRes,
-          ffrRes, faRes, cmtRes, dlRes, caRes, dahRes, chRes, mvRes,
+          ffrRes, faRes, cmtRes, dlRes, caRes, dahRes, chRes, mvRes, bdRes,
         ] = await Promise.allSettled([
           sb.from("training_assigns").select("*"),
           sb.from("training_completions").select("*"),
@@ -575,6 +585,7 @@ export default function App() {
           sb.from("doc_ack_history").select("*"),
           sb.from("training_completion_history").select("*"),
           sb.from("module_versions").select("*"),
+          sb.from("doc_bundles").select("*"),
         ]);
 
         // Small helper: allSettled wraps each result in {status, value} or
@@ -583,7 +594,7 @@ export default function App() {
         // everything else's processing below.
         const rows = (res) => (res.status === "fulfilled" ? (res.value?.data ?? null) : null);
         if (usersRes.status === "rejected") console.error("Supabase load error (users):", usersRes.reason);
-        [aRes,cRes,iRes,invRes,ackRes,daRes,docRes,dseRes,resRes,llRes,pwRes,upRes,ecRes,qfRes,conRes,conIndRes,conCertRes,conVisitRes,permitRes,raRes,cmRes,mcRes,eqRes,siRes,msdsRes,ccRes,fwRes,fdRes,fatRes,fexRes,felRes,ffrRes,faRes,cmtRes,dlRes,caRes,dahRes,chRes,mvRes]
+        [aRes,cRes,iRes,invRes,ackRes,daRes,docRes,dseRes,resRes,llRes,pwRes,upRes,ecRes,qfRes,conRes,conIndRes,conCertRes,conVisitRes,permitRes,raRes,cmRes,mcRes,eqRes,siRes,msdsRes,ccRes,fwRes,fdRes,fatRes,fexRes,felRes,ffrRes,faRes,cmtRes,dlRes,caRes,dahRes,chRes,mvRes,bdRes]
           .forEach(r => { if (r.status === "rejected") console.error("Supabase load error:", r.reason); });
 
         // Pattern used below: rows(x) → null/[] means "nothing stored" → keep seed data.
@@ -627,10 +638,12 @@ export default function App() {
         // Doc assignments
         const daRows = rows(daRes);
         if (daRows && daRows.length) {
-          const map = {};
-          daRows.forEach(r => { const did=String(r.doc_id); map[did] = map[did] || []; map[did].push(String(r.user_id)); });
-          setDocAssignments(map);
+          setDocAssignments(mapDocAssignRows(daRows));
         }
+
+        // Document bundles (doc_bundles_table.sql — until it has been run this read fails and there are none)
+        const bdRows = rows(bdRes);
+        if (bdRows) setDocBundles(mapBundleRows(bdRows));
 
         // Documents (uploaded by admin)
         const docRows = rows(docRes);
@@ -969,9 +982,9 @@ export default function App() {
     if (!_ready.current || refreshBusyRef.current) return;
     refreshBusyRef.current = true;
     try {
-      const [iRes, invRes, cRes, ackRes, aRes, hRes] = await Promise.all([sb.from("incidents").select("*"), sb.from("investigations").select("*"),
+      const [iRes, invRes, cRes, ackRes, aRes, hRes, daRes, bdRes] = await Promise.all([sb.from("incidents").select("*"), sb.from("investigations").select("*"),
         sb.from("training_completions").select("*"), sb.from("doc_acknowledgements").select("*"), sb.from("training_assigns").select("*"),
-        sb.from("training_completion_history").select("*")]);
+        sb.from("training_completion_history").select("*"), sb.from("doc_assignments").select("*"), sb.from("doc_bundles").select("*")]);
       // Training completions, assignments and document confirmations made elsewhere
       // (a member of staff finishing a module, a manager assigning one) appear here
       // without a reload. With the old sign-in an empty table means "use the demo data".
@@ -980,6 +993,14 @@ export default function App() {
       if (okRows(cRes)) setComps(cur => mergeNested(cur, mapCompRows(cRes.data), recent, "c"));
       if (okRows(ackRes)) setDocAcknowledgements(cur => mergeNested(cur, mapAckRows(ackRes.data), recent, "k"));
       if (okRows(aRes)) setAssigns(cur => mergeAssigns(cur, mapAssignRows(aRes.data), recent));
+      // Required reading given elsewhere (e.g. an admin assigning a bundle) appears without a reload.
+      if (okRows(daRes)) setDocAssignments(cur => mergeAssigns(cur, mapDocAssignRows(daRes.data), recent, "d"));
+      if (!bdRes.error && Array.isArray(bdRes.data)) setDocBundles(cur => {
+        const fresh = mapBundleRows(bdRes.data), now = Date.now();
+        const isRecent = id => { const t = recent.get(`b:${id}`); return t && now - t < RECENT_MS; };
+        const next = [...fresh.filter(b => !isRecent(b.id)), ...cur.filter(b => isRecent(b.id))].sort((a, b) => a.name.localeCompare(b.name));
+        return stableJSON(next) === stableJSON(cur) ? cur : next;
+      });
       if (okRows(hRes)) setCompHistory(cur => {
         const now = Date.now();
         const pending = cur.filter(h => h.at && now - new Date(h.at).getTime() < RECENT_MS && !hRes.data.some(r => String(r.user_id) === String(h.user_id) && String(r.module_id) === String(h.module_id) && r.date === h.date));
@@ -1314,6 +1335,7 @@ export default function App() {
 
   // Replaces the full list of staff a document is assigned to (delete-then-insert).
   async function dbSaveDocAssignments(docId, userIds) {
+    markWrite(`d:${docId}`);
     await dbWrite(sb.from("doc_assignments").delete().eq("doc_id", String(docId)), "doc assignments clear");
     if (userIds.length) await dbWrite(sb.from("doc_assignments").insert(userIds.map(uid => ({ doc_id: String(docId), user_id: String(uid) }))), "doc assignments");
   }
@@ -1350,6 +1372,105 @@ export default function App() {
     await dbWrite(sb.from("documents").delete().eq("id", id), "document delete");
     await dbWrite(sb.from("doc_assignments").delete().eq("doc_id", id), "doc assignments delete");
     await dbWrite(sb.from("doc_acknowledgements").delete().eq("doc_id", id), "doc acknowledgements delete");
+    // ...and take it out of any document bundle
+    const inBundles = withoutDoc(docBundles, id);
+    if (inBundles.length) {
+      setDocBundles(p => p.map(b => inBundles.find(c => c.id === b.id) || b));
+      await Promise.all(inBundles.map(dbSaveBundle));
+    }
+  }
+
+  // ── Document bundles ─────────────────────────────────────────────────────────
+  // A named set of documents assigned together as required reading. Assigning a
+  // bundle writes the normal doc_assignments rows, so everything else (Required
+  // Reading, confirmations, reminders, reports) works unchanged. See bundles.js.
+  const sortBundles = list => [...list].sort((a, b) => a.name.localeCompare(b.name));
+  async function dbSaveBundle(b) {
+    markWrite(`b:${b.id}`);
+    return dbWrite(sb.from("doc_bundles").upsert(bundleRow(b), { onConflict: "id" }), "document bundle", { alertOnError: true });
+  }
+  // Saves the per-document assignment lists that changed.
+  async function writeDocAssignments(next, changed) {
+    const ids = [...new Set(changed)];
+    if (!ids.length) return;
+    setDocAssignments(next);
+    await Promise.all(ids.map(did => dbSaveDocAssignments(did, next[did] || [])));
+  }
+  const existingDocIds = ids => ids.filter(id => docs.some(d => String(d.id) === id));
+  const bundleNames = ids => ids.map(id => auditNameOf(id));
+  // Create or edit. Documents added to a bundle go straight to everyone who has it;
+  // removed ones come off their reading only if the admin ticked that option.
+  async function saveBundle(b, { unassignRemoved } = {}) {
+    const old = docBundles.find(x => x.id === b.id);
+    const now = new Date().toISOString();
+    const rec = old ? { ...b, memberIds: old.memberIds, updatedAt: now }
+      : { ...b, id: "bd" + Date.now(), memberIds: [], createdBy: user?.name || "", createdAt: now, updatedAt: now };
+    if (!(await dbSaveBundle(rec))) return false;
+    setDocBundles(p => sortBundles([...p.filter(x => x.id !== rec.id), rec]));
+    let da = docAssignments; const changed = [];
+    const added = old ? rec.docIds.filter(d => !old.docIds.includes(d)) : [];
+    const removed = old ? old.docIds.filter(d => !rec.docIds.includes(d)) : [];
+    if (rec.memberIds.length) {
+      const r1 = addAssignments(da, existingDocIds(added), rec.memberIds); da = r1.next; changed.push(...r1.changed);
+      if (unassignRemoved) { const r2 = removeAssignments(da, removed, rec.memberIds, docBundles.filter(x => x.id !== rec.id)); da = r2.next; changed.push(...r2.changed); }
+    }
+    await writeDocAssignments(da, changed);
+    const title = id => (docs.find(d => String(d.id) === id) || {}).title || id;
+    auditEvent("doc_bundle", rec.id, old ? "update" : "create",
+      old ? `Edited document bundle "${rec.name}"${added.length ? ` — added ${added.map(title).join(", ")}` : ""}${removed.length ? ` — removed ${removed.map(title).join(", ")}${unassignRemoved && rec.memberIds.length ? " (taken off members' reading)" : ""}` : ""}`
+          : `Created document bundle "${rec.name}" with ${rec.docIds.length} document${rec.docIds.length !== 1 ? "s" : ""}`,
+      old ? { name: old.name !== rec.name ? { from: old.name, to: rec.name } : undefined, documents: added.length || removed.length ? { from: old.docIds.map(title), to: rec.docIds.map(title) } : undefined, autoNew: old.autoNew !== rec.autoNew ? { from: old.autoNew, to: rec.autoNew } : undefined }
+          : { documents: { from: null, to: rec.docIds.map(title) } }, rec.name);
+    return true;
+  }
+  async function deleteBundle(b, { unassign } = {}) {
+    markWrite(`b:${b.id}`);
+    if (!(await dbWrite(sb.from("doc_bundles").delete().eq("id", b.id), "document bundle delete", { alertOnError: true }))) return;
+    setDocBundles(p => p.filter(x => x.id !== b.id));
+    if (unassign) { const r = removeAssignments(docAssignments, b.docIds, b.memberIds, docBundles.filter(x => x.id !== b.id)); await writeDocAssignments(r.next, r.changed); }
+    auditEvent("doc_bundle", b.id, "delete", `Deleted document bundle "${b.name}"${unassign && b.memberIds.length ? " and took its documents off members' reading" : ""}`, {}, b.name);
+  }
+  // Give a bundle to people → number newly given it.
+  async function assignBundle(b, userIds) {
+    const cur = docBundles.find(x => x.id === b.id) || b;
+    const add = [...new Set(userIds.map(String))].filter(u => !cur.memberIds.includes(u));
+    if (!add.length) return 0;
+    const rec = { ...cur, memberIds: [...cur.memberIds, ...add], updatedAt: new Date().toISOString() };
+    if (!(await dbSaveBundle(rec))) return 0;
+    setDocBundles(p => p.map(x => x.id === rec.id ? rec : x));
+    const r = addAssignments(docAssignments, existingDocIds(rec.docIds), add);
+    await writeDocAssignments(r.next, r.changed);
+    auditEvent("doc_bundle", rec.id, "assign", `Assigned document bundle "${rec.name}" to ${add.length} ${add.length !== 1 ? "people" : "person"}: ${bundleNames(add).join(", ")}`, { people: { from: null, to: bundleNames(add) } }, rec.name);
+    return add.length;
+  }
+  // Take a bundle away: its documents come off their reading unless another bundle of theirs has them.
+  async function unassignBundle(b, userIds) {
+    const cur = docBundles.find(x => x.id === b.id) || b;
+    const drop = userIds.map(String);
+    const rec = { ...cur, memberIds: cur.memberIds.filter(u => !drop.includes(u)), updatedAt: new Date().toISOString() };
+    if (!(await dbSaveBundle(rec))) return;
+    setDocBundles(p => p.map(x => x.id === rec.id ? rec : x));
+    const r = removeAssignments(docAssignments, rec.docIds, drop, docBundles.filter(x => x.id !== rec.id));
+    await writeDocAssignments(r.next, r.changed);
+    auditEvent("doc_bundle", rec.id, "unassign", `Took document bundle "${rec.name}" away from ${bundleNames(drop).join(", ")}`, { people: { from: bundleNames(drop), to: null } }, rec.name);
+  }
+  // New staff get every bundle marked "give to new staff automatically".
+  async function giveNewStarterBundles(userIds) {
+    const ids = userIds.map(String);
+    const autos = docBundles.filter(b => b.autoNew);
+    if (!autos.length || !ids.length) return;
+    let da = docAssignments; const changed = [], recs = [];
+    autos.forEach(b => {
+      const add = ids.filter(u => !b.memberIds.includes(u));
+      if (!add.length) return;
+      recs.push({ ...b, memberIds: [...b.memberIds, ...add] });
+      const r = addAssignments(da, existingDocIds(b.docIds), add); da = r.next; changed.push(...r.changed);
+    });
+    if (!recs.length) return;
+    setDocBundles(p => p.map(b => recs.find(r => r.id === b.id) || b));
+    await Promise.all(recs.map(dbSaveBundle));
+    await writeDocAssignments(da, changed);
+    recs.forEach(b => auditEvent("doc_bundle", b.id, "assign", `New staff given document bundle "${b.name}" automatically: ${bundleNames(ids).join(", ")}`, {}, b.name));
   }
 
   // Rewrites ALL of a user's DSE reports; report_idx = position in the array (so order matters —
@@ -2137,6 +2258,7 @@ export default function App() {
       <div style={{fontFamily:font,color:T.white}}><PreviewModal doc={previewDoc} onClose={()=>setPreviewDoc(null)} Z={T} font={font}/></div>
       <MobileApp
         user={user}
+        docBundles={docBundles}
         onSignOut={logout}
         onSwitchToDesktop={() => setForceDesktop(true)}
         onCompleteQuickReport={(inc) => { setForceDesktop(true); setStab("incidents"); setQuickEditId(inc.id); }}
@@ -3121,9 +3243,11 @@ export default function App() {
                 const required = docs.filter(d=>(docAssignments[String(d.id)]||[]).includes(String(user.id)));
                 const allOther = docs.filter(d=>!(docAssignments[String(d.id)]||[]).includes(String(user.id)));
                 const unread = required.filter(d=>!(docAcknowledgements[user.id]||{})[d.id]);
+                const myBundles = bundlesFor(docBundles, user.id);
 
                 return (
                   <>
+                    <MyBundles bundles={myBundles} userId={String(user.id)} docs={docs} acks={docAcknowledgements} Z={T} font={font}/>
                     {required.length>0 && (
                       <div style={{marginBottom:28}}>
                         <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
@@ -3146,6 +3270,7 @@ export default function App() {
                                     <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2,flexWrap:"wrap"}}>
                                       <span style={{fontWeight:700,fontSize:14,color:"#fff"}}>{d.title}</span>
                                       {!ack && <Pill label="Required Reading" col="amber"/>}
+                                      {bundleNamesOf(myBundles, d.id).map(n=><span key={n} style={{fontSize:11,fontWeight:600,color:"#60a5fa",background:"rgba(96,165,250,0.1)",border:"1px solid rgba(96,165,250,0.3)",borderRadius:20,padding:"1px 8px"}}>{E("📚 ","")}{n}</span>)}
                                     </div>
                                     <div style={{color:T.muted,fontSize:12}}>Updated: {d.date} · {d.size}{d.fileName?` · ${d.fileName.split(".").pop().toUpperCase()}`:""}</div>
                                     {ack && <div style={{color:T.green,fontSize:12,marginTop:3,fontWeight:600}}>✓ You confirmed reading this on {ack.date}</div>}
@@ -3533,13 +3658,14 @@ export default function App() {
         (async () => {
           await dbSaveUser(newUser);
           if ((newUser.status||"active") === "leaver") return;
+          giveNewStarterBundles([id]);
           const pw = makeTempPassword();
           const r = await setTempPasswordFor(newUser, pw);
           setTempPwNotice(r.ok
             ? { title: `Sign-in account created for ${newUser.name}`, items: [{ name: newUser.name, login: newUser.email.toLowerCase(), password: pw }], failures: [] }
             : { title: "Sign-in account not created", items: [], failures: [{ name: newUser.name, error: r.error }] });
         })();
-      } else dbSaveUser(newUser);
+      } else dbSaveUser(newUser).then(()=>{ if ((newUser.status||"active") !== "leaver") giveNewStarterBundles([id]); });
       dbSaveUserProfile(newUser);
       setNewName(""); setNewEmail(""); setNewJobTitle(""); setNewManager(""); setNewRole("staff"); setNewIsWarehouse(false); setNewDepartment(""); setNewStatus("active"); setAddErr(""); setShowAddStaff(false);
     };
@@ -3565,6 +3691,8 @@ export default function App() {
       setDocAssignments(p=>Object.fromEntries(Object.entries(p).map(([d,ids])=>[d,(ids||[]).filter(x=>String(x)!==sid)])));
       setCompHistory(p=>p.filter(h=>String(h.user_id)!==sid)); setDocAckHistory(p=>p.filter(h=>String(h.user_id)!==sid));
       setQuizFailures(p=>p.filter(f=>String(f.userId)!==sid));
+      const inBundles = withoutMember(docBundles, sid);
+      if (inBundles.length) { setDocBundles(p=>p.map(b=>inBundles.find(c=>c.id===b.id)||b)); await Promise.all(inBundles.map(dbSaveBundle)); }
       await dbDeleteUser(uid);
       const ok = await dbDeletePersonRecords(uid);
       auditEvent("staff", sid, "remove", `Removed staff member and their records (${detail})${ok ? "" : " — some records could not be deleted"}`, {}, u?.name || sid);
@@ -4296,6 +4424,7 @@ export default function App() {
                           setAllUsers(p=>[...p,...newUsers]);
                           newUsers.forEach(u=>dbSaveUserProfile(u));
                           await Promise.all(newUsers.map(u=>dbSaveUser(u)));
+                          giveNewStarterBundles(newUsers.map(u=>u.id));
                           const passwords = Object.fromEntries(newUsers.map(u=>[String(u.id), makeTempPassword()]));
                           const r = await adminCall("createMissing", { passwords });
                           const byId = Object.fromEntries(newUsers.map(u=>[String(u.id), u]));
@@ -4313,6 +4442,7 @@ export default function App() {
                           dbSaveUserProfile(u);
                           savePasswordFor(u.id,hashed);
                         });
+                        giveNewStarterBundles(newUsers.map(u=>u.id));
                         setCsvPreview([]);
                         setShowCsvImport(false);
                         alert(`✓ Imported ${toAdd.length} staff.${skipped>0?` ${skipped} skipped (email already exists).`:""} Default password: pass123`);
@@ -4882,12 +5012,27 @@ export default function App() {
             <div>
               <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",flexWrap:"wrap",gap:12,marginBottom:6}}>
                 <h2 style={{fontSize:22,fontWeight:900,letterSpacing:-.5,margin:0}}>H&S Documentation <HelpTip dark={false} text="Upload policies, procedures, risk assessments and guidance documents. Use the Assign button on each document to nominate staff for required reading — they'll be prompted to confirm they've read it in their portal."/></h2>
-                <button onClick={()=>setShowBulkDocAssign(v=>!v)}
+                {docView!=="bundles" && <button onClick={()=>setShowBulkDocAssign(v=>!v)}
                   style={{background:showBulkDocAssign?`rgba(239,68,68,0.1)`:`rgba(37,99,235,0.1)`,color:showBulkDocAssign?"#f87171":T.accentLt,border:showBulkDocAssign?"1px solid rgba(239,68,68,0.25)":`1px solid rgba(37,99,235,0.25)`,borderRadius:10,padding:"9px 18px",cursor:"pointer",fontFamily:font,fontWeight:700,fontSize:13,whiteSpace:"nowrap"}}>
                   {showBulkDocAssign?"✕ Cancel":E("👥 ","")+"Bulk Assign"}
-                </button>
+                </button>}
               </div>
-              <p style={{color:T.muted,marginBottom:16,fontSize:13}}>Upload documents and assign them for required reading.</p>
+              <p style={{color:T.muted,marginBottom:12,fontSize:13}}>Upload documents and assign them for required reading.</p>
+
+              {/* Documents | Document bundles */}
+              <div role="tablist" style={{display:"inline-flex",gap:4,padding:4,borderRadius:12,background:T.overlay,border:`1px solid ${T.border}`,marginBottom:18}}>
+                {[["docs",`${E("📁 ","")}Documents (${docs.length})`],["bundles",`${E("📚 ","")}Document bundles (${docBundles.length})`]].map(([v,l])=>(
+                  <button key={v} role="tab" aria-selected={docView===v} onClick={()=>{setDocView(v);setShowBulkDocAssign(false);}}
+                    style={{padding:"8px 16px",borderRadius:9,border:"none",background:docView===v?`linear-gradient(135deg,${T.accent},${T.blue})`:"transparent",color:docView===v?"#fff":T.muted,fontWeight:docView===v?800:600,cursor:"pointer",fontFamily:font,fontSize:13}}>{l}</button>
+                ))}
+              </div>
+
+              {docView==="bundles" && (
+                <DocBundles bundles={docBundles} docs={docs} staff={staff.filter(u=>(u.status||"active")!=="leaver")} allPeople={allUsers}
+                  docAcknowledgements={docAcknowledgements} onSave={saveBundle} onDelete={deleteBundle} onAssign={assignBundle} onUnassign={unassignBundle}
+                  Z={T} font={font} isMobile={isMobile}/>
+              )}
+              {docView!=="bundles" && <>
 
               {/* Bulk assign panel */}
               {showBulkDocAssign && (() => {
@@ -5046,12 +5191,13 @@ export default function App() {
                       const unreadCount = assignedStaff.length - readCount;
 
                       return (
-                        <DocCard key={d.id} d={d} staff={staff} assignedIds={assignedIds} assignedStaff={assignedStaff} readCount={readCount} unreadCount={unreadCount} icon={icon} docAcknowledgements={docAcknowledgements} setDocAcknowledgements={setDocAcknowledgements} setDocAssignments={setDocAssignments} dbSaveDocAssignments={dbSaveDocAssignments} setDocs={setDocs} dbDeleteDoc={dbDeleteDoc} dbSaveDoc={dbSaveDoc} setPreviewDoc={setPreviewDoc} docAckHistory={docAckHistory} T={T} font={font}/>
+                        <DocCard key={d.id} d={d} staff={staff} assignedIds={assignedIds} assignedStaff={assignedStaff} readCount={readCount} unreadCount={unreadCount} icon={icon} docAcknowledgements={docAcknowledgements} setDocAcknowledgements={setDocAcknowledgements} setDocAssignments={setDocAssignments} dbSaveDocAssignments={dbSaveDocAssignments} setDocs={setDocs} dbDeleteDoc={dbDeleteDoc} dbSaveDoc={dbSaveDoc} setPreviewDoc={setPreviewDoc} docAckHistory={docAckHistory} bundleNames={bundleNamesOf(docBundles, d.id)} T={T} font={font}/>
                       );
                     })}
                   </div>
                 )
               }
+              </>}
             </div>
           )}
 

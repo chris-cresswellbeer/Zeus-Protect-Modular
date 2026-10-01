@@ -21,7 +21,7 @@ import { auditEvent } from "../../lib/audit";
  * (setDocs, dbSaveDoc, dbDeleteDoc, setDocAssignments, dbSaveDocAssignments,
  *  setDocAcknowledgements, setPreviewDoc…), plus pre-computed counts from the parent.
  */
-function DocCard({ d, staff, assignedIds, assignedStaff, readCount, unreadCount, icon, docAcknowledgements, setDocAcknowledgements, setDocAssignments, dbSaveDocAssignments, setDocs, dbDeleteDoc, dbSaveDoc, setPreviewDoc, docAckHistory = [], T, font }) {
+function DocCard({ d, staff, assignedIds, assignedStaff, readCount, unreadCount, icon, docAcknowledgements, setDocAcknowledgements, setDocAssignments, dbSaveDocAssignments, setDocs, dbDeleteDoc, dbSaveDoc, setPreviewDoc, docAckHistory = [], bundleNames = [], T, font }) {
   const [expanded, setExpanded] = React.useState(false);
   const [pendingFile, setPendingFile] = React.useState(null); // new-version file awaiting the minor/major choice
   const [showVersions, setShowVersions] = React.useState(false);
@@ -154,6 +154,11 @@ function DocCard({ d, staff, assignedIds, assignedStaff, readCount, unreadCount,
                 <button onClick={()=>saveReviewDate(reviewInput)} style={{background:"rgba(16,185,129,0.15)",color:T.green,border:"1px solid rgba(16,185,129,0.3)",borderRadius:6,padding:"2px 8px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font}}>✓</button>
                 {reviewInput && <button onClick={()=>saveReviewDate("")} style={{background:"rgba(239,68,68,0.1)",color:"#f87171",border:"1px solid rgba(239,68,68,0.2)",borderRadius:6,padding:"2px 8px",cursor:"pointer",fontSize:11,fontFamily:font}}>Clear</button>}
                 <button onClick={()=>setEditingReview(false)} style={{background:"none",border:"none",color:T.muted,cursor:"pointer",fontSize:11,fontFamily:font}}>✕</button>
+              </span>
+            )}
+            {bundleNames.length>0 && (
+              <span title="Document bundles this document is part of" style={{display:"inline-flex",alignItems:"center",gap:4,padding:"1px 7px",borderRadius:20,background:"rgba(96,165,250,0.1)",border:"1px solid rgba(96,165,250,0.3)",color:"#60a5fa",fontSize:11,fontWeight:600}}>
+                📚 {bundleNames.join(", ")}
               </span>
             )}
           </div>

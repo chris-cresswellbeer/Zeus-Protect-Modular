@@ -4528,7 +4528,7 @@ export default function App() {
 
                       {/* Individual card */}
                       {bulkTarget==="individual" && (() => {
-                        const tUser = allUsers.find(u=>u.id===target);
+                        const tUser = allUsers.find(u=>String(u.id)===String(target));
                         return (
                           <div style={{display:"flex",alignItems:"center",gap:12,marginTop:16,paddingTop:16,borderTop:`1px solid ${T.border}`}}>
                             <Avatar name={tUser?.name||""}/>

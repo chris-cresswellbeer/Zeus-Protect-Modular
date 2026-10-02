@@ -39,7 +39,9 @@ function generateStaffPDF(u, allModules, assigns, comps, docs, docAssignments, d
     const c = userComps[mid];
     if (!m) return "";
     const passed = isPassed(c);
-    const statusTxt = !c?"Not started":c.recorded?"Completed (recorded)":passed?"Passed":"Failed";
+    // recorded training says how it was done and whether evidence is on file (training/evidence.js)
+    const ev = c && c.recorded && (c.recorded.evidence||[]).length;
+    const statusTxt = !c?"Not started":c.recorded?`Completed (${c.recorded.session?"group session":"recorded"}${ev?`, ${c.recorded.session?"signed sign-in sheet":"evidence"} on file`:""})`:passed?"Passed":"Failed";
     const score = c?scoreText(c):"—";
     const date = c?c.date:"—";
     const certId = c?.certId||"—";

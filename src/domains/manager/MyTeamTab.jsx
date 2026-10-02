@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { isPassed, scoreText } from "../training/completion";
+import { EvidenceLinks } from "../training/TrainingEvidence";
+import { evidenceLabel } from "../training/evidence";
 import { HelpTip } from "../../shared/HelpTip";
 import { getExpiryStatus } from "../../lib/dates";
 import { teamOf, normName } from "./team";
@@ -119,6 +121,7 @@ function MemberDetail({ u, s, allModules, assigned, onAssign, onSignOffDse, onSi
           <div key={m.id} style={row}>
             <span style={{ fontSize: 13, color: Z.white, fontWeight: 600, flex: 1, minWidth: 180 }}>{m.icon} {m.title}</span>
             <span style={{ fontSize: 12, color: Z.muted }}>{rec ? `${scoreText(rec)} · ${rec.date}${rec.moduleVersion ? ` · v${rec.moduleVersion}` : ""}` : ""}{ex && ex.expiryDate ? ` · expires ${ex.expiryDate}` : ""}</span>
+            {rec && rec.recorded && (rec.recorded.evidence || []).length > 0 && <EvidenceLinks evidence={rec.recorded.evidence} label={evidenceLabel(rec, 0)} Z={Z} />}
             <Badge text={st.label} color={col} Z={Z} />
           </div>
         );
@@ -162,7 +165,7 @@ function MemberDetail({ u, s, allModules, assigned, onAssign, onSignOffDse, onSi
   );
 }
 
-function MyTeamTab({ manager, users, allModules, assigns, comps, docs, docAssignments, docAcknowledgements, dseReports, adminResponses, investigations, onAssign, onSignOffDse, onSignOffAction, onGroupSession, Z, font }) {
+function MyTeamTab({ manager, users, allModules, assigns, comps, docs, docAssignments, docAcknowledgements, dseReports, adminResponses, investigations, onAssign, onSignOffDse, onSignOffAction, onGroupSession, onSessions, Z, font }) {
   const [openId, setOpenId] = useState(null);
   const team = teamOf(manager, users);
   const ctx = { allModules, assigns, comps, docs, docAssignments, docAcknowledgements, dseReports, adminResponses, investigations };
@@ -186,6 +189,11 @@ function MyTeamTab({ manager, users, allModules, assigns, comps, docs, docAssign
         {onGroupSession && team.length > 0 && (
           <button onClick={onGroupSession} style={{ background: "rgba(37,99,235,0.12)", color: Z.accentLt, border: `1px solid ${Z.accent}55`, borderRadius: 10, padding: "8px 16px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: font }}>
             {E("👥 ", "")}Record a group session
+          </button>
+        )}
+        {onSessions && team.length > 0 && (
+          <button onClick={onSessions} style={{ background: Z.overlay, color: Z.white, border: `1px solid ${Z.borderMd}`, borderRadius: 10, padding: "8px 16px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: font }}>
+            {E("📋 ", "")}Group session records
           </button>
         )}
       </div>

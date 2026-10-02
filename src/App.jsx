@@ -95,6 +95,8 @@ import { ScrollNav } from "./shared/ScrollNav";
 import { BackupPanel, BACKUP_DUE_DAYS } from "./domains/audit/BackupPanel";
 import { lastBackupAt } from "./lib/backup";
 import { RecordCompletionModal, ImportPriorTrainingModal, GroupSessionModal } from "./domains/training/RecordCompletion";
+import { EvidenceLinks, AttachEvidenceModal, SessionsModal } from "./domains/training/TrainingEvidence";
+import { uploadEvidence, listSessions, sessionKey, evidenceLabel } from "./domains/training/evidence";
 import { teamOf } from "./domains/manager/team";
 import { isPassed, scoreText, recordedText, passMarkOf } from "./domains/training/completion";
 import { DSEAssessment } from "./domains/dse/DSEAssessment";
@@ -431,6 +433,8 @@ export default function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [bulkTarget, setBulkTarget] = useState("individual");
   const [recordFor, setRecordFor] = useState(null);          // Assign Training: { uid, mid } → "Record as completed" window
+  const [showSessions, setShowSessions] = useState(null);    // "all" | "team" → group session records (training/TrainingEvidence.jsx)
+  const [evidenceFor, setEvidenceFor] = useState(null);      // { uid, mid } → attach evidence to one recorded completion
   const [showImportPrior, setShowImportPrior] = useState(false); // Assign Training: import prior training (CSV)
   const [groupSessionFor, setGroupSessionFor] = useState(null); // "all" (admin) | "team" (line manager) → group session window
   const [lastBackup, setLastBackup] = useState(undefined);   // admin: when the last full backup was downloaded (null = never)
@@ -1209,7 +1213,8 @@ export default function App() {
       if (toSave.some(x => x.uid === uid && x.mid === mid)) { skipped.push({ ...it, reason: "listed twice" }); return; }
       const mod = allModules.find(m => String(m.id) === mid);
       toSave.push({ uid, mid, rec: { score: null, date: it.date, certId: null, answers: null, moduleVersion: (mod && mod.version) || 1,
-        recorded: { by, byId, at, ...(it.note ? { note: String(it.note).slice(0, 300) } : {}), ...(it.session ? { session: it.session } : {}) } } });
+        recorded: { by, byId, at, ...(it.note ? { note: String(it.note).slice(0, 300) } : {}), ...(it.session ? { session: it.session } : {}),
+          ...(it.evidence && it.evidence.length ? { evidence: it.evidence } : {}) } } });
     });
     if (!toSave.length) return { saved: 0, skipped };
     // assignments first (one write per person), then the completions
@@ -1224,11 +1229,42 @@ export default function App() {
       setComps(p => ({ ...p, [uid]: { ...(p[uid] || {}), [mid]: rec } }));
       const who = (allUsers.find(u => String(u.id) === uid) || {}).name || uid;
       const title = (allModules.find(m => String(m.id) === mid) || {}).title || mid;
-      auditEvent("training_completion", uid, "record", `${rec.recorded.session ? "Group session" : "Recorded as completed"} on ${rec.date}: ${title}${rec.recorded.note ? ` — ${rec.recorded.note}` : ""}`,
+      auditEvent("training_completion", uid, "record", `${rec.recorded.session ? "Group session" : "Recorded as completed"} on ${rec.date}: ${title}${rec.recorded.note ? ` — ${rec.recorded.note}` : ""}${rec.recorded.evidence ? ` (${evidenceLabel(rec, 0).toLowerCase()} attached: ${rec.recorded.evidence.map(e => e.name).join(", ")})` : ""}`,
         { module: { from: null, to: title }, completed: { from: null, to: rec.date } }, who);
     }
     return { saved, skipped };
   }
+  // Evidence for recorded training (training/evidence.js): the signed sign-in sheet of a
+  // group session, or a certificate for prior training. Added to the current record and
+  // its history row, for every target. Returns an error message, or "" when all saved.
+  async function attachEvidence(targets, files, key) {
+    let evidence;
+    try { evidence = await uploadEvidence(files, key, user ? user.name : ""); }
+    catch (e) { return String(e.message || e); }
+    const failed = [];
+    for (const t of targets) {
+      const uid = String(t.uid), mid = String(t.mid);
+      const c = (comps[uid] || {})[mid];
+      if (!c || !c.recorded) continue;
+      const recorded = { ...c.recorded, evidence: [...(c.recorded.evidence || []), ...evidence] };
+      markWrite(`c:${uid}:${mid}`);
+      const { error } = await sb.from("training_completions").update({ recorded }).match({ user_id: uid, module_id: mid });
+      if (error) { console.error("evidence save failed:", error); failed.push(uid); continue; }
+      dbWrite(sb.from("training_completion_history").update({ recorded }).match({ user_id: uid, module_id: mid, date: c.date }), "evidence history");
+      setComps(p => ({ ...p, [uid]: { ...(p[uid] || {}), [mid]: { ...((p[uid] || {})[mid] || c), recorded } } }));
+      setCompHistory(p => p.map(h => String(h.user_id) === uid && String(h.module_id) === mid && h.date === c.date && h.recorded ? { ...h, recorded } : h));
+      const who = (allUsers.find(u => String(u.id) === uid) || {}).name || uid;
+      const title = (allModules.find(m => String(m.id) === mid) || {}).title || mid;
+      auditEvent("training_completion", uid, "evidence", `${evidenceLabel({ recorded }, 0)} attached to ${c.recorded.session ? "group session" : "recorded completion"} (${c.date}): ${title} — ${evidence.map(e => e.name).join(", ")}`,
+        { evidence: { from: (c.recorded.evidence || []).map(e => e.name), to: recorded.evidence.map(e => e.name) } }, who);
+    }
+    if (failed.length) return `The file was uploaded, but it couldn't be linked to ${failed.length} record${failed.length !== 1 ? "s" : ""} (${failed.map(auditNameOf).join(", ")}). Try again.`;
+    return "";
+  }
+  // Attach to a whole group session (every attendee's record), from the session register.
+  const attachToSession = (session, files) =>
+    attachEvidence(session.attendees.map(uid => ({ uid, mid: session.moduleId })), files, session.key.startsWith("gs_") ? session.key : `gs_legacy_${session.moduleId}_${session.date}`);
+
   // Undo a recorded completion (only recorded ones — quiz results can't be removed here).
   async function removeRecordedCompletion(userId, moduleId) {
     const uid = String(userId), mid = String(moduleId);
@@ -3422,7 +3458,10 @@ export default function App() {
               dseReports={dseReports} adminResponses={adminResponses} investigations={investigations}
               onAssign={managerAssign} onSignOffDse={managerSignOffDse} onSignOffAction={managerSignOffAction}
               onGroupSession={()=>setGroupSessionFor("team")}
+              onSessions={()=>setShowSessions("team")}
               Z={T} font={font}/>
+            {showSessions==="team" && <SessionsModal sessions={listSessions(comps, teamOf(user, allUsers).map(u=>u.id))} people={allUsers} modules={allModules}
+              onAttach={attachToSession} onClose={()=>setShowSessions(null)} Z={T} font={font}/>}
             {groupSessionFor==="team" && <GroupSessionModal people={teamOf(user, allUsers)} modules={allModules.filter(m=>!m._hidden)} comps={comps}
               leaderName={user.name} onSave={recordCompletions} onClose={()=>setGroupSessionFor(null)} Z={T} font={font}/>}
             </React.Suspense>
@@ -4712,14 +4751,29 @@ export default function App() {
                   style={{background:"rgba(16,185,129,0.1)",color:T.green,border:"1px solid rgba(16,185,129,0.3)",borderRadius:10,padding:"8px 16px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font}}>
                   {E("📥 ","")}Import training done before the portal
                 </button>
+                {(()=>{ const ss=listSessions(comps); const miss=ss.filter(x=>!x.evidence.length).length; return (
+                  <button onClick={()=>setShowSessions("all")}
+                    style={{background:T.overlay,color:T.white,border:`1px solid ${T.borderMd}`,borderRadius:10,padding:"8px 16px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font}}>
+                    {E("📋 ","")}Group session records{ss.length?` (${ss.length})`:""}{miss?<span style={{color:"#fbbf24"}}> · {miss} without sign-in sheet</span>:null}
+                  </button>); })()}
               </div>
+              {showSessions==="all" && <SessionsModal sessions={listSessions(comps)} people={allUsers} modules={allModules}
+                onAttach={attachToSession} onClose={()=>setShowSessions(null)} Z={T} font={font}/>}
+              {evidenceFor && (()=>{ const c=(comps[evidenceFor.uid]||{})[evidenceFor.mid]; if(!c||!c.recorded) return null;
+                const pm=allModules.find(m=>String(m.id)===String(evidenceFor.mid)); const pu=allUsers.find(u=>String(u.id)===evidenceFor.uid);
+                const key=sessionKey(evidenceFor.mid,c); const sess=key && listSessions(comps).find(x=>x.key===key);
+                return <AttachEvidenceModal
+                  title={sess?`Sign-in sheet: ${pm?pm.title:""}`:`Evidence: ${pu?pu.name:""} — ${pm?pm.title:""}`}
+                  intro={sess?`The signed sign-in sheet for the session on ${String(c.date).split("-").reverse().join("/")}. It will be linked to all ${sess.attendees.length} attendees' records.`:"A certificate or old-system record showing this training was done."}
+                  onSave={files=>sess?attachToSession(sess,files):attachEvidence([{uid:evidenceFor.uid,mid:evidenceFor.mid}],files,`rec_${evidenceFor.uid}_${evidenceFor.mid}`)}
+                  onClose={()=>setEvidenceFor(null)} Z={T} font={font}/>; })()}
               {groupSessionFor==="all" && <GroupSessionModal people={allUsers.filter(u=>(u.status||"active")!=="leaver")} modules={allModules.filter(m=>!m._hidden)} comps={comps}
                 leaderName={user.name} onSave={recordCompletions} onClose={()=>setGroupSessionFor(null)} Z={T} font={font}/>}
               {showImportPrior && <ImportPriorTrainingModal users={allUsers.filter(u=>(u.status||"active")!=="leaver")} modules={allModules} comps={comps}
                 onImport={recordCompletions} onClose={()=>setShowImportPrior(false)} Z={T} font={font}/>}
               {recordFor && (()=>{ const pu=allUsers.find(u=>String(u.id)===String(recordFor.uid)); const pm=allModules.find(m=>m.id===recordFor.mid);
                 return pu && pm ? <RecordCompletionModal person={pu} module={pm}
-                  onSave={(date,note)=>recordCompletions([{userId:pu.id,moduleId:pm.id,date,note}])}
+                  byName={user.name} onSave={(date,note,evidence)=>recordCompletions([{userId:pu.id,moduleId:pm.id,date,note,evidence}])}
                   onClose={()=>setRecordFor(null)} Z={T} font={font}/> : null; })()}
 
               {(()=>{
@@ -4874,7 +4928,11 @@ export default function App() {
                                   </button>);
                                 if (c.recorded) return (
                                   <span style={{display:"inline-flex",alignItems:"center",gap:6,marginRight:8,flexShrink:0}}>
-                                    <span title={recordedText(c)} style={{fontSize:11,fontWeight:700,color:T.green,background:"rgba(16,185,129,0.1)",border:"1px solid rgba(16,185,129,0.3)",borderRadius:8,padding:"4px 10px"}}>Recorded · completed {dd}</span>
+                                    <span title={recordedText(c)} style={{fontSize:11,fontWeight:700,color:T.green,background:"rgba(16,185,129,0.1)",border:"1px solid rgba(16,185,129,0.3)",borderRadius:8,padding:"4px 10px"}}>{c.recorded.session?"Group session":"Recorded"} · completed {dd}</span>
+                                    {(c.recorded.evidence||[]).length>0
+                                      ? <EvidenceLinks evidence={c.recorded.evidence} label={evidenceLabel(c,0)} Z={T}/>
+                                      : <button onClick={()=>setEvidenceFor({uid:String(target),mid:m.id})} title={c.recorded.session?"Attach the signed sign-in sheet (linked to everyone at that session)":"Attach a certificate or old-system record"}
+                                          style={{background:"transparent",color:T.accentLt,border:`1px solid ${T.accent}55`,borderRadius:8,padding:"3px 9px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font}}>{E("📎 ","")}{c.recorded.session?"Attach sign-in sheet":"Attach evidence"}</button>}
                                     <button onClick={()=>{ if(window.confirm(`Remove the recorded completion of "${m.title}"?`)) removeRecordedCompletion(target,m.id); }}
                                       style={{background:"transparent",color:T.muted,border:"none",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font,textDecoration:"underline"}}>Undo</button>
                                   </span>);

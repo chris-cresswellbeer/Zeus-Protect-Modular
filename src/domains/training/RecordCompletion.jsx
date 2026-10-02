@@ -2,6 +2,8 @@ import React, { useState } from "react";
 import { E } from "../../lib/emoji";
 import { parseCompletionDate } from "./completion";
 import { getExpiryStatus } from "../../lib/dates";
+import { EvidencePicker } from "./TrainingEvidence";
+import { uploadEvidence } from "./evidence";
 
 /**
  * Recording training done BEFORE the portal (e.g. on the old system), so staff
@@ -33,10 +35,11 @@ const input = Z => ({ width: "100%", background: Z.overlay, border: `1px solid $
 const label = Z => ({ color: Z.muted, fontSize: 11, fontWeight: 700, letterSpacing: .5, display: "block", margin: "12px 0 6px", textTransform: "uppercase" });
 const btn = (Z, primary) => ({ border: primary ? "none" : `1px solid ${Z.borderMd}`, background: primary ? `linear-gradient(135deg,${Z.green},#059669)` : Z.overlay, color: primary ? "#fff" : Z.muted, borderRadius: 10, padding: "10px 20px", fontWeight: 800, cursor: "pointer", fontSize: 13 });
 
-/** One person, one module. onSave(date, note) → Promise<{saved, skipped}> */
-function RecordCompletionModal({ person, module: m, onSave, onClose, Z, font }) {
+/** One person, one module. onSave(date, note, evidence) → Promise<{saved, skipped}> */
+function RecordCompletionModal({ person, module: m, onSave, onClose, byName, Z, font }) {
   const [date, setDate] = useState("");
   const [note, setNote] = useState("");
+  const [files, setFiles] = useState([]);           // optional evidence: certificate / old-system record
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const ex = date && m.renewalMonths ? getExpiryStatus(date, m.renewalMonths) : null;
@@ -44,7 +47,12 @@ function RecordCompletionModal({ person, module: m, onSave, onClose, Z, font }) 
     const iso = parseCompletionDate(date);
     if (!iso) { setErr("Enter the date they completed it. It can't be in the future."); return; }
     setBusy(true); setErr("");
-    const r = await onSave(iso, note.trim());
+    let evidence = null;
+    if (files.length) {
+      try { evidence = await uploadEvidence(files, `rec_${person.id}_${m.id}`, byName); }
+      catch (e) { setBusy(false); setErr(String(e.message || e)); return; }
+    }
+    const r = await onSave(iso, note.trim(), evidence);
     setBusy(false);
     if (r && r.saved) onClose();
     else setErr((r && r.skipped && r.skipped[0] && `Not recorded: ${r.skipped[0].reason}.`) || "Not recorded.");
@@ -62,6 +70,7 @@ function RecordCompletionModal({ person, module: m, onSave, onClose, Z, font }) 
       </div>}
       <label style={label(Z)} htmlFor="rc-note">Note (optional)</label>
       <input id="rc-note" value={note} maxLength={300} onChange={e => setNote(e.target.value)} placeholder="e.g. Old system record, certificate ref. 4471" style={input(Z)} />
+      <EvidencePicker files={files} setFiles={setFiles} label="Evidence (optional)" hint="Certificate or old-system record · PDF or photo" Z={Z} font={font} testId="rc-evidence" />
       <p style={{ fontSize: 12, color: Z.muted, margin: "12px 0 0", lineHeight: 1.5 }}>
         It counts as complete from that date, with no quiz score and no portal certificate. The module is assigned to them if it isn't already. Your name and today's date are recorded with it, and it appears in the Audit Trail.
       </p>
@@ -255,6 +264,7 @@ function GroupSessionModal({ people, modules, comps, leaderName, onSave, onClose
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(null);
+  const [files, setFiles] = useState([]);           // optional: the signed sign-in sheet
   const m = modules.find(x => String(x.id) === String(mid));
   const list = people.filter(u => !q || `${u.name} ${u.jobTitle || ""} ${u.manager || ""}`.toLowerCase().includes(q.toLowerCase()))
     .sort((a, b) => String(a.manager || "").localeCompare(String(b.manager || "")) || a.name.localeCompare(b.name));
@@ -295,8 +305,15 @@ function GroupSessionModal({ people, modules, comps, leaderName, onSave, onClose
     if (!chosen.length) { setErr("Tick everyone who attended."); return; }
     setBusy(true); setErr("");
     const note = `Group session${where.trim() ? ` at ${where.trim()}` : ""}, led by ${leader.trim()}`;
-    const r = await onSave(chosen.map(u => ({ userId: u.id, moduleId: m.id, date: iso, note, session: { leader: leader.trim(), where: where.trim() } })));
-    setBusy(false); setDone(r); if (r && r.saved) setPicked({});
+    // id ties the attendees' records together, so a sign-in sheet attached later reaches them all
+    const session = { id: `gs_${Date.now()}`, leader: leader.trim(), where: where.trim() };
+    let evidence = null;
+    if (files.length) {
+      try { evidence = await uploadEvidence(files, session.id, leaderName); }
+      catch (e) { setBusy(false); setErr(String(e.message || e)); return; }
+    }
+    const r = await onSave(chosen.map(u => ({ userId: u.id, moduleId: m.id, date: iso, note, session, ...(evidence ? { evidence } : {}) })));
+    setBusy(false); setDone(r && { ...r, evidence: !!evidence }); if (r && r.saved) { setPicked({}); setFiles([]); }
   }
   const cell = { padding: "7px 8px", borderBottom: `1px solid ${Z.border}`, fontSize: 12.5 };
   return (
@@ -339,10 +356,13 @@ function GroupSessionModal({ people, modules, comps, leaderName, onSave, onClose
           </tbody>
         </table>
       </div>
+      <EvidencePicker files={files} setFiles={setFiles} label="Signed sign-in sheet (optional — you can also attach it later)"
+        hint="Print the sheet below, have it signed at the session, then scan or photograph it" Z={Z} font={font} testId="gs-evidence" />
       {err && <div role="alert" style={{ color: Z.red || "#f87171", fontWeight: 700, fontSize: 13, marginTop: 12 }}>{err}</div>}
       {done && (
         <div role="status" style={{ marginTop: 12, padding: "10px 14px", borderRadius: 12, background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.3)", fontSize: 13 }}>
-          <b style={{ color: Z.green }}>✓ {done.saved} attendee{done.saved !== 1 ? "s" : ""} recorded.</b>
+          <b style={{ color: Z.green }}>✓ {done.saved} attendee{done.saved !== 1 ? "s" : ""} recorded{done.evidence ? ", with the signed sign-in sheet" : ""}.</b>
+          {!done.evidence && done.saved > 0 && <span style={{ color: Z.muted }}> You can attach the signed sign-in sheet later from <b>Group session records</b>.</span>}
           {done.skipped && done.skipped.length > 0 && <span style={{ color: Z.muted }}> {done.skipped.length} not recorded: {done.skipped.map(x => `${(people.find(u => String(u.id) === String(x.userId)) || {}).name || x.userId} (${x.reason})`).join("; ")}.</span>}
         </div>
       )}

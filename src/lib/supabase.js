@@ -182,6 +182,8 @@ const sb = (() => {
     // PostgREST refuses an unfiltered PATCH, so .eq() is required.
     update: (values) => ({
       eq: (col, val) => q("PATCH", table, { filter: `${col}=eq.${encodeURIComponent(val)}`, body: values }),
+      // match({user_id:"12", module_id:"m3"}) → update rows matching ALL the given columns.
+      match: (conditions) => q("PATCH", table, { filter: Object.entries(conditions).map(([k,v])=>`${k}=eq.${encodeURIComponent(v)}`).join("&"), body: values }),
     }),
     // PostgREST refuses DELETE without a filter, so you must pick one of these.
     delete: () => ({

@@ -44,6 +44,8 @@ function cellFor(user, mod, assigns, comps) {
     status: ex ? (ex.status === "expired" ? "expired" : ex.status === "expiring" ? "expiring" : "valid") : "valid",
     assigned, completed: comp.date || "", expires: ex ? ex.expiryDate : "", daysLeft: ex ? ex.daysLeft : null,
     score: comp.recorded ? "Recorded" : comp.score, recorded: !!comp.recorded, certId: comp.certId || "", version: comp.moduleVersion || null,
+    how: comp.recorded ? (comp.recorded.session ? "Group session" : "Recorded by admin") : "Portal quiz",
+    evidence: comp.recorded ? ((comp.recorded.evidence || []).length ? "Yes" : "No") : "",
   };
 }
 
@@ -161,7 +163,7 @@ function exportTrainingMatrixXlsx(matrix, { filterText = "", companyName = "Zeus
   s1.push([{ v: "* completed although not assigned — shown for information, not counted in compliance. Compliance = assigned modules complete and in date ÷ assigned modules.", s: { italic: true, color: "595959", size: 9 } }]);
 
   // ── Sheet 2: detail list ──
-  const dHead = ["Name", "Job title", "Line manager", "Department", "Module", "Category", "Renewal", "Assigned", "Status", "Completed", "Score %", "Expires", "Days left", "Certificate ID", "Module version"];
+  const dHead = ["Name", "Job title", "Line manager", "Department", "Module", "Category", "Renewal", "Assigned", "Status", "Completed", "Score %", "Expires", "Days left", "Certificate ID", "Module version", "How completed", "Evidence on file"];
   const s2 = [dHead.map(h => ({ v: h, s: head }))];
   rows.forEach(r => r.cells.forEach((c, ci) => {
     if (c.status === "na") return;
@@ -169,7 +171,8 @@ function exportTrainingMatrixXlsx(matrix, { filterText = "", companyName = "Zeus
     s2.push([r.user.name, r.user.jobTitle || "", r.user.manager || "", r.user.department || "", m.title, m.category || "", m.renewalLabel || (m.renewalMonths ? `${m.renewalMonths} months` : "No renewal"),
       c.assigned ? "Yes" : "No", { v: MATRIX_STATUS[c.status].label, s: { fill: MATRIX_STATUS[c.status].fill, color: MATRIX_STATUS[c.status].text } },
       fmtLong(c.completed), typeof c.score === "number" ? c.score : (c.score ? Number(c.score) || c.score : ""), fmtLong(c.expires),
-      c.daysLeft === null || c.daysLeft === undefined ? "" : c.daysLeft, c.certId || "", c.version || ""]);
+      c.daysLeft === null || c.daysLeft === undefined ? "" : c.daysLeft, c.certId || "", c.version || "", c.how || "",
+      c.evidence === "No" ? { v: "No", s: { fill: "FFEB9C", color: "9C5700" } } : (c.evidence || "")]);
   }));
 
   // ── Sheet 3: per-module summary ──
@@ -181,7 +184,7 @@ function exportTrainingMatrixXlsx(matrix, { filterText = "", companyName = "Zeus
     { name: "Training Matrix", rows: s1, merges, freeze: { row: 6, col: 1 }, landscape: true,
       cols: [26, 24, 20, 12, ...cols.map(() => 11.5)], rowHeights: { 0: 24, 2: 42, 4: 30, 5: 190 } },
     { name: "Detail", rows: s2, freeze: { row: 1, col: 1 }, autoFilter: `A1:${colName(dHead.length - 1)}${s2.length}`,
-      cols: [24, 24, 20, 16, 34, 20, 12, 10, 30, 12, 9, 12, 10, 18, 10] },
+      cols: [24, 24, 20, 16, 34, 20, 12, 10, 30, 12, 9, 12, 10, 18, 10, 18, 12] },
     { name: "By Module", rows: s3, freeze: { row: 1, col: 1 }, cols: [36, 22, 12, 14, 16, 10, 10, 14, 12] },
   ]);
   downloadBlob(blob, filename || `Training_Matrix_${today}.xlsx`);

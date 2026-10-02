@@ -2,6 +2,7 @@
 import React from "react";
 import { getExpiryStatus } from "../../lib/dates";
 import { Screen, SectionLabel, Row, StatusChip } from "../ui";
+import { dueText } from "../../lib/dueDates";
 
 // Status for one assigned module from its completion record + renewal period
 // (same rules as the desktop staff dashboard).
@@ -15,7 +16,9 @@ function statusOf(m, comp) {
 
 function Training({ myMods, myComps, onOpenModule, Z, font }) {
   const withStatus = myMods.map((m) => ({ m, s: statusOf(m, myComps[m.id]) }));
-  const todo = withStatus.filter((x) => x.s.key === "notStarted" || x.s.key === "expired" || x.s.key === "expiring");
+  // to do: overdue first, then soonest due date (m.due from lib/dueDates.js), then the rest
+  const todo = withStatus.filter((x) => x.s.key === "notStarted" || x.s.key === "expired" || x.s.key === "expiring")
+    .sort((a, b) => ((a.m.due || {}).due || "9999").localeCompare((b.m.due || {}).due || "9999"));
   const valid = withStatus.filter((x) => x.s.key === "valid");
 
   return (
@@ -33,12 +36,12 @@ function Training({ myMods, myComps, onOpenModule, Z, font }) {
             {todo.map(({ m, s }) => (
               <Row
                 key={m.id} Z={Z} font={font}
-                tone={s.key === "expired" ? "danger" : "flat"}
+                tone={s.key === "expired" || (m.due && m.due.overdue) ? "danger" : "flat"}
                 icon={m.icon}
                 title={m.title}
-                sub={`${m.category} · ${m.duration}${s.key === "expired" ? " · renewal required" : ""}`}
+                sub={`${m.due ? dueText(m.due) + " · " : ""}${m.category} · ${m.duration}${s.key === "expired" ? " · renewal required" : ""}${m.progressSlide > 1 ? ` · carry on from slide ${m.progressSlide}` : ""}`}
                 onClick={() => onOpenModule(m)}
-                right={<StatusChip label={s.label} color={s.color} />}
+                right={<StatusChip label={m.due && m.due.overdue ? "Overdue" : s.label} color={m.due && m.due.overdue ? "#ef4444" : s.color} />}
               />
             ))}
           </div>

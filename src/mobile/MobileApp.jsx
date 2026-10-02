@@ -34,9 +34,11 @@ import { INSP_TYPES } from "../data/seedInspections";
 import { myIncompleteQuickReports } from "../domains/incidents/quickReportStatus";
 import { ScrollNav } from "../shared/ScrollNav";
 import { bundlesFor } from "../domains/documents/bundles";
+import { progressMap, saveProgress as saveModuleProgress, clearProgress } from "../lib/moduleProgress";
+import { dueInfo } from "../lib/dueDates";
 
 const FONT = "'Barlow','Trebuchet MS',system-ui,sans-serif";
-const PROGRESS_KEY = "zeus.mobile.progress";
+const OLD_PROGRESS_KEY = "zeus.mobile.progress";   // before Oct 2026: one list for everyone on the phone (removed)
 const PREFS_KEY = "zeus.mobile.prefs";
 
 // Bottom tab bar for everyone; admins get extra entries (see where TABS is built below).
@@ -86,14 +88,14 @@ const MOBILE_INSP_TYPES = ["weekly_walk", "office_housekeeping", "warehouse_hous
 // as `db.x && db.x(...)`, so a missing one is simply skipped. Currently mobileDb does
 // not provide optimisticInspection, optimisticPermitSignOn/Off or addActionProof.
 //
-// LOCAL-ONLY STATE (localStorage, per device): module slide progress (PROGRESS_KEY)
+// LOCAL-ONLY STATE (localStorage, per device): module slide progress (lib/moduleProgress.js, per person)
 // and display prefs (PREFS_KEY: followSystem, keepOffline, mobileData, textScale).
 function MobileApp({
   // identity
   user, onSignOut, onSwitchToDesktop, onCompleteQuickReport,
   // domain state, straight from App.jsx
   allModules, assigns, comps, docs, docAssignments, docAcknowledgements, docBundles = [],
-  dseReports, incidents, investigations, allUsers = [],
+  dseReports, incidents, investigations, allUsers = [], dueDates = {},
   siteInspections = [], permits = [],
   // theme
   theme, setTheme, setDarkMode,
@@ -117,7 +119,10 @@ function MobileApp({
   const [activePermit, setActivePermit] = React.useState(null);
   const [queue, setQueue] = React.useState([]);
   const [canInstall, setCanInstall] = React.useState(false);
-  const [progress, setProgress] = React.useState(loadProgress);
+  // Where they got to in each module — per person, shared with the computer layout (lib/moduleProgress.js)
+  const [progressTick, setProgressTick] = React.useState(0);
+  const progress = React.useMemo(() => progressMap(user.id, allModules), [user.id, allModules, progressTick]); // eslint-disable-line react-hooks/exhaustive-deps
+  React.useEffect(() => { try { localStorage.removeItem(OLD_PROGRESS_KEY); } catch { /* */ } }, []);
   const [prefs, setPrefs] = React.useState(loadPrefs);
   const [textScale, setTextScale] = React.useState(() => loadPrefs().textScale || 1);
 
@@ -183,7 +188,8 @@ function MobileApp({
   const myComps = comps[user.id] || {};
   const myMods = allModules
     .filter((m) => myIds.includes(m.id))
-    .map((m) => ({ ...m, progressSlide: progress[m.id] || 0, offline: !!prefs.keepOffline }));
+    .map((m) => ({ ...m, progressSlide: progress[m.id] || 0, offline: !!prefs.keepOffline, due: dueInfo(dueDates, user.id, m.id, !!myComps[m.id]) }))
+    .sort((a, b) => ((a.due || {}).due || "9999").localeCompare((b.due || {}).due || "9999"));   // soonest due first
 
   const requiredDocs = docs.filter((d) =>
     (docAssignments[String(d.id)] || []).includes(String(user.id))
@@ -263,11 +269,10 @@ function MobileApp({
 
   // ── Writes ────────────────────────────────────────────────────────────────
   function saveProgress(moduleId, slide) {
-    setProgress((p) => {
-      const next = { ...p, [moduleId]: slide };
-      localStorage.setItem(PROGRESS_KEY, JSON.stringify(next));
-      return next;
-    });
+    const m = allModules.find((x) => String(x.id) === String(moduleId));
+    if (!m) return;
+    if (slide > 0) saveModuleProgress(user.id, m, slide); else clearProgress(user.id, m);
+    setProgressTick((t) => t + 1);
   }
 
   // Only PASSED attempts are recorded from mobile (failures are not logged to quiz_failures here).
@@ -555,11 +560,6 @@ function MobileApp({
 }
 
 // localStorage helpers — wrapped in try/catch because private browsing / full storage can throw.
-function loadProgress() {
-  try { return JSON.parse(localStorage.getItem(PROGRESS_KEY)) || {}; }
-  catch { return {}; }
-}
-
 function loadPrefs() {
   try {
     return Object.assign(

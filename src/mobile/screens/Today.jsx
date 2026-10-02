@@ -8,6 +8,7 @@ import React from "react";
 import { getExpiryStatus } from "../../lib/dates";
 import { Screen, SectionLabel, Row, StatusChip, PrimaryButton } from "../ui";
 import { isQuickReportOverdue, quickReportDueLabel } from "../../domains/incidents/quickReportStatus";
+import { dueText } from "../../lib/dueDates";
 
 // ⚠ One deliberate difference from desktop: the compliance % here counts TRAINING only;
 // the desktop staff dashboard also counts external certificates and the DSE assessment,
@@ -124,7 +125,7 @@ function Today({
                   {nextUp.title}
                 </div>
                 <div style={{ fontSize: 12, color: "#a5b4fc", marginTop: 3 }}>
-                  {nextUp.duration} · {nextUp.level} · {(nextUp.content || []).length} slides
+                  {nextUp.due ? `${dueText(nextUp.due)} · ` : ""}{nextUp.duration} · {nextUp.level} · {(nextUp.content || []).length} slides
                 </div>
               </div>
             </div>
@@ -192,14 +193,17 @@ function Today({
                 right={<Cta label="Review" color="#f59e0b" />}
               />
             )}
-            {notStarted.filter((m) => m !== nextUp).map((m) => (
-              <Row
-                key={m.id} Z={Z} font={font} icon={m.icon}
-                title={m.title} sub={`${m.category} · ${m.duration}`}
-                onClick={() => onOpenModule(m)}
-                right={<StatusChip label="Not started" color="#f59e0b" />}
-              />
-            ))}
+            {notStarted.filter((m) => m !== nextUp).map((m) => {
+              const late = m.due && m.due.overdue;
+              return (
+                <Row
+                  key={m.id} Z={Z} font={font} icon={m.icon} tone={late ? "danger" : undefined}
+                  title={m.title} sub={m.due ? `${dueText(m.due)} · ${m.duration}` : `${m.category} · ${m.duration}`}
+                  onClick={() => onOpenModule(m)}
+                  right={<StatusChip label={late ? "Overdue" : "Not started"} color={late ? "#ef4444" : "#f59e0b"} />}
+                />
+              );
+            })}
           </div>
         </>
       )}

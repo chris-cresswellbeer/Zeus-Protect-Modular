@@ -15,6 +15,7 @@ import { AdminDSETab } from "../dse/AdminDSETab";
 import { TrainingMatrixView } from "./TrainingMatrixView";
 import { MonthlyReportView } from "../reports/MonthlyReportView";
 import { useRemembered } from "../../lib/remembered";
+import { useSort, sortRows, SortButton } from "../../shared/Sortable";
 
 /**
  * ReportsTab — admin "Training → Reports" area. One component, many report views,
@@ -53,7 +54,7 @@ function saveQuizFailureReviewed(f) {
   if (req) dbWrite(req, "quiz failure reviewed", { alertOnError: true });
 }
 
-function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledgements, reportView, setReportView, dseReports, adminResponses, setAdminResponses, darkMode, Z, font, modules, machineComps, allMachineTypes, lastLoginMap, extCerts, quizFailures, setQuizFailures, incidents, inspections, ras, investigations, onExportPDF, setAtab, userName }) {
+function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledgements, reportView, setReportView, dseReports, adminResponses, setAdminResponses, darkMode, Z, font, modules, machineComps, allMachineTypes, lastLoginMap, extCerts, quizFailures, setQuizFailures, incidents, inspections, ras, investigations, onExportPDF, setAtab, userName, dueDates, onMatrixAssign, onMatrixRecord, onMatrixDue, onMatrixOpen }) {
   const isMobile = useWindowWidth() <= 1024;
   const [rptFilterSearch, setRptFilterSearch] = React.useState("");
   const [showTeamExport, setShowTeamExport] = React.useState(false);
@@ -63,6 +64,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
   const allModules = modules || TRAINING_MODULES;
   const [expandedStaff, setExpandedStaff] = useState(null);
   const [expandedModule, setExpandedModule] = useState(null);
+  const [rptSort, setRptSortBy] = useSort("reports.staff", { by: "name", dir: "asc" });   // Staff Overview column sort
 
   // ── Manager performance calculations ──────────────────────────────────────
   // Groups staff by their `manager` text field and computes team totals for ManagerRow.
@@ -390,7 +392,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
                 const pct=a?Math.min(100,Math.round(d/a*100)):0;
                 if (rptFilterProgress==="compliant" && pct!==100) return false;
                 if (rptFilterProgress==="inprogress" && (pct===100||pct===0)) return false;
-                if (rptFilterProgress==="overdue" && pct!==0) return false;
+                if (rptFilterProgress==="overdue" && (a===0 || pct!==0)) return false;
                 if (rptFilterProgress==="none" && a!==0) return false;
               }
               return true;
@@ -432,7 +434,20 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
             {staff.length === 0 && (
               <div style={{padding:"32px 20px",textAlign:"center",color:Z.muted,fontSize:14}}>No staff members yet.</div>
             )}
-            {filteredStaff.map((u,i)=>{
+            {!isMobile && filteredStaff.length > 0 && (
+              <div style={{padding:"9px 20px",display:"grid",gridTemplateColumns:"2fr 1fr 1fr 2fr auto",gap:14,fontSize:11,fontWeight:700,letterSpacing:1,color:Z.muted,textTransform:"uppercase",background:Z.headerBg,borderBottom:`1px solid ${Z.border}`}}>
+                <SortButton label="Staff member" by="name" sort={rptSort} onSort={setRptSortBy} Z={Z} font={font}/>
+                <SortButton label="Done" by="done" sort={rptSort} onSort={setRptSortBy} Z={Z} font={font}/>
+                <SortButton label="Status" by="progress" sort={rptSort} onSort={setRptSortBy} Z={Z} font={font}/>
+                <SortButton label="Progress" by="progress" sort={rptSort} onSort={setRptSortBy} Z={Z} font={font}/>
+                <span style={{minWidth:16}}/>
+              </div>
+            )}
+            {sortRows(filteredStaff, rptSort, {
+              name: u=>u.name,
+              done: u=>(assigns[u.id]||[]).filter(mid=>(comps[u.id]||{})[mid]).length,
+              progress: u=>{ const a=(assigns[u.id]||[]).length; return a ? Math.round((assigns[u.id]||[]).filter(mid=>(comps[u.id]||{})[mid]).length/a*100) : null; },
+            }).map((u,i)=>{
               const assignedIds = assigns[u.id]||[];
               const userComps = comps[u.id]||{};
               const a = assignedIds.length;
@@ -725,7 +740,8 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
 
       {/* ── INCIDENT TRENDS: hand-drawn SVG/div charts (no chart library). Types come from incident.type. ── */}
       {reportView === "matrix" && (
-        <TrainingMatrixView staff={staff} modules={allModules} assigns={assigns} comps={comps} Z={Z} font={font}/>
+        <TrainingMatrixView staff={staff} modules={allModules} assigns={assigns} comps={comps} dueDates={dueDates}
+          onAssign={onMatrixAssign} onRecord={onMatrixRecord} onDueDate={onMatrixDue} onOpen={onMatrixOpen} Z={Z} font={font}/>
       )}
 
       {reportView === "monthly" && (

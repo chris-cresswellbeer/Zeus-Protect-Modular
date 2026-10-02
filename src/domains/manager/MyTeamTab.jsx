@@ -6,6 +6,7 @@ import { HelpTip } from "../../shared/HelpTip";
 import { getExpiryStatus } from "../../lib/dates";
 import { teamOf, normName } from "./team";
 import { E } from "../../lib/emoji";
+import { dueInfo, dueText, today as todayISO } from "../../lib/dueDates";
 
 /**
  * MyTeamTab — the "My Team" tab for users with role "manager".
@@ -23,7 +24,7 @@ const norm = normName;
 
 // One member's position, using the same rules as the staff dashboard.
 function summarise(u, ctx) {
-  const { allModules, assigns, comps, docs, docAssignments, docAcknowledgements, dseReports, adminResponses, investigations } = ctx;
+  const { allModules, assigns, comps, docs, docAssignments, docAcknowledgements, dseReports, adminResponses, investigations, dueDates } = ctx;
   const ids = assigns[String(u.id)] || [];
   const mods = allModules.filter(m => ids.includes(m.id));
   const c = comps[u.id] || comps[String(u.id)] || {};
@@ -34,7 +35,9 @@ function summarise(u, ctx) {
       ex = m.renewalMonths ? getExpiryStatus(rec.date, m.renewalMonths) : null;
       status = !ex || ex.status === "valid" ? "valid" : ex.status;   // valid | expiring | expired
     } else if (rec) status = "failed";
-    return { m, rec, status, ex };
+    // due date (lib/dueDates.js): only matters until it's passed
+    const due = dueInfo(dueDates, u.id, m.id, isPassed(rec));
+    return { m, rec, status, ex, due };
   });
   const good = modules.filter(x => x.status === "valid" || x.status === "expiring").length;
   const unreadDocs = docs.filter(d => (docAssignments[String(d.id)] || []).includes(String(u.id)) && !((docAcknowledgements[String(u.id)] || {})[d.id]));
@@ -50,6 +53,7 @@ function summarise(u, ctx) {
     modules, good, total: modules.length,
     pct: modules.length ? Math.round(good / modules.length * 100) : 100,
     overdue: modules.filter(x => x.status === "not_started" || x.status === "expired" || x.status === "failed").length,
+    pastDue: modules.filter(x => x.due && x.due.overdue).length,
     unreadDocs, last, dseExp, dseIssues,
     openDse: dseIssues.filter(x => !x.r.resolved).length,
     actions,
@@ -85,6 +89,7 @@ function SignOffButton({ label, onConfirm, Z, font }) {
 
 function AssignPanel({ member, allModules, assigned, onAssign, Z, font }) {
   const [sel, setSel] = useState([]);
+  const [due, setDue] = useState("");
   const available = allModules.filter(m => !m._hidden && !assigned.includes(m.id));
   if (!available.length) return <div style={{ fontSize: 12, color: Z.muted }}>Every module is already assigned.</div>;
   return (
@@ -97,7 +102,12 @@ function AssignPanel({ member, allModules, assigned, onAssign, Z, font }) {
           </label>
         ))}
       </div>
-      <button disabled={!sel.length} onClick={() => { onAssign(member, sel); setSel([]); }} style={{ background: `linear-gradient(135deg,${Z.accent},${Z.blue})`, color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", fontWeight: 800, fontSize: 12, cursor: sel.length ? "pointer" : "not-allowed", opacity: sel.length ? 1 : .5, fontFamily: font }}>
+      <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, color: Z.muted, fontWeight: 700, marginRight: 10, marginBottom: 8 }}>
+        Due by (optional)
+        <input type="date" value={due} min={todayISO()} onChange={e => setDue(e.target.value)} data-testid="team-due"
+          style={{ background: Z.overlay, border: `1px solid ${Z.borderMd}`, borderRadius: 8, padding: "6px 10px", color: Z.white, fontSize: 12, fontFamily: font, colorScheme: "dark" }} />
+      </label>
+      <button disabled={!sel.length} onClick={() => { onAssign(member, sel, due || null); setSel([]); setDue(""); }} style={{ background: `linear-gradient(135deg,${Z.accent},${Z.blue})`, color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", fontWeight: 800, fontSize: 12, cursor: sel.length ? "pointer" : "not-allowed", opacity: sel.length ? 1 : .5, fontFamily: font }}>
         Assign {sel.length || ""} module{sel.length === 1 ? "" : "s"} to {member.name.split(" ")[0]}
       </button>
     </div>
@@ -115,13 +125,14 @@ function MemberDetail({ u, s, allModules, assigned, onAssign, onSignOffDse, onSi
         <button onClick={() => setShowAssign(v => !v)} style={{ background: Z.overlay, border: `1px solid ${Z.borderMd}`, borderRadius: 8, padding: "5px 12px", color: Z.accentLt, fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: font, textTransform: "none", letterSpacing: 0 }}>{showAssign ? "✕ Close" : "+ Assign training"}</button>
       </div>
       {showAssign && <div style={{ marginBottom: 12 }}><AssignPanel member={u} allModules={allModules} assigned={assigned} onAssign={onAssign} Z={Z} font={font} /></div>}
-      {s.modules.length === 0 ? <div style={{ fontSize: 12, color: Z.muted }}>No training assigned.</div> : s.modules.map(({ m, rec, status, ex }) => {
+      {s.modules.length === 0 ? <div style={{ fontSize: 12, color: Z.muted }}>No training assigned.</div> : s.modules.map(({ m, rec, status, ex, due }) => {
         const st = STATUS[status]; const col = Z[st.key] || Z.muted;
         return (
           <div key={m.id} style={row}>
             <span style={{ fontSize: 13, color: Z.white, fontWeight: 600, flex: 1, minWidth: 180 }}>{m.icon} {m.title}</span>
             <span style={{ fontSize: 12, color: Z.muted }}>{rec ? `${scoreText(rec)} · ${rec.date}${rec.moduleVersion ? ` · v${rec.moduleVersion}` : ""}` : ""}{ex && ex.expiryDate ? ` · expires ${ex.expiryDate}` : ""}</span>
             {rec && rec.recorded && (rec.recorded.evidence || []).length > 0 && <EvidenceLinks evidence={rec.recorded.evidence} label={evidenceLabel(rec, 0)} Z={Z} />}
+            {due && <Badge text={dueText(due)} color={due.overdue ? Z.red : due.soon ? Z.amber : Z.muted} Z={Z} />}
             <Badge text={st.label} color={col} Z={Z} />
           </div>
         );
@@ -165,10 +176,10 @@ function MemberDetail({ u, s, allModules, assigned, onAssign, onSignOffDse, onSi
   );
 }
 
-function MyTeamTab({ manager, users, allModules, assigns, comps, docs, docAssignments, docAcknowledgements, dseReports, adminResponses, investigations, onAssign, onSignOffDse, onSignOffAction, onGroupSession, onSessions, Z, font }) {
+function MyTeamTab({ manager, users, allModules, assigns, comps, docs, docAssignments, docAcknowledgements, dseReports, adminResponses, investigations, dueDates, onAssign, onSignOffDse, onSignOffAction, onGroupSession, onSessions, Z, font }) {
   const [openId, setOpenId] = useState(null);
   const team = teamOf(manager, users);
-  const ctx = { allModules, assigns, comps, docs, docAssignments, docAcknowledgements, dseReports, adminResponses, investigations };
+  const ctx = { allModules, assigns, comps, docs, docAssignments, docAcknowledgements, dseReports, adminResponses, investigations, dueDates };
   const rows = team.map(u => ({ u, s: summarise(u, ctx) })).sort((a, b) => a.s.pct - b.s.pct);
   const totalMods = rows.reduce((n, r) => n + r.s.total, 0), goodMods = rows.reduce((n, r) => n + r.s.good, 0);
   const teamPct = totalMods ? Math.round(goodMods / totalMods * 100) : 100;
@@ -176,6 +187,7 @@ function MyTeamTab({ manager, users, allModules, assigns, comps, docs, docAssign
     { label: "Team members", value: team.length, color: Z.accentLt },
     { label: "Training up to date", value: `${teamPct}%`, color: teamPct === 100 ? Z.green : teamPct >= 70 ? Z.amber : Z.red },
     { label: "Training to do", value: rows.reduce((n, r) => n + r.s.overdue, 0), color: Z.red },
+    { label: "Past due date", value: rows.reduce((n, r) => n + r.s.pastDue, 0), color: rows.some(r => r.s.pastDue) ? Z.red : Z.green },
     { label: "Unread documents", value: rows.reduce((n, r) => n + r.s.unreadDocs.length, 0), color: Z.amber },
     { label: "Open DSE issues", value: rows.reduce((n, r) => n + r.s.openDse, 0), color: Z.amber },
     { label: "Open actions", value: rows.reduce((n, r) => n + r.s.openActions, 0), color: Z.gold },
@@ -224,7 +236,7 @@ function MyTeamTab({ manager, users, allModules, assigns, comps, docs, docAssign
                     <span><b style={{ fontSize: 14 }}>{u.name}</b><span style={{ display: "block", fontSize: 12, color: Z.muted }}>{u.jobTitle || ""}</span></span>
                     {s.total === 0
                       ? <span style={{ fontSize: 13, color: Z.muted }}>None assigned</span>
-                      : <span style={{ fontSize: 13 }}><b style={{ color: pctCol }}>{s.pct}%</b> <span style={{ color: Z.muted }}>({s.good}/{s.total})</span>{s.overdue ? <span style={{ display: "block", fontSize: 11, color: Z.red }}>{s.overdue} to do</span> : null}</span>}
+                      : <span style={{ fontSize: 13 }}><b style={{ color: pctCol }}>{s.pct}%</b> <span style={{ color: Z.muted }}>({s.good}/{s.total})</span>{s.overdue ? <span style={{ display: "block", fontSize: 11, color: Z.red }}>{s.overdue} to do{s.pastDue ? ` · ${s.pastDue} past due` : ""}</span> : null}</span>}
                     <span style={{ fontSize: 13, color: s.unreadDocs.length ? Z.amber : Z.green }}>{s.unreadDocs.length ? `${s.unreadDocs.length} unread` : "✓ Read"}</span>
                     <span style={{ fontSize: 13, color: !s.last ? Z.red : s.openDse ? Z.amber : Z.green }}>{!s.last ? "Not done" : s.openDse ? `${s.openDse} open issue${s.openDse === 1 ? "" : "s"}` : "✓ OK"}</span>
                     <span style={{ fontSize: 13, color: s.openActions ? Z.gold : Z.muted }}>{s.openActions ? `${s.openActions} open` : s.actions.length ? "✓ Done" : "—"}</span>

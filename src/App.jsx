@@ -2339,6 +2339,10 @@ export default function App() {
     const isIntro = step===0;
     const isQuiz  = step===quizStep;
     const slide   = (!isIntro && !isQuiz) ? mod.content[step-1] : null;
+    // A slide imported from PowerPoint (images[0].deck, see slideImport.js) is shown large:
+    // wider column, less padding, a small heading (the title is in the picture) and the
+    // picture sized to fit the screen height. Hotspot slides keep the normal layout.
+    const isDeck  = !!(slide && (slide.images||[])[0] && slide.images[0].deck && !(slide.hotspots&&slide.hotspots.length>0));
 
     let qScore=0, qPct=0, passed=false;
     if (qsub) {
@@ -2470,7 +2474,7 @@ export default function App() {
           <div style={{height:"100%",background:`linear-gradient(90deg,${T.accent},${T.accentLt})`,width:`${(step/quizStep)*100}%`,transition:"width .4s"}}/>
         </div>
 
-        <div style={{maxWidth:720,margin:"0 auto",padding:"44px 24px"}}>
+        <div style={{maxWidth:isDeck?1280:720,margin:"0 auto",padding:isDeck?"20px 24px":"44px 24px"}}>
 
           {isIntro && (
             <div style={{textAlign:"center"}}>
@@ -2488,8 +2492,8 @@ export default function App() {
 
           {slide && (
             <div>
-              <div style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:20,padding:40,border:`1px solid ${T.border}`,boxShadow:"0 8px 40px rgba(0,0,0,.4)"}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+              <div data-testid="slide-card" data-deck={isDeck?"1":undefined} style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:20,padding:isDeck?"16px 20px 20px":40,border:`1px solid ${T.border}`,boxShadow:"0 8px 40px rgba(0,0,0,.4)"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:isDeck?10:20}}>
                   <div style={{color:T.muted,fontSize:11,fontWeight:800,letterSpacing:2}}>SLIDE {step} OF {totalSlides}</div>
                   <div style={{display:"flex",gap:4}}>
                     {Array.from({length:totalSlides}).map((_,i)=>(
@@ -2498,7 +2502,9 @@ export default function App() {
                   </div>
                 </div>
                 {slide.heading && (
-                  <h2 style={{fontSize:22,fontWeight:900,color:T.white,margin:"0 0 18px",letterSpacing:-.5,paddingBottom:14,borderBottom:`1px solid ${T.borderMd}`}}>
+                  <h2 style={isDeck
+                    ? {fontSize:15,fontWeight:800,color:T.muted,margin:"0 0 10px",letterSpacing:-.2}
+                    : {fontSize:22,fontWeight:900,color:T.white,margin:"0 0 18px",letterSpacing:-.5,paddingBottom:14,borderBottom:`1px solid ${T.borderMd}`}}>
                     {slide.heading}
                   </h2>
                 )}
@@ -2509,7 +2515,7 @@ export default function App() {
                     {(slide.images||[]).map((img,ii)=>(
                       <img key={ii} src={img.url||img.data} alt={img.deck ? (slide.heading||"Slide") : (img.name||"")} onClick={()=>{setLightboxSrc(img.url||img.data);setLightboxZoomed(false);}}
                         style={img.deck
-                          ? {width:"100%",maxHeight:"70vh",borderRadius:12,border:`1px solid ${T.borderMd}`,objectFit:"contain",cursor:"zoom-in",background:"#fff"}
+                          ? {maxWidth:"100%",maxHeight:"max(260px, calc(100vh - 250px))",width:"auto",height:"auto",borderRadius:10,border:`1px solid ${T.borderMd}`,cursor:"zoom-in",background:"#fff",display:"block"}
                           : {maxWidth:"100%",flex:"1 1 220px",maxHeight:360,borderRadius:12,border:`1px solid ${T.borderMd}`,objectFit:"contain",cursor:"zoom-in"}}/>
                     ))}
                     {/* backwards compat: old single image field */}

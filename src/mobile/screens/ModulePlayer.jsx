@@ -308,7 +308,7 @@ function slideImages(slide) {
 
 // No loading="lazy": inside the player's fixed, nested scroll container some
 // Android WebViews never fire the intersection that triggers the load.
-function SlideImage({ src: stored, Z }) {
+function SlideImage({ src: stored, Z, deck }) {
   // Private files (new sign-in) need a signed link first; null while it's fetched,
   // so the image isn't tried with the old link and wrongly shown as failed.
   const src = useFileUrl(stored);
@@ -319,7 +319,10 @@ function SlideImage({ src: stored, Z }) {
   return (
     <img
       src={src} alt="" decoding="async" onError={() => setFailed(true)}
-      style={{ width: "100%", maxHeight: 320, objectFit: "contain", display: "block" }}
+      style={deck
+        // a whole PowerPoint slide: as large as the screen allows (also in landscape)
+        ? { width: "100%", maxHeight: "calc(100vh - 170px)", objectFit: "contain", display: "block", background: "#fff" }
+        : { width: "100%", maxHeight: 320, objectFit: "contain", display: "block" }}
     />
   );
 }
@@ -385,13 +388,16 @@ function SlideCard({ slide, Z, font, onHotspotStatus }) {
   const vs = videoSource(slide.video);                // uploaded file, direct link, or embed
   const videoSrc = vs && vs.src;
 
+  const deck = deckFirst && !isHotspot;               // imported PowerPoint slide: show it large
   return (
-    <div style={{
-      background: `linear-gradient(135deg,${Z.navyMd},${Z.navy})`, borderRadius: 20,
-      padding: "22px 20px", border: `1px solid ${Z.border}`, boxShadow: "0 8px 40px rgba(0,0,0,.4)",
+    <div data-testid="slide-card" data-deck={deck ? "1" : undefined} style={{
+      background: `linear-gradient(135deg,${Z.navyMd},${Z.navy})`, borderRadius: deck ? 16 : 20,
+      padding: deck ? "12px 8px 14px" : "22px 20px", border: `1px solid ${Z.border}`, boxShadow: "0 8px 40px rgba(0,0,0,.4)",
     }}>
       {slide.heading && (
-        <h2 style={{
+        <h2 style={deck ? {
+          fontSize: 14, fontWeight: 800, color: Z.muted, margin: "0 6px 10px", lineHeight: 1.25,
+        } : {
           fontSize: 20, fontWeight: 900, color: Z.white, margin: "0 0 15px",
           letterSpacing: -0.4, paddingBottom: 13,
           borderBottom: `1px solid ${Z.borderMd}`, lineHeight: 1.2,
@@ -412,13 +418,16 @@ function SlideCard({ slide, Z, font, onHotspotStatus }) {
                 overflow: "hidden", background: Z.overlay, cursor: "zoom-in", lineHeight: 0,
               }}
             >
-              <SlideImage src={src} Z={Z} />
+              <SlideImage src={src} Z={Z} deck />
             </button>
           ))}
+          <div data-testid="deck-hint" style={{ fontSize: 11.5, color: Z.muted, textAlign: "center", marginTop: -2 }}>
+            Tap the slide to enlarge it, or turn your phone sideways.
+          </div>
         </div>
       )}
 
-      {slide.text && <SlideBody text={slide.text} Z={Z} />}
+      {slide.text && (deck ? <div style={{ padding: "0 8px" }}><SlideBody text={slide.text} Z={Z} /></div> : <SlideBody text={slide.text} Z={Z} />)}
 
       {vs && vs.kind === "embed" && <SlideVideoEmbed src={vs.src} title={slide.video.name} Z={Z} />}
       {vs && vs.kind === "file" && <SlideVideo src={vs.src} Z={Z} />}

@@ -94,7 +94,9 @@ function ModulePreviewModal({ m, staff, assigns, comps, compHistory = [], module
                     <div style={{display:"flex",flexWrap:"wrap",gap:10,marginTop:12}}>
                       {/* new images[] array */}
                       {(slides[previewSlide].images||[]).map((img,ii)=>(
-                        <img key={ii} src={img.url||img.data} alt="" style={{maxWidth:"100%",flex:"1 1 200px",borderRadius:10,objectFit:"contain",maxHeight:320}}/>
+                        <img key={ii} src={img.url||img.data} alt="" style={img.deck
+                          ? {width:"100%",borderRadius:10,objectFit:"contain",maxHeight:"60vh",background:"#fff"}
+                          : {maxWidth:"100%",flex:"1 1 200px",borderRadius:10,objectFit:"contain",maxHeight:320}}/>
                       ))}
                       {/* backwards compat: old single image field */}
                       {(slides[previewSlide].images||[]).length===0 && (slides[previewSlide].image?.data||slides[previewSlide].image?.url||slides[previewSlide].imageData) && (

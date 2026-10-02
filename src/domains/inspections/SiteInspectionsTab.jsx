@@ -1,10 +1,13 @@
 import { useState } from "react";
+import { ask } from "../../shared/Feedback";
+import { useFormGuard, DraftBanner, confirmLeave } from "../../lib/unsaved";
 import { useWindowWidth } from "../../shared/hooks";
 import { HelpTip } from "../../shared/HelpTip";
 import { E } from "../../lib/emoji";
 import { ACCEPT_IMAGES } from "../../lib/constants";
 import { INSP_TYPES, INSP_SECTIONS } from "../../data/seedInspections";
 import { embedFiles } from "../../lib/fileAccess";
+import { useRemembered } from "../../lib/remembered";
 
 /**
  * SiteInspectionsTab — admin workplace inspections (checklists + non-conformances).
@@ -33,8 +36,8 @@ function SiteInspectionsTab({ inspections, setInspections, staff, Z, font }) {
   const isMobile = useWindowWidth() <= 1024;
   const [view, setView] = useState("list"); // "list"|"new"|"detail"|"report"
   const [activeId, setActiveId] = useState(null);
-  const [filterType, setFilterType] = useState("all");
-  const [filterStatus, setFilterStatus] = useState("all");
+  const [filterType, setFilterType] = useRemembered("inspections.type", "all");
+  const [filterStatus, setFilterStatus] = useRemembered("inspections.status", "all");
   const [photoError, setPhotoError] = useState("");
 
   // New inspection form state
@@ -46,6 +49,8 @@ function SiteInspectionsTab({ inspections, setInspections, staff, Z, font }) {
   const [ncReturnSection, setNcReturnSection] = useState(null); // section index to jump back to after saving/cancelling an NC flagged from a checklist question
   const [editingInspId, setEditingInspId] = useState(null);
   const [editInspForm, setEditInspForm] = useState(null);
+  // unsaved-changes warning + draft on this device for a new inspection (lib/unsaved.jsx)
+  const inspGuard = useFormGuard({ key: "inspection.new", label: "your new inspection", active: view === "new", value: form, onRestore: v => setForm(v) });
 
   const today = new Date().toISOString().slice(0,10);
   const selInsp = inspections.find(i=>i.id===activeId);
@@ -131,6 +136,7 @@ function SiteInspectionsTab({ inspections, setInspections, staff, Z, font }) {
       maxScore: possible,
     };
     setInspections(p=>[newInsp,...p]);
+    inspGuard.done();
     setView("detail"); setActiveId(newInsp.id);
   }
 
@@ -408,8 +414,9 @@ function SiteInspectionsTab({ inspections, setInspections, staff, Z, font }) {
 
     return (
       <div>
+        <DraftBanner guard={inspGuard} Z={Z} font={font} what="a new inspection"/>
         <div style={{display:"flex",gap:12,alignItems:"center",marginBottom:20,flexWrap:"wrap"}}>
-          <button onClick={()=>{setView("list");setForm(BLANK_FORM);setFormSection(0);setNcForm(null);setEditNcIdx(null);setNcReturnSection(null);}} style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:8,padding:"7px 14px",color:Z.muted,cursor:"pointer",fontFamily:font,fontSize:12,fontWeight:700}}>← Cancel</button>
+          <button onClick={async()=>{if(inspGuard.dirty && !(await confirmLeave())) return; inspGuard.done(); setView("list");setForm(BLANK_FORM);setFormSection(0);setNcForm(null);setEditNcIdx(null);setNcReturnSection(null);}} style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:8,padding:"7px 14px",color:Z.muted,cursor:"pointer",fontFamily:font,fontSize:12,fontWeight:700}}>← Cancel</button>
           <div style={{flex:1}}>
             <h2 style={{margin:0,fontSize:20,fontWeight:900,color:Z.white}}>New {ti.label}</h2>
             <p style={{margin:0,color:Z.muted,fontSize:13}}>Complete all checklist sections then log any non-conformances</p>
@@ -745,7 +752,7 @@ function SiteInspectionsTab({ inspections, setInspections, staff, Z, font }) {
                 <div style={{display:"flex",gap:6,flexShrink:0}} onClick={e=>e.stopPropagation()}>
                   <button onClick={()=>{setEditingInspId(ins.id);setEditInspForm({date:ins.date,location:ins.location,inspector:ins.inspector,summary:ins.summary||"",nextDue:ins.nextDue||"",status:ins.status});}}
                     style={{background:"rgba(37,99,235,0.1)",color:Z.accentLt,border:"1px solid rgba(37,99,235,0.25)",borderRadius:9,padding:"8px 14px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:12,whiteSpace:"nowrap"}}>✏ Edit</button>
-                  <button onClick={()=>{if(window.confirm("Delete this inspection? This cannot be undone.")){setInspections(p=>p.filter(x=>x.id!==ins.id));}}}
+                  <button onClick={async()=>{if(await ask({ title: "Delete this inspection?", message: "This can't be undone.", ok: "Delete", danger: true })){setInspections(p=>p.filter(x=>x.id!==ins.id));}}}
                     style={{background:"rgba(239,68,68,0.1)",color:"#f87171",border:"1px solid rgba(239,68,68,0.2)",borderRadius:9,padding:"8px 12px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:12}}>🗑</button>
                   <button onClick={()=>{setActiveId(ins.id);setView("detail");window.scrollTo({top:0,behavior:"smooth"});}}
                     style={{background:`linear-gradient(135deg,${Z.accent},${Z.blue})`,color:"#fff",border:"none",borderRadius:9,padding:"8px 16px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:12,whiteSpace:"nowrap",boxShadow:`0 4px 12px ${Z.accent}33`}}>View →</button>

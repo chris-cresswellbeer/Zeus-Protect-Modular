@@ -1,4 +1,5 @@
 import React from "react";
+import { ask } from "../../shared/Feedback";
 import { Avatar } from "../../shared/primitives";
 import { INDUCTION_ITEMS } from "../../data/seedContractors";
 import { WorkerDetailModal } from "./WorkerDetailModal";
@@ -84,7 +85,7 @@ function ContractorDetail({ selCon, contractorInductions, setContractorInduction
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
             <span style={{fontSize:11,fontWeight:700,padding:"4px 12px",borderRadius:20,background:selCon.status==="active"?"rgba(16,185,129,0.12)":T.overlay,color:selCon.status==="active"?"#10b981":T.muted,border:`1px solid ${selCon.status==="active"?"rgba(16,185,129,0.3)":T.borderMd}`,textTransform:"capitalize"}}>{selCon.status||"active"}</span>
             <button onClick={()=>setEditingCon(selCon)} style={{background:"rgba(37,99,235,0.1)",color:T.accentLt,border:"1px solid rgba(37,99,235,0.25)",borderRadius:9,padding:"5px 12px",cursor:"pointer",fontFamily:font,fontWeight:700,fontSize:12}}>✏ Edit</button>
-            <button onClick={()=>{if(window.confirm(`Remove ${selCon.name}?`)){setContractors(p=>p.filter(c=>c.id!==selCon.id));dbDeleteContractor(selCon.id);setView("list");}}} style={{background:"rgba(239,68,68,0.1)",color:"#f87171",border:"1px solid rgba(239,68,68,0.2)",borderRadius:9,padding:"5px 12px",cursor:"pointer",fontFamily:font,fontWeight:700,fontSize:12}}>🗑</button>
+            <button onClick={async()=>{if(await ask({ title: `Remove ${selCon.name}?`, message: "This removes the contractor, their workers and visit records.", ok: "Remove", danger: true })){setContractors(p=>p.filter(c=>c.id!==selCon.id));dbDeleteContractor(selCon.id);setView("list");}}} style={{background:"rgba(239,68,68,0.1)",color:"#f87171",border:"1px solid rgba(239,68,68,0.2)",borderRadius:9,padding:"5px 12px",cursor:"pointer",fontFamily:font,fontWeight:700,fontSize:12}}>🗑</button>
           </div>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:8}}>
@@ -250,9 +251,9 @@ function ContractorDetail({ selCon, contractorInductions, setContractorInduction
                         {v.notes && <div style={{fontSize:11,color:T.muted,fontStyle:"italic",marginTop:2}}>{v.notes}</div>}
                       </div>
                       <div style={{display:"flex",gap:6,flexShrink:0}}>
-                        <button onClick={()=>{
+                        <button onClick={async()=>{
                           // Convert scheduled visit to actual (mark as today)
-                          if(window.confirm("Mark this visit as completed today?")) {
+                          if(await ask({ title: "Visit completed?", message: "Mark this visit as completed today?", ok: "Mark completed" })) {
                             const nv=allVisits.map(x=>x.id===v.id?{...x,date:today,scheduled:false}:x);
                             setContractorVisits(p=>({...p,[selCon.id]:nv}));
                             dbSaveContractorVisits(selCon.id,nv);
@@ -350,7 +351,7 @@ function ContractorDetail({ selCon, contractorInductions, setContractorInduction
                     </div>
                     <div style={{display:"flex",gap:6,flexShrink:0}}>
                       <button onClick={()=>{setEditingVisitIdx(vi);setEditVisitForm({...v});}} style={{background:"rgba(37,99,235,0.1)",color:T.accentLt,border:"1px solid rgba(37,99,235,0.25)",borderRadius:7,padding:"5px 10px",cursor:"pointer",fontSize:11,fontFamily:font,fontWeight:700,whiteSpace:"nowrap"}}>Edit</button>
-                      <button onClick={()=>{if(window.confirm("Delete this visit?")){{const nv=visits.filter((_,j)=>j!==vi);setContractorVisits(p=>({...p,[selCon.id]:nv}));dbSaveContractorVisits(selCon.id,nv);}}}} style={{background:"rgba(239,68,68,0.08)",color:"#f87171",border:"1px solid rgba(239,68,68,0.15)",borderRadius:7,padding:"5px 10px",cursor:"pointer",fontSize:11,fontFamily:font,fontWeight:700}}>🗑</button>
+                      <button onClick={async()=>{if(await ask({ title: "Delete this visit?", message: "The visit record is removed.", ok: "Delete", danger: true })){{const nv=visits.filter((_,j)=>j!==vi);setContractorVisits(p=>({...p,[selCon.id]:nv}));dbSaveContractorVisits(selCon.id,nv);}}}} style={{background:"rgba(239,68,68,0.08)",color:"#f87171",border:"1px solid rgba(239,68,68,0.15)",borderRadius:7,padding:"5px 10px",cursor:"pointer",fontSize:11,fontFamily:font,fontWeight:700}}>🗑</button>
                     </div>
                   </div>
                   )}
@@ -408,7 +409,7 @@ function ContractorDetail({ selCon, contractorInductions, setContractorInduction
                     </div>
                     <div style={{display:"flex",gap:6}}>
                       <button onClick={()=>setSelectedWorker(w)} style={{background:"rgba(37,99,235,0.1)",color:T.accentLt,border:"1px solid rgba(37,99,235,0.25)",borderRadius:8,padding:"6px 12px",cursor:"pointer",fontFamily:font,fontWeight:700,fontSize:11}}>Manage →</button>
-                      <button onClick={()=>{if(window.confirm(`Remove ${w.name}?`)) removeWorker(w.id);}} style={{background:"rgba(239,68,68,0.08)",color:"#f87171",border:"1px solid rgba(239,68,68,0.15)",borderRadius:8,padding:"6px 8px",cursor:"pointer",fontSize:11}}>🗑</button>
+                      <button onClick={async()=>{if(await ask({ title: `Remove ${w.name}?`, message: "Their inductions and certificates for this contractor are removed too.", ok: "Remove", danger: true })) removeWorker(w.id);}} style={{background:"rgba(239,68,68,0.08)",color:"#f87171",border:"1px solid rgba(239,68,68,0.15)",borderRadius:8,padding:"6px 8px",cursor:"pointer",fontSize:11}}>🗑</button>
                     </div>
                   </div>
                 );

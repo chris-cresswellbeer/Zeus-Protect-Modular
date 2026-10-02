@@ -46,6 +46,7 @@
 // A Netlify site can point the portal at a different project (e.g. the staging copy)
 // by setting VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in Site configuration →
 // Environment variables, then redeploying. Without them the live project is used.
+import { notify } from "../shared/Feedback";   // dbWrite error messages
 const LIVE_SUPABASE_URL  = "https://aoahugfyswgcisfiosyn.supabase.co";
 const LIVE_SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFvYWh1Z2Z5c3dnY2lzZmlvc3luIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk5NjY1NzMsImV4cCI6MjA5NTU0MjU3M30.9mlm3pVxqwTgCdrdVF2ek1mBHro28P-MTaVjdAUvCIs";
 const ENV = (typeof import.meta !== "undefined" && import.meta.env) || {};
@@ -280,7 +281,7 @@ async function dbWrite(promise, label, opts = {}) {
   if (error) {
     console.error(`[dbWrite] Save failed${label ? ` [${label}]` : ""}:`, error);
     if (opts.alertOnError) {
-      alert(`Failed to save${label ? ` ${label}` : ""}. Your changes may not have been saved.\n\n${error}`);
+      notify(`Failed to save${label ? ` ${label}` : ""}. Your changes may not have been saved.\n${error}`, { kind: "error" });
     }
   }
   return !error;

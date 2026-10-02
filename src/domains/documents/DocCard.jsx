@@ -1,4 +1,5 @@
 import React from "react";
+import { notify, ask } from "../../shared/Feedback";
 import { Pill } from "../../shared/primitives";
 import { sb, dbWrite } from "../../lib/supabase";
 import { ACCEPT_IMG_DOCS } from "../../lib/constants";
@@ -81,7 +82,7 @@ function DocCard({ d, staff, assignedIds, assignedStaff, readCount, unreadCount,
       });
     }
     sb.storage.upload("documents",path2,file).then(({error})=>{
-      if (error) { console.error("New version upload failed:", error); alert("Upload failed: " + error); return; }
+      if (error) { console.error("New version upload failed:", error); notify("Upload failed: " + error, { kind: "error" }); return; }
       newDoc.fileUrl=sb.storage.getPublicUrl("documents",path2);
       newDoc.fileData=newDoc.fileUrl;
       setDocs(p=>p.map(x=>x.id===d.id?newDoc:x));
@@ -92,15 +93,15 @@ function DocCard({ d, staff, assignedIds, assignedStaff, readCount, unreadCount,
     });
   }
 
-  function confirmDelete() {
+  async function confirmDelete() {
     if (d.raId) {
-      window.alert(`"${d.title}" is created from a risk assessment, so it can't be removed here.\n\nTo remove it, delete or change the risk assessment under Risk Assessments.`);
+      notify(`"${d.title}" is created from a risk assessment, so it can't be removed here. To remove it, delete or change the risk assessment under Risk Assessments.`, { kind: "info", timeout: 9000 });
       return;
     }
     const lines = [`Delete "${d.title}"?`, ""];
     if (assignedStaff.length) lines.push(`It is assigned to ${assignedStaff.length} staff member${assignedStaff.length!==1?"s":""} (${readCount} ha${readCount!==1?"ve":"s"} confirmed reading it). Their assignments and read confirmations will be removed too.`, "");
     lines.push("The file will be deleted. This cannot be undone.");
-    if (!window.confirm(lines.join("\n"))) return;
+    if (!(await ask({ title: `Delete "${d.title}"?`, danger: true, ok: "Delete document", message: lines.slice(1).join("\n").trim() }))) return;
     setDocs(p=>p.filter(x=>x.id!==d.id));
     dbDeleteDoc(d.id,d.fileName);
     auditEvent("document", d.id, "delete", `Deleted document "${d.title}" (v${d.version||1})`,

@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { ask } from "../../shared/Feedback";
 import { adminCall, makeTempPassword } from "../../lib/auth";
 import { E } from "../../lib/emoji";
 
@@ -27,7 +28,7 @@ function SignInAccountsPanel({ users, onShowPasswords, Z, font }) {
 
   async function createAll() {
     if (!missing.length) return;
-    if (!window.confirm(`Create sign-in accounts for ${missing.length} ${missing.length === 1 ? "person" : "people"}? Each gets a temporary password, shown once for you to print.`)) return;
+    if (!(await ask({ title: "Create sign-in accounts", ok: "Create accounts", message: `Create sign-in accounts for ${missing.length} ${missing.length === 1 ? "person" : "people"}? Each gets a temporary password, shown once for you to print.` }))) return;
     setBusy(true); setErr("");
     const passwords = Object.fromEntries(missing.map(u => [String(u.id), makeTempPassword()]));
     const r = await adminCall("createMissing", { passwords });

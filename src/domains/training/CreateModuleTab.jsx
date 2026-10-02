@@ -1,4 +1,5 @@
 import React, { useState, useRef } from "react";
+import { notify } from "../../shared/Feedback";
 import { useWindowWidth } from "../../shared/hooks";
 import { HelpTip } from "../../shared/HelpTip";
 import { sb, SUPABASE_URL } from "../../lib/supabase";
@@ -10,6 +11,7 @@ import { htmlToPlainText } from "./slideTextUtils";
 import { SlideImportPanel } from "./SlideImportPanel";
 import { MAX_UPLOAD_MB } from "./slideImport";
 import { parseVideoLink } from "../../lib/videoLink";
+import { useFormGuard, DraftBanner } from "../../lib/unsaved";
 
 /**
  * CreateModuleTab — admin 4-step wizard to create or edit a training module.
@@ -76,6 +78,10 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
   })) : [{ heading:"", text:"", video:null, images:[], hotspots:null, hotspotInstructions:"" }]);
   const [quiz, setQuiz] = useState(editingModule ? (editingModule.quiz||[]).map(q=>({...q, options:[...q.options]})) : [{ q:"", options:["","","",""], answer:0 }]);
   const [err, setErr] = useState("");
+  // unsaved-changes warning + draft on this device (lib/unsaved.jsx)
+  const guard = useFormGuard({ key: `module.${editingModule ? editingModule.id : "new"}`, label: editingModule ? `the module "${editingModule.title}"` : "your new module",
+    active: true, value: { details, slides, quiz },
+    onRestore: v => { if (v.details) setDetails(v.details); if (v.slides) setSlides(v.slides); if (v.quiz) setQuiz(v.quiz); } });
   const [showImport, setShowImport] = useState(false);
   const [linkDraft, setLinkDraft] = useState({});     // slide index → pasted video link
   const [linkErr, setLinkErr] = useState({});         // slide index → message
@@ -172,7 +178,7 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
     };
     // Editing an existing module: App.jsx asks "minor or major change?" and saves it as a
     // new version (saveModuleVersion) — nothing is written until the admin confirms.
-    if (editingModule) { onSave(newModule); return; }
+    if (editingModule) { guard.done(); onSave(newModule); return; }
     // New module: save directly to Supabase before updating state
     const { error } = await sb.from("custom_modules").upsert({ id: newModule.id, data: { ...newModule, version: 1 } }, { onConflict: "id" });
     if (error) {
@@ -180,6 +186,7 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
       setErr(`Failed to save module — your changes were not saved. ${error}`);
       return;
     }
+    guard.done();
     onSave(newModule);
   }
 
@@ -205,6 +212,7 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
         })}
       </div>
 
+      <DraftBanner guard={guard} Z={Z} font={font} what={editingModule ? "this module" : "a new module"}/>
       {err && <div style={{background:"rgba(239,68,68,0.1)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:10,padding:"10px 16px",color:"#f87171",fontSize:13,marginBottom:16}}>{err}</div>}
 
       {/* ── STEP 1: Details ── */}
@@ -329,7 +337,7 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
                     updateSlide(i,"images",[...(s.images||[]),placeholder]);
                     const { error } = await sb.storage.upload("documents",path,file);
                     if (error) {
-                      alert("Image upload failed: "+error);
+                      notify("Image upload failed: "+error, { kind: "error" });
                       updateSlide(i,"images",(s.images||[]).filter(img=>img!==placeholder));
                       return;
                     }
@@ -409,7 +417,7 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
                         const path = `video_${Date.now()}_${safeName}`;
                         updateSlide(i,"video",{name:file.name,type:file.type,data:null,uploading:true});
                         const { error } = await sb.storage.upload("documents", path, file);
-                        if (error) { alert("Video upload failed: " + error); updateSlide(i,"video",null); return; }
+                        if (error) { notify("Video upload failed: " + error, { kind: "error" }); updateSlide(i,"video",null); return; }
                         // Build URL without any encoding — path is already safe
                         const url = `${SUPABASE_URL}/storage/v1/object/public/documents/${path}`;
                         console.log("Video uploaded, URL:", url);

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useFormGuard, DraftBanner } from "../../lib/unsaved";
 import { useWindowWidth } from "../../shared/hooks";
 import { HelpTip } from "../../shared/HelpTip";
 import { IncidentForm } from "./IncidentForm";
@@ -44,10 +45,14 @@ function IncidentTracker({ user, incidents, setIncidents, equipment, setEquipmen
   const editingQuick = editingId ? isIncompleteQuickReport(incidents.find(i=>i.id===editingId)) : false;
 
   function setF(k,v){ setForm(p=>({...p,[k]:v})); setErr(""); setSaved(false); }
+  // unsaved-changes warning + draft on this device (lib/unsaved.jsx); the equipment list isn't part of the report
+  const { _equipmentList, ...formData } = form || {};
+  const guard = useFormGuard({ key: `incident.${editingId || "new"}`, label: editingId ? "the incident report you're editing" : "your new incident report",
+    active: showForm, value: formData, onRestore: v => setForm({ ...v, _equipmentList: equipment || [] }) });
 
   function openNew() { setForm({...BLANK_FORM,_equipmentList:equipment||[]}); setEditingId(null); setSaved(false); setErr(""); setShowForm(true); }
   function openEdit(inc) { setForm(incToForm(inc, equipment||[])); setEditingId(inc.id); setSaved(false); setErr(""); setShowForm(true); setExpandedId(null); }
-  function cancelForm() { setShowForm(false); setEditingId(null); setErr(""); setSaved(false); }
+  function cancelForm() { guard.done(); setShowForm(false); setEditingId(null); setErr(""); setSaved(false); }
 
   // Deep link from a reminder (dashboard, bell, My Actions, mobile): open that report's form.
   useEffect(() => {
@@ -97,6 +102,7 @@ function IncidentTracker({ user, incidents, setIncidents, equipment, setEquipmen
     const newInc = { id:"i"+Date.now(), reportedBy:String(user.id), closed:false, ...formToInc(form, {}) };
     setIncidents(p=>[newInc,...p]);
     applyEquipmentSideEffects(form);
+    guard.done();
     setSaved(true);
     setForm({...BLANK_FORM,_equipmentList:equipment||[]});
     setTimeout(()=>{ setShowForm(false); setSaved(false); }, 1400);
@@ -106,6 +112,7 @@ function IncidentTracker({ user, incidents, setIncidents, equipment, setEquipmen
     if (!validate()) return;
     setIncidents(p=>p.map(i=>i.id===editingId ? formToInc(form, i) : i));
     applyEquipmentSideEffects(form);
+    guard.done();
     setSaved(true);
     setTimeout(()=>{ setShowForm(false); setEditingId(null); setSaved(false); }, 1200);
   }
@@ -152,6 +159,7 @@ function IncidentTracker({ user, incidents, setIncidents, equipment, setEquipmen
         </div>
       )}
 
+      {showForm && <DraftBanner guard={guard} Z={Z} font={font} what="this incident report"/>}
       {showForm && (
         <IncidentForm form={form} setF={setF} err={err} saved={saved}
           onSubmit={editingId ? saveEdit : submitNew}

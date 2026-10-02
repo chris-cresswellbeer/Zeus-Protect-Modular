@@ -1,4 +1,5 @@
 import React from "react";
+import { notify } from "../../shared/Feedback";
 import { useWindowWidth } from "../../shared/hooks";
 import { sb } from "../../lib/supabase";
 import { ACCEPT_IMG_DOCS } from "../../lib/constants";
@@ -32,7 +33,7 @@ function ExternalCertsSection({ staff, extCerts, setExtCerts, dbSaveExtCert, dbD
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
     const path = `ext_certs/${selectedUser}_${certType}_${safeName}`;
     const { error } = await sb.storage.upload("documents", path, file);
-    if (error) { alert("Upload failed: " + error); setUploadingFor(null); return; }
+    if (error) { notify("Upload failed: " + error, { kind: "error" }); setUploadingFor(null); return; }
     const fileUrl = sb.storage.getPublicUrl("documents", path);
     const rec = { fileName: file.name, fileUrl, issuedDate: form.issuedDate, expiryDate: form.expiryDate, uploadedAt: new Date().toLocaleDateString("en-GB") };
     setExtCerts(p => ({ ...p, [selectedUser]: { ...(p[selectedUser]||{}), [certType]: rec } }));

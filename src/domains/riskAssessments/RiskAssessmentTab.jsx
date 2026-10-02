@@ -1,9 +1,11 @@
 import React, { useState } from "react";
+import { useFormGuard, DraftBanner, confirmLeave } from "../../lib/unsaved";
 import { useWindowWidth } from "../../shared/hooks";
 import { RiskMatrix, riskLevel } from "../../shared/RiskMatrix";
 import { HelpTip } from "../../shared/HelpTip";
 import { EMPTY_HAZARD } from "../../data/seedRiskAssessments";
 import { generateRAHtml } from "./generateRAHtml";
+import { ask } from "../../shared/Feedback";
 
 /**
  * RiskAssessmentTab — admin risk assessments (Management of Health and Safety at Work
@@ -52,6 +54,14 @@ function RiskAssessmentTab({ docs, setDocs, setAtab, ras, setRas, dbSaveRA, Z, f
   }
 
   function setF(k,v){ setForm(p=>({...p,[k]:v})); }
+  // unsaved-changes warning + draft on this device (lib/unsaved.jsx)
+  const raGuard = useFormGuard({ key: `ra.${editId || "new"}`, label: view === "edit" ? "the risk assessment you're editing" : "your new risk assessment",
+    active: (view === "new" || view === "edit") && !!form, value: form, onRestore: v => setForm(v) });
+  // the form's own ← Back / Cancel buttons ask first too
+  async function leaveForm() {
+    if (raGuard.dirty && !(await confirmLeave())) return;
+    raGuard.done(); setView("list"); setForm(null); setSaved(false);
+  }
 
   // Toggle a hazard's "further control complete" flag directly from the tracker,
   // without entering the edit flow. Writes back through the same setRas+dbSaveRA
@@ -117,6 +127,7 @@ function RiskAssessmentTab({ docs, setDocs, setAtab, ras, setRas, dbSaveRA, Z, f
         return [...p, docEntry];
       });
       setSaved(true);
+      raGuard.saved();
       setRas(p=>{
         const existing = p.findIndex(r=>r.id===form.id);
         if (existing>=0) { const n=[...p]; n[existing]=form; return n; }
@@ -198,10 +209,11 @@ function RiskAssessmentTab({ docs, setDocs, setAtab, ras, setRas, dbSaveRA, Z, f
                     style={{background:"rgba(16,185,129,0.12)",color:"#10b981",border:"1px solid rgba(16,185,129,0.3)",borderRadius:8,padding:"7px 16px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font}}>
                     📄 View in Docs
                   </button>
-                  <button onClick={()=>{
-                    const d = prompt("Set next review date (YYYY-MM-DD):", ra.reviewDate || new Date(new Date().setFullYear(new Date().getFullYear()+1)).toISOString().slice(0,10));
-                    if (d===null) return;
-                    const updated = {...ra, reviewDate:d};
+                  <button onClick={async()=>{
+                    const v = await ask({ title: "Next review date", message: `When should "${ra.title}" next be reviewed?`, ok: "Save date",
+                      fields: [{ id: "date", label: "Review date", type: "date", required: true, value: ra.reviewDate || new Date(new Date().setFullYear(new Date().getFullYear()+1)).toISOString().slice(0,10) }] });
+                    if (!v) return;
+                    const updated = {...ra, reviewDate:v.date};
                     setRas(p=>p.map(r=>r.id===ra.id?updated:r));
                     dbSaveRA(updated);
                   }} style={{background:"rgba(245,158,11,0.1)",color:"#f59e0b",border:"1px solid rgba(245,158,11,0.25)",borderRadius:8,padding:"7px 16px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font,whiteSpace:"nowrap"}}>
@@ -345,10 +357,11 @@ function RiskAssessmentTab({ docs, setDocs, setAtab, ras, setRas, dbSaveRA, Z, f
   if (step===0) return (
     <div>
       <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:24}}>
-        <button onClick={()=>{setView("list");setForm(null);}}
+        <button onClick={leaveForm}
           style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:8,padding:"7px 14px",color:Z.muted,cursor:"pointer",fontFamily:font,fontWeight:700,fontSize:12}}>← Back</button>
         <h2 style={{margin:0,fontSize:20,fontWeight:900,letterSpacing:-.5}}>{view==="edit"?"Edit":"New"} Risk Assessment</h2>
       </div>
+      <DraftBanner guard={raGuard} Z={Z} font={font} what="this risk assessment"/>
       <StepBar/>
       <div style={{background:`linear-gradient(135deg,${Z.navyMd},${Z.navy})`,borderRadius:16,padding:28,border:`1px solid ${Z.border}`}}>
         <h3 style={{margin:"0 0 20px",fontSize:13,fontWeight:700,letterSpacing:.5,color:Z.muted,textTransform:"uppercase"}}>Assessment Details</h3>
@@ -422,7 +435,7 @@ function RiskAssessmentTab({ docs, setDocs, setAtab, ras, setRas, dbSaveRA, Z, f
   if (step===1) return (
     <div>
       <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:24,flexWrap:"wrap"}}>
-        <button onClick={()=>{setView("list");setForm(null);}}
+        <button onClick={leaveForm}
           style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:8,padding:"7px 14px",color:Z.muted,cursor:"pointer",fontFamily:font,fontWeight:700,fontSize:12}}>← Back</button>
         <h2 style={{margin:0,fontSize:20,fontWeight:900,letterSpacing:-.5,flex:1}}>{form.title||"Risk Assessment"}</h2>
       </div>
@@ -518,7 +531,7 @@ function RiskAssessmentTab({ docs, setDocs, setAtab, ras, setRas, dbSaveRA, Z, f
   return (
     <div>
       <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:24}}>
-        <button onClick={()=>{setView("list");setForm(null);}}
+        <button onClick={leaveForm}
           style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:8,padding:"7px 14px",color:Z.muted,cursor:"pointer",fontFamily:font,fontWeight:700,fontSize:12}}>← Back</button>
         <h2 style={{margin:0,fontSize:20,fontWeight:900,letterSpacing:-.5}}>{form.title}</h2>
       </div>
@@ -600,7 +613,7 @@ function RiskAssessmentTab({ docs, setDocs, setAtab, ras, setRas, dbSaveRA, Z, f
               style={{background:`linear-gradient(135deg,${Z.accent},${Z.blue})`,color:"#fff",border:"none",borderRadius:9,padding:"9px 18px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:13}}>
               → Go to Documents
             </button>
-            <button onClick={()=>{setView("list");setForm(null);setSaved(false);}}
+            <button onClick={leaveForm}
               style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:9,padding:"9px 18px",color:Z.muted,fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:13}}>
               Done
             </button>

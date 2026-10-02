@@ -20,6 +20,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App.jsx";
 import { startPrivateFiles } from "./lib/fileAccess";
+import { FeedbackHost } from "./shared/Feedback";
 
 // New sign-in only: swap links to private files (documents, fire safety,
 // incident photos) for short-lived signed links as they appear on screen.
@@ -33,9 +34,22 @@ startPrivateFiles();
 //     import { registerServiceWorker } from "./mobile/registerSW";
 //     registerServiceWorker();
 // (It only runs in production builds.) Remember to bump CACHE_VERSION in sw.js on deploys.
+// Keyboard focus outlines: many buttons and boxes set outline:none in their inline styles,
+// which hid where you were when using Tab. :focus-visible only shows the outline for
+// keyboard use (not mouse clicks), so the look for mouse users doesn't change.
+const focusCss = document.createElement("style");
+focusCss.textContent = `
+  :focus-visible { outline: 3px solid #f59e0b !important; outline-offset: 2px !important; border-radius: 4px; }
+  input:focus-visible, select:focus-visible, textarea:focus-visible, [contenteditable]:focus-visible { outline: 2px solid #60a5fa !important; outline-offset: 0 !important; }
+  @media (forced-colors: active) { :focus-visible { outline-color: Highlight !important; } }
+`;
+document.head.appendChild(focusCss);
+
 // React 18 root API. `document.getElementById("root")` must match the id in index.html.
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <App />
+    {/* on-page messages and confirmation windows (shared/Feedback.jsx) */}
+    <FeedbackHost />
   </React.StrictMode>
 );

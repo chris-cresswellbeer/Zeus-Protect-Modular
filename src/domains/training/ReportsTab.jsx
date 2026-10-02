@@ -14,6 +14,7 @@ import { isPassed, scoreText, recordedText } from "./completion";
 import { AdminDSETab } from "../dse/AdminDSETab";
 import { TrainingMatrixView } from "./TrainingMatrixView";
 import { MonthlyReportView } from "../reports/MonthlyReportView";
+import { useRemembered } from "../../lib/remembered";
 
 /**
  * ReportsTab — admin "Training → Reports" area. One component, many report views,
@@ -57,8 +58,8 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
   const [rptFilterSearch, setRptFilterSearch] = React.useState("");
   const [showTeamExport, setShowTeamExport] = React.useState(false);
   const [exportManager, setExportManager] = React.useState("");
-  const [rptFilterManager, setRptFilterManager] = React.useState("all");
-  const [rptFilterProgress, setRptFilterProgress] = React.useState("all");
+  const [rptFilterManager, setRptFilterManager] = useRemembered("reports.manager", "all");
+  const [rptFilterProgress, setRptFilterProgress] = useRemembered("reports.progress", "all");
   const allModules = modules || TRAINING_MODULES;
   const [expandedStaff, setExpandedStaff] = useState(null);
   const [expandedModule, setExpandedModule] = useState(null);

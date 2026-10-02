@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { notify, ask } from "../../shared/Feedback";
 import { E } from "../../lib/emoji";
 import { parseCompletionDate } from "./completion";
 import { getExpiryStatus } from "../../lib/dates";
@@ -175,7 +176,7 @@ function ImportPriorTrainingModal({ users, modules, comps, onImport, onClose, Z,
   }
   async function go() {
     if (!ok.length) return;
-    if (!window.confirm(`Record ${ok.length} completion${ok.length !== 1 ? "s" : ""} as done before the portal?`)) return;
+    if (!(await ask({ title: "Record prior training", ok: `Record ${ok.length}`, message: `Record ${ok.length} completion${ok.length !== 1 ? "s" : ""} as done before the portal?` }))) return;
     setBusy(true);
     const res = await onImport(ok.map(r => ({ userId: r.user.id, moduleId: r.module.id, date: r.date, note: r.note })));
     setBusy(false); setDone(res); setRows(null);
@@ -282,7 +283,7 @@ function GroupSessionModal({ people, modules, comps, leaderName, onSave, onClose
     const who = chosen.length ? chosen : list;
     const esc = t => String(t == null ? "" : t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
     const w = window.open("", "_blank");
-    if (!w) { alert("Allow pop-ups for this site to print the sheet."); return; }
+    if (!w) { notify("Allow pop-ups for this site to print the sheet.", { kind: "error" }); return; }
     w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Sign-in sheet — ${esc(m ? m.title : "")}</title>
       <style>body{font-family:Arial,sans-serif;padding:28px;color:#0f172a}h1{font-size:20px;margin:0 0 4px}p{font-size:13px;color:#334155;margin:2px 0}
       table{border-collapse:collapse;width:100%;margin-top:16px;font-size:13px}th,td{border:1px solid #94a3b8;padding:10px 8px;text-align:left}

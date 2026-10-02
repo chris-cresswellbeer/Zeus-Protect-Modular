@@ -1,4 +1,6 @@
 import React, { useState } from "react";
+import { notify, ask } from "../../shared/Feedback";
+import { useFormGuard, DraftBanner } from "../../lib/unsaved";
 import { useWindowWidth } from "../../shared/hooks";
 import { Pill, Avatar } from "../../shared/primitives";
 import { HelpTip } from "../../shared/HelpTip";
@@ -28,15 +30,16 @@ import { INCIDENT_TYPES, ACCIDENT_CODES, NUMBER_CODES } from "../../data/seedInc
  */
 import { isIncompleteQuickReport } from "./quickReportStatus";
 import { AuditHistoryModal } from "../audit/AuditTrailTab";
+import { useRemembered } from "../../lib/remembered";
 
 // Urgency chosen on a quick hazard report (QuickReportModal / mobile ReportHazard).
 const QUICK_URGENCY_LABEL = { low:"Safe to leave", medium:"Needs attention", high:"STOP WORK" };
 
-function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, investigations, setInvestigations, onOpenInvestigation, equipment, setEquipment, focusIncidentId, setFocusIncidentId, showAdminReportForm, setShowAdminReportForm, Z, font }) {
+function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, investigations, setInvestigations, onOpenInvestigation, equipment, setEquipment, focusIncidentId, setFocusIncidentId, preset, clearPreset, showAdminReportForm, setShowAdminReportForm, Z, font }) {
   const isMobile = useWindowWidth() <= 1024;
-  const [filterType, setFilterType]     = useState("all");
-  const [filterStatus, setFilterStatus] = useState("all");
-  const [filterRiddor, setFilterRiddor] = useState(false);
+  const [filterType, setFilterType]     = useRemembered("incidents.type", "all");
+  const [filterStatus, setFilterStatus] = useRemembered("incidents.status", "all");
+  const [filterRiddor, setFilterRiddor] = useRemembered("incidents.riddor", false);
   const [search, setSearch]             = useState("");
   const [expandedId, setExpandedId] = useState(focusIncidentId||null);
   // Deep-link: expand the requested incident and scroll it into view (retried a few
@@ -47,6 +50,7 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
     if(!fid) return;
     setFilterType("all");
     setFilterStatus("all");
+    setFilterRiddor(false);
     setSearch("");
     setExpandedId(fid);
     setFocusIncidentId&&setFocusIncidentId(null);
@@ -56,6 +60,12 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
       if(el) el.scrollIntoView({behavior:"smooth",block:"center"});
     },delay));
   },[focusIncidentId]);
+  // Dashboard figure → open the list already filtered (e.g. open incidents), then clear the request
+  React.useEffect(()=>{
+    if(!preset) return;
+    setFilterType(preset.type||"all"); setFilterStatus(preset.status||"all"); setFilterRiddor(!!preset.riddor); setSearch("");
+    clearPreset&&clearPreset();
+  },[preset]); // eslint-disable-line react-hooks/exhaustive-deps
   const [editingId, setEditingId]       = useState(null);
   const [editForm, setEditForm]         = useState(null);
   const [editErr, setEditErr]           = useState("");
@@ -88,7 +98,11 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
     window.scrollTo({top:0,behavior:"smooth"});
   }
 
-  function cancelEdit() { setEditingId(null); setEditForm(null); setEditErr(""); setEditSaved(false); }
+  // unsaved-changes warning + draft on this device (lib/unsaved.jsx)
+  const { _equipmentList: _eq, ...editData } = editForm || {};
+  const editGuard = useFormGuard({ key: `incident.${editingId || "none"}`, label: "the incident you're editing",
+    active: !!(editingId && editForm), value: editData, onRestore: v => setEditForm({ ...v, _equipmentList: equipment || [] }) });
+  function cancelEdit() { editGuard.done(); setEditingId(null); setEditForm(null); setEditErr(""); setEditSaved(false); }
 
   function setEF(k,v){ setEditForm(p=>({...p,[k]:v})); setEditErr(""); setEditSaved(false); }
 
@@ -122,6 +136,7 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
     if (!editForm.numberCode) { setEditErr("Please select a Number Code."); return; }
     setIncidents(p=>p.map(i=>i.id===editingId ? formToInc(editForm, i) : i));
     applyEquipmentSideEffects(editForm);
+    editGuard.done();
     setEditSaved(true);
     setTimeout(()=>{ setEditingId(null); setEditForm(null); setEditSaved(false); }, 1200);
   }
@@ -537,6 +552,7 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
       })()}
 
       {/* Inline edit form */}
+      {editingId && editForm && <DraftBanner guard={editGuard} Z={Z} font={font} what="this incident"/>}
       {editingId && editForm && (
         <IncidentForm form={editForm} setF={setEF} err={editErr} saved={editSaved}
           onSubmit={saveEdit} onCancel={cancelEdit} isEdit={true} Z={Z} font={font}/>
@@ -781,18 +797,23 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
                             )}
                           </div>
                           {!inc.riddorReported ? (
-                            <button onClick={()=>{
-                              const date = prompt("Date reported to HSE (YYYY-MM-DD):", new Date().toISOString().slice(0,10));
-                              if (!date) return;
-                              const ref = prompt("HSE reference number (optional):", "") || "";
-                              const by = prompt("Reported by (name):", "") || "";
+                            <button onClick={async()=>{
+                              const v = await ask({ title: "Mark as reported to HSE", message: "Record when this RIDDOR report was made.", ok: "Mark as reported",
+                                fields: [{ id: "date", label: "Date reported to HSE", type: "date", required: true, value: new Date().toISOString().slice(0,10) },
+                                         { id: "ref", label: "HSE reference number (optional)" },
+                                         { id: "by", label: "Reported by (name)" }] });
+                              if (!v) return;
+                              const date = v.date, ref = v.ref.trim(), by = v.by.trim();
                               setIncidents(p=>p.map(i=>i.id===inc.id?{...i,riddorReported:true,riddorReportedDate:date,hseReference:ref,riddorReportedBy:by}:i));
                             }} style={{background:"linear-gradient(135deg,#ef4444,#b91c1c)",color:"#fff",border:"none",borderRadius:8,padding:"8px 16px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font,flexShrink:0,whiteSpace:"nowrap"}}>
                               ✓ Mark as Reported to HSE
                             </button>
                           ) : (
                             <button onClick={()=>{
-                              if(window.confirm("Undo RIDDOR reported status?")) setIncidents(p=>p.map(i=>i.id===inc.id?{...i,riddorReported:false,riddorReportedDate:null,hseReference:null,riddorReportedBy:null}:i));
+                              // reversible, so no question first — the message offers Undo
+                              const was = { riddorReported:inc.riddorReported, riddorReportedDate:inc.riddorReportedDate, hseReference:inc.hseReference, riddorReportedBy:inc.riddorReportedBy };
+                              setIncidents(p=>p.map(i=>i.id===inc.id?{...i,riddorReported:false,riddorReportedDate:null,hseReference:null,riddorReportedBy:null}:i));
+                              notify("RIDDOR 'reported to HSE' removed from this incident.", { undo: () => setIncidents(p=>p.map(i=>i.id===inc.id?{...i,...was}:i)) });
                             }} style={{background:"rgba(255,255,255,0.06)",color:"rgba(255,255,255,0.4)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:11,fontFamily:font,flexShrink:0,whiteSpace:"nowrap"}}>
                               Undo
                             </button>

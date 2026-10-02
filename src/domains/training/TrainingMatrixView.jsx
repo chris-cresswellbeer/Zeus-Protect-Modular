@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { E } from "../../lib/emoji";
 import { buildTrainingMatrix, exportTrainingMatrixXlsx, MATRIX_STATUS, matrixCellText } from "./trainingMatrix";
+import { useRemembered } from "../../lib/remembered";
 
 /**
  * TrainingMatrixView — Reports → "Training Matrix".
@@ -10,13 +11,13 @@ import { buildTrainingMatrix, exportTrainingMatrixXlsx, MATRIX_STATUS, matrixCel
  * Read-only: nothing here changes any data.
  */
 function TrainingMatrixView({ staff, modules, assigns, comps, Z, font }) {
-  const [manager, setManager] = useState("all");
-  const [department, setDepartment] = useState("all");
+  const [manager, setManager] = useRemembered("matrix.manager", "all");
+  const [department, setDepartment] = useRemembered("matrix.department", "all");
   const [search, setSearch] = useState("");
-  const [includeLeavers, setIncludeLeavers] = useState(false);
-  const [onlyNonCompliant, setOnlyNonCompliant] = useState(false);
-  const [allModules, setAllModules] = useState(false);
-  const [showDates, setShowDates] = useState(false);
+  const [includeLeavers, setIncludeLeavers] = useRemembered("matrix.leavers", false);
+  const [onlyNonCompliant, setOnlyNonCompliant] = useRemembered("matrix.nonCompliant", false);
+  const [allModules, setAllModules] = useRemembered("matrix.allModules", false);
+  const [showDates, setShowDates] = useRemembered("matrix.dates", false);
 
   const filter = { manager, department, search, includeLeavers, onlyNonCompliant, allModules };
   const matrix = useMemo(() => buildTrainingMatrix({ staff, modules, assigns, comps, filter }),

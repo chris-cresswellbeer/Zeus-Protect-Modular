@@ -87,6 +87,9 @@ const LazyCoshhTab = React.lazy(() => import("./domains/coshh/CoshhTab").then(m 
 import { DocCard } from "./domains/documents/DocCard";
 import { DocBundles, MyBundles } from "./domains/documents/DocBundles";
 import { SlideVideo } from "./shared/SlideVideo";
+import { parseRoute, routeHash, routeAllowed } from "./lib/router";
+import { notify, ask, notifyAfterReload, setFeedbackTheme } from "./shared/Feedback";
+import { confirmLeave, unsavedLabels, setDraftUser } from "./lib/unsaved";
 import { mapBundleRows, bundleRow, addAssignments, removeAssignments, bundlesFor, bundleNamesOf, withoutDoc, withoutMember } from "./domains/documents/bundles";
 import { ExternalCertsSection } from "./domains/documents/ExternalCertsSection";
 import { PreviewModal } from "./domains/documents/PreviewModal";
@@ -146,6 +149,9 @@ import { NewVersionModal } from "./shared/NewVersionModal";
 import { CertificateModal } from "./domains/training/CertificateModal";
 import { applyLightThemeFix, isLightTheme } from "./lib/lightThemeFix";
 import { mergeInvestigation, changedSince } from "./domains/incidents/investigationMerge";
+import { QuickSearch } from "./shared/QuickSearch";
+import { NavMenu } from "./shared/NavMenu";
+import { useRemembered, clearRemembered } from "./lib/remembered";
 import { setAuditUser, primeAudit, primeAuditList, primeAuditMap, auditRecord, auditList, auditDelete, auditEvent } from "./lib/audit";
 
 // Wraps a dashboard stat card to make it draggable. Only the small handle in
@@ -285,7 +291,7 @@ export default function App() {
   // Light themes: darken the pale dark-theme text colours so admin text stays readable.
   useEffect(() => { applyLightThemeFix(isLightTheme(theme)); }, [theme]);
   const [user,    setUser]    = useState(null);
-  const [view,    setView]    = useState("login");
+  const [view,    setViewRaw] = useState("login");
   const [allUsers,setAllUsers]= useState([]); // loaded from Supabase users table; USERS constant is seed-only
   // ── Auth & users ──
   const [passwords, setPasswords] = useState({}); // userId -> password (overrides default)
@@ -305,13 +311,22 @@ export default function App() {
   const [lightboxSrc, setLightboxSrc] = useState(null); // image URL to show in lightbox
   const [lightboxZoomed, setLightboxZoomed] = useState(false); // true = zoomed in past fit-to-screen
   // ── Navigation: atab = active ADMIN tab key, stab = active STAFF tab key (see the render sections) ──
-  const [atab,    setAtab]    = useState("dashboard");
+  const [atab,    setAtabRaw] = useState("dashboard");
   const [dashboardLayouts, setDashboardLayouts] = useState({}); // { [userId]: [cardId, ...] } — admin's saved stat-card order
   const statDragSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
-  const [adminReportView, setAdminReportView] = useState("staff");
+  const [adminReportView, setAdminReportView] = useRemembered("admin.reportView", "staff");
   const [focusIncidentId, setFocusIncidentId] = useState(null);
+  const [focusContractorId, setFocusContractorId] = useState(null); // quick search → open this contractor
+  const [pagePreset, setPagePreset] = useState(null); // dashboard figure → open a page already filtered, e.g. {tab:"incidents", status:"open"}
   const [showAdminReportForm, setShowAdminReportForm] = useState(false);
-  const [stab,    setStab]    = useState("dashboard");
+  const [stab,    setStabRaw] = useState("dashboard");
+  // Moving to another page asks first if a form has unsaved changes (lib/unsaved.js).
+  const guarded = raw => v => { if (!unsavedLabels().length) { raw(v); return; } confirmLeave().then(ok => { if (ok) raw(v); }); };
+  const setView = guarded(setViewRaw), setAtab = guarded(setAtabRaw), setStab = guarded(setStabRaw);
+  // Page addresses (lib/router.js): the address the portal was opened with (a refresh,
+  // bookmark or link) is applied once the person has signed in.
+  const initialRouteRef = useRef(parseRoute(typeof window !== "undefined" ? window.location.hash : ""));
+  const pendingModuleRef = useRef(null);   // module to reopen from the address, once modules have loaded
   const [quickEditId, setQuickEditId] = useState(null); // quick report to open in the full form (reminder deep link)
   const [cert,    setCert]    = useState(null);
   const [target,  setTarget]  = useState("1");
@@ -394,11 +409,12 @@ export default function App() {
   const allMachineCategories = [...new Set(allMachineTypes.map(m=>m.category))];
   // ── Admin UI form/filter state (staff management, bulk actions, CSV import, doc bulk-assign) ──
   const [showAddStaff, setShowAddStaff] = useState(false);
-  const [showHiddenModules, setShowHiddenModules] = useState(false);
-  const [staffFilterManager,  setStaffFilterManager]  = useState("all");
+  const [showHiddenModules, setShowHiddenModules] = useRemembered("modules.showHidden", false);
+  const [staffFilterManager,  setStaffFilterManager]  = useRemembered("staff.manager", "all");
   const [staffFilterSearch,   setStaffFilterSearch]   = useState("");
+  const [staffSel, setStaffSel] = useState([]); // Staff list: ticked people (string ids) for bulk actions
   const [showBulkReset, setShowBulkReset] = useState(false);
-  const [docFolder, setDocFolder] = useState("all"); // active folder filter
+  const [docFolder, setDocFolder] = useRemembered("docs.folder", "all"); // active folder filter
   const [showBulkDocAssign, setShowBulkDocAssign] = useState(false);
   const [bulkDocTarget, setBulkDocTarget] = useState("all"); // all | team | individual
   const [bulkDocManager, setBulkDocManager] = useState("");
@@ -411,8 +427,8 @@ export default function App() {
   const [bulkResetScope, setBulkResetScope] = useState("all"); // "all" | "selected"
   const [bulkResetSelected, setBulkResetSelected] = useState([]);
   const [bulkResetDone, setBulkResetDone] = useState(false);
-  const [staffFilterProgress, setStaffFilterProgress] = useState("all");
-  const [staffGroupByTeam,    setStaffGroupByTeam]    = useState(false);
+  const [staffFilterProgress, setStaffFilterProgress] = useRemembered("staff.progress", "all");
+  const [staffGroupByTeam,    setStaffGroupByTeam]    = useRemembered("staff.byTeam", false);
   const [staffExpandedTeams,  setStaffExpandedTeams]  = useState({});
   const [editingStaff, setEditingStaff] = useState(null); // user object being edited
   const [newName, setNewName]           = useState("");
@@ -428,17 +444,17 @@ export default function App() {
   const [csvError, setCsvError] = useState("");
   const [staffSearch, setStaffSearch] = useState("");
   const [staffDeptFilter, setStaffDeptFilter] = useState("all");
-  const [staffStatusFilter, setStaffStatusFilter] = useState("all");
+  const [staffStatusFilter, setStaffStatusFilter] = useRemembered("staff.status", "all");
   const [addErr,  setAddErr]    = useState("");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [bulkTarget, setBulkTarget] = useState("individual");
+  const [bulkTarget, setBulkTarget] = useRemembered("assign.who", "individual");
   const [recordFor, setRecordFor] = useState(null);          // Assign Training: { uid, mid } → "Record as completed" window
   const [showSessions, setShowSessions] = useState(null);    // "all" | "team" → group session records (training/TrainingEvidence.jsx)
   const [evidenceFor, setEvidenceFor] = useState(null);      // { uid, mid } → attach evidence to one recorded completion
   const [showImportPrior, setShowImportPrior] = useState(false); // Assign Training: import prior training (CSV)
   const [groupSessionFor, setGroupSessionFor] = useState(null); // "all" (admin) | "team" (line manager) → group session window
   const [lastBackup, setLastBackup] = useState(undefined);   // admin: when the last full backup was downloaded (null = never)
-  const [bulkManager, setBulkManager] = useState("");
+  const [bulkManager, setBulkManager] = useRemembered("assign.manager", "");
   // ── Session safety ──
   const [dbReady, setDbReady] = useState(false); // true once initial Supabase load is complete
   // NOTE: lockout counters live only in memory — a page refresh resets them. For real brute-force
@@ -456,6 +472,7 @@ export default function App() {
 
   // Global font stack + responsive breakpoints (desktop layouts collapse at ≤1024px).
   const font = "'Barlow','Trebuchet MS',system-ui,sans-serif";
+  useEffect(() => { setFeedbackTheme(T, font); }, [theme]); // eslint-disable-line
   const winW = useWindowWidth();
   const isMobile = winW <= 1024;
   const isSmall = winW <= 480;
@@ -466,6 +483,40 @@ export default function App() {
   // sets forceDesktop and returns the user here.
   const isPhone = winW <= 700;
   const [forceDesktop, setForceDesktop] = useState(false);
+  const routerOn = !!user && (view === "admin" || view === "staff") && !(isPhone && !forceDesktop);
+  // Keep the address in step with the page; each page change is a new Back/Forward step.
+  // (After Back/Forward the address already matches, so nothing is added.)
+  const routeStartedRef = useRef(false);
+  useEffect(() => {
+    if (!routerOn) return;
+    const h = routeHash({ view, atab, stab, moduleId: view === "staff" && mod ? mod.id : null });
+    if (!h || window.location.hash === h) { routeStartedRef.current = true; return; }
+    if (!routeStartedRef.current) { window.history.replaceState(null, "", h); routeStartedRef.current = true; }
+    else window.history.pushState(null, "", h);
+  }, [routerOn, view, atab, stab, mod && mod.id]); // eslint-disable-line
+  // Back / Forward
+  useEffect(() => {
+    if (!routerOn) return;
+    const onPop = async () => {
+      const r = parseRoute(window.location.hash);
+      if (!r || !routeAllowed(r, user)) return;
+      // unsaved work: ask once; if they stay, the address is put back by the effect above
+      if (unsavedLabels().length && !(await confirmLeave())) { window.history.pushState(null, "", routeHash({ view, atab, stab, moduleId: view === "staff" && mod ? mod.id : null })); return; }
+      if (r.area === "admin") { setMod(null); setViewRaw("admin"); setAtabRaw(r.tab); return; }
+      setViewRaw("staff"); setStabRaw(r.tab);
+      const m = r.moduleId && allModules.find(x => String(x.id) === r.moduleId);
+      if (m) { if (!mod || mod.id !== m.id) startMod(m); } else setMod(null);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [routerOn, user, allModules, mod, view, atab, stab]); // eslint-disable-line
+  // A module in the address (refresh in the player) reopens once modules have loaded.
+  useEffect(() => {
+    const id = pendingModuleRef.current;
+    if (!id || !user) return;
+    const m = allModules.find(x => String(x.id) === id);
+    if (m) { pendingModuleRef.current = null; startMod(m); }
+  }, [allModules, user]); // eslint-disable-line
 
   // (maximum-scale=1 stops iOS auto-zooming into inputs, but also disables pinch-zoom — an accessibility trade-off.)
   // ── Ensure correct viewport meta tag for mobile ─────────────────────────────
@@ -482,12 +533,12 @@ export default function App() {
       clearTimeout(inactivityTimer.current);
       inactivityTimer.current = setTimeout(() => {
         if (AUTH_MODE === "supabase") {
-          alert("You have been logged out due to 30 minutes of inactivity.");
+          notifyAfterReload("You were signed out after 30 minutes without activity. Sign in again to carry on where you were.", { kind: "info", timeout: 0 });
           signOut().finally(() => window.location.reload());
           return;
         }
-        setUser(null); setView("login"); setMod(null); setMustChangePw(false);
-        alert("You have been logged out due to 30 minutes of inactivity.");
+        setUser(null); setViewRaw("login"); setMod(null); setMustChangePw(false);
+        notify("You were signed out after 30 minutes without activity. Sign in again to carry on where you were.", { kind: "info", timeout: 0 });
       }, INACTIVITY_MINUTES * 60 * 1000);
     };
     const events = ["mousemove","keydown","mousedown","touchstart","scroll","click"];
@@ -955,7 +1006,7 @@ export default function App() {
   }, [dbReady]); // eslint-disable-line
 
   // Audit entries are attributed to whoever is signed in.
-  useEffect(() => { setAuditUser(user); }, [user]);
+  useEffect(() => { setAuditUser(user); setDraftUser(user && user.id); }, [user]);
   const auditNameOf = (uid) => (allUsers.find(u => String(u.id) === String(uid)) || {}).name || `User ${uid}`;
 
   // Only incidents / investigations that changed since they were last saved or loaded are written.
@@ -1164,7 +1215,7 @@ export default function App() {
       console.error("training_assigns save error:", failed);
       failed.forEach(f => recentWriteRef.current.delete(`a:${f.uid}`));   // let the next refresh show what is really stored
       const names = [...new Set(failed.map(f => auditNameOf(f.uid)))].join(", ");
-      alert(`Training assignments for ${names} could not be saved.\n\n${String(failed[0].error).slice(0, 300)}\n\nIf this mentions "out of range for type integer", run user_id_text_columns.sql in the Supabase SQL Editor.`);
+      notify(`Training assignments for ${names} could not be saved.\n${String(failed[0].error).slice(0, 300)}\nIf this mentions "out of range for type integer", run user_id_text_columns.sql in the Supabase SQL Editor.`, { kind: "error" });
       refreshSharedRecords();
     }
     return failed.length === 0;
@@ -1279,6 +1330,14 @@ export default function App() {
     const who = (allUsers.find(u => String(u.id) === uid) || {}).name || uid;
     const title = (allModules.find(m => String(m.id) === mid) || {}).title || mid;
     auditEvent("training_completion", uid, "remove", `Removed recorded completion (${c.date}): ${title}`, { module: { from: title, to: null } }, who);
+    // no "are you sure?" first: it can be put straight back
+    notify(`Removed the recorded completion of "${title}" for ${who}.`, { undo: async () => {
+      const ok2 = await dbSaveCompletion(uid, mid, c);
+      if (!ok2) { notify("Couldn't put it back. Record it again with Record as completed.", { kind: "error" }); return; }
+      setComps(p => ({ ...p, [uid]: { ...(p[uid] || {}), [mid]: c } }));
+      auditEvent("training_completion", uid, "record", `Put back recorded completion (${c.date}): ${title}`, { module: { from: null, to: title } }, who);
+      notify(`"${title}" is recorded as completed again.`);
+    } });
   }
 
   // Upserts one incident (and uploads any new photos first). Called for EVERY incident by the auto-sync effect.
@@ -1411,7 +1470,7 @@ export default function App() {
       const safeName = doc.fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
       const path = `doc_${doc.id}_${safeName}`;
       const { error } = await sb.storage.upload("documents", path, file);
-      if (error) { console.error("Doc upload failed:", error); alert("Upload failed: " + error); return; }
+      if (error) { console.error("Doc upload failed:", error); notify("Upload failed: " + error, { kind: "error" }); return; }
       doc.fileUrl = sb.storage.getPublicUrl("documents", path);
     }
     await dbWrite(sb.from("documents").upsert({
@@ -1746,7 +1805,7 @@ export default function App() {
     // Supabase sign-in: copy login, role and leaver status onto their sign-in account.
     if (ok && AUTH_MODE === "supabase") {
       const r = await adminCall("sync", { userId: String(user.id) });
-      if (!r.ok) alert(`The staff record was saved, but their sign-in account wasn't updated:\n\n${r.error}`);
+      if (!r.ok) notify(`The staff record was saved, but their sign-in account wasn't updated:\n${r.error}`, { kind: "error" });
     }
     return ok;
   }
@@ -1762,7 +1821,7 @@ export default function App() {
     await dbWrite(sb.from("users").delete().eq("id", String(userId)), "user delete", { alertOnError: true });
     if (AUTH_MODE === "supabase") {
       const r = await adminCall("remove", { userId: String(userId) });
-      if (!r.ok) alert(`The staff record was removed, but their sign-in account wasn't:\n\n${r.error}`);
+      if (!r.ok) notify(`The staff record was removed, but their sign-in account wasn't:\n${r.error}`, { kind: "error" });
     }
   }
 
@@ -2189,19 +2248,145 @@ export default function App() {
       setDarkMode(["dark","slate","forest","graphite"].includes(profile.data.theme));
     }
     if (profile?.data?.emojiMode === false) setEmojiMode(false);
-    setUser(u); setView(u.role==="admin"?"admin":"staff"); setErr("");
+    setUser(u); setErr("");
+    // Back to the page in the address (refresh / bookmark / link) if this person may see it.
+    const r = initialRouteRef.current || parseRoute(window.location.hash); initialRouteRef.current = null;
+    if (r && routeAllowed(r, u)) {
+      if (r.area === "admin") { setViewRaw("admin"); setAtabRaw(r.tab); }
+      else { setViewRaw("staff"); setStabRaw(r.tab); pendingModuleRef.current = r.moduleId || null; }
+    } else setViewRaw(u.role==="admin"?"admin":"staff");
   }
 
   // Clears the session (and, in Supabase sign-in mode, ends the server session too).
   // In Supabase sign-in mode the page is reloaded after signing out, so nothing the
   // last person could see stays in memory for the next person on this computer.
-  function logout() {
+  async function logout() {
+    if (!(await confirmLeave())) return;      // unsaved form? ask first
+    // forget the page address, so the next person to sign in on this computer starts at their dashboard
+    try { window.history.replaceState(null, "", window.location.pathname + window.location.search); } catch { /* */ }
+    // ...and forget their remembered filters (lib/remembered.js)
+    clearRemembered();
     if (AUTH_MODE === "supabase") { signOut().finally(() => window.location.reload()); return; }
-    setMustChangePw(false); setUser(null); setView("login"); setMod(null);
+    setMustChangePw(false); setUser(null); setViewRaw("login"); setMod(null);
+    setAdminReportView("staff"); setShowHiddenModules(false); setStaffFilterManager("all"); setDocFolder("all"); setStaffFilterProgress("all");
+    setStaffGroupByTeam(false); setStaffStatusFilter("all"); setBulkTarget("individual"); setBulkManager(""); setStaffFilterSearch(""); setStaffSel([]);
   }
 
   // Opens a module in the player and resets all per-attempt state.
   function startMod(m) { setMod(m); setStep(0); setQans({}); setQsub(false); setShowCelebration(false); setHotspotComplete({}); }
+
+  // ── Quick search (🔍 in the header, Ctrl+K / ⌘K) ── shared/QuickSearch.jsx
+  // Builds the list of things a person can jump to. Only runs while the search is open.
+  // jump() asks once about unsaved work, then changes page with the raw setters
+  // (the guarded setters would each ask separately).
+  const jump = fn => { if (!unsavedLabels().length) { fn(); return; } confirmLeave().then(ok => { if (ok) fn(); }); };
+  function quickItems() {
+    if (!user) return [];
+    const items = [];
+    const isAdmin = user.role === "admin";
+    const toStaff = (tab, then) => jump(() => { setMod(null); setViewRaw("staff"); setStabRaw(tab); if (then) then(); });
+    const toAdmin = (tab, then) => jump(() => { setMod(null); setViewRaw("admin"); setAtabRaw(tab); if (then) then(); });
+    const fmt = d => (d ? String(d).slice(0, 10).split("-").reverse().join("/") : "");
+    // pages
+    const STAFF_PAGES = { dashboard: "Dashboard", training: "My Training", history: "Training history & certificates", documents: "Documents", incidents: "Report Incident", dse: "My DSE", machinery: "My Machinery", actions: "My Actions", team: "My Team", account: "My Account" };
+    const staffTabs = ["dashboard", "training", "history", "documents", "incidents", "dse", ...(isWarehouseWorker(user) ? ["machinery"] : []), "actions", ...(user.role === "manager" ? ["team"] : []), "account"];
+    staffTabs.forEach(t => items.push({ id: `p:s:${t}`, group: "Pages", icon: "📄", label: STAFF_PAGES[t], sub: isAdmin ? "Your own training view" : "Page", words: t === "history" ? "certificates certificate history" : t === "incidents" ? "report hazard near miss" : "", run: () => toStaff(t) }));
+    if (isAdmin) {
+      const ADMIN_PAGES = [["dashboard", "Admin dashboard", ""], ["users", "Staff", "staff accounts people users"], ["assign", "Assign Training", "training"], ["modules", "Training Library", "modules training"],
+        ["create", "Create Module", "new module training"], ["reports", "Reports", "training matrix report excel"], ["documents", "H&S Documents", "documents bundles policies"], ["coshh", "COSHH Register", "chemicals"],
+        ["audit", "Audit Trail", "log history"], ["incidents", "Incidents", "accidents near miss riddor"], ["inspections", "Inspections", "site inspection"], ["ra", "Risk Assessments", "risk"],
+        ["firesafety", "Fire Safety", "wardens extinguishers drills"], ["firstaid", "First Aid", "first aiders"], ["contractors", "Contractors", ""], ["permits", "Permits", "permit to work"],
+        ["machinery", "Machinery Competence", "forklift"], ["equipment", "Equipment Register", "equipment"], ["account", "My Account", "password"]];
+      ADMIN_PAGES.forEach(([t, l, w]) => items.push({ id: `p:a:${t}`, group: "Pages", icon: "🧭", label: l, sub: "Admin page", words: w, run: () => toAdmin(t) }));
+      // people
+      allUsers.forEach(u => {
+        const leaver = (u.status || "active") === "leaver";
+        const open = () => toAdmin("users", () => { setStaffFilterSearch(u.name); setStaffFilterManager("all"); setStaffFilterProgress("all"); setStaffStatusFilter("all"); setEditingStaff(null); });
+        items.push({ id: `u:${u.id}`, group: "People", icon: "👤", label: u.name, sub: [u.jobTitle, u.manager && `Manager: ${u.manager}`, leaver && "Leaver"].filter(Boolean).join(" · "), words: `${u.email || ""} ${u.department || ""}`, run: open,
+          actions: [{ label: "Assign training", run: () => toAdmin("assign", () => { setBulkTarget("individual"); setTarget(String(u.id)); }) },
+                    { label: "Edit", run: () => toAdmin("users", () => { setStaffFilterSearch(u.name); setStaffFilterManager("all"); setStaffFilterProgress("all"); setStaffStatusFilter("all"); setEditingStaff(u); }) }] });
+      });
+      allModules.forEach(m => items.push({ id: `m:${m.id}`, group: "Modules", icon: m.icon || "📚", label: m.title, sub: [m.category, m.level, m._hidden && "Hidden"].filter(Boolean).join(" · "), words: m.description || "", run: () => setPreviewModule(m) }));
+      const INC = { near_miss: "Near miss", unsafe_condition: "Unsafe condition", unsafe_act: "Unsafe act", accident: "Accident", dangerous_occurrence: "Dangerous occurrence", ill_health: "Ill health" };
+      incidents.forEach(i => items.push({ id: `i:${i.id}`, group: "Incidents", icon: i.riddor ? "🚨" : "⚠️", label: `${INC[i.type] || "Incident"} — ${i.location || "no location"}`, sub: [fmt(i.date), i.closed ? "Closed" : "Open", i.riddor && "RIDDOR", i.description].filter(Boolean).join(" · "), words: `${i.id} ${(allUsers.find(u => String(u.id) === String(i.reportedBy)) || {}).name || ""}`,
+        run: () => toAdmin("incidents", () => setFocusIncidentId(i.id)) }));
+      (contractors || []).forEach(c => items.push({ id: `c:${c.id}`, group: "Contractors", icon: "🦺", label: c.name, sub: [c.trade || c.type, c.status].filter(Boolean).join(" · "), words: `${c.contact || ""} ${(c.workers || []).map(w => w.name).join(" ")}`,
+        run: () => toAdmin("contractors", () => setFocusContractorId(c.id)) }));
+    } else {
+      const myIds = (assigns[String(user.id)] || []).map(String);
+      allModules.filter(m => myIds.includes(String(m.id))).forEach(m => {
+        const done = (comps[user.id] || comps[String(user.id)] || {})[m.id];
+        items.push({ id: `m:${m.id}`, group: "My training", icon: m.icon || "📚", label: m.title, sub: done ? `Completed ${fmt(done.date)}` : "To do", words: m.category || "", run: () => toStaff("training", () => startMod(m)) });
+      });
+    }
+    // documents (everyone can read the H&S documents)
+    docs.forEach(d => items.push({ id: `d:${d.id}`, group: "Documents", icon: "📘", label: d.title, sub: [d.type || d.category, d.date && `Updated ${d.date}`].filter(Boolean).join(" · "), words: d.fileName || "",
+      run: () => (isAdmin && view === "admin" ? toAdmin : toStaff)("documents", () => { setDocFolder("all"); if (d.fileData) setPreviewDoc(d); }) }));
+    return items;
+  }
+
+  // ── Staff list bulk actions (tick people → one action for all of them) ──
+  // Each asks once in an on-page window, then shows a message with Undo.
+  const peopleNamed = ids => { const n = ids.map(id => (allUsers.find(u => String(u.id) === id) || {}).name).filter(Boolean); return n.length <= 3 ? n.join(", ") : `${n.slice(0, 3).join(", ")} and ${n.length - 3} more`; };
+  async function bulkAssignModule(ids) {
+    const mods = allModules.filter(m => !m._hidden);
+    const v = await ask({ title: `Assign a module to ${ids.length} ${ids.length !== 1 ? "people" : "person"}`, message: peopleNamed(ids), ok: "Assign",
+      fields: [{ id: "mid", label: "Module", required: true, placeholder: "Choose a module…", options: mods.map(m => ({ value: String(m.id), label: `${m.title}${m.level === "Mandatory" ? " (mandatory)" : ""}` })) }] });
+    if (!v) return false;
+    const m = mods.find(x => String(x.id) === v.mid); if (!m) return false;
+    const affected = {}, added = [];
+    ids.forEach(id => { const cur = assigns[id] || []; if (!cur.includes(m.id)) { affected[id] = [...cur, m.id]; added.push(id); } });
+    if (!added.length) { notify(`Everyone ticked already has "${m.title}".`, { kind: "info" }); return true; }
+    setAssigns(p => ({ ...p, ...affected }));
+    await dbSaveAssigns(affected);
+    notify(`"${m.title}" assigned to ${added.length} ${added.length !== 1 ? "people" : "person"}${added.length < ids.length ? ` (${ids.length - added.length} already had it)` : ""}.`, { undo: () => {
+      const back = {}; added.forEach(id => { back[id] = (affected[id] || []).filter(x => x !== m.id); });
+      setAssigns(p => { const n = { ...p }; added.forEach(id => { n[id] = (n[id] || []).filter(x => x !== m.id); }); return n; });
+      dbSaveAssigns(back); notify(`"${m.title}" taken off again.`, { kind: "info" });
+    } });
+    return true;
+  }
+  async function bulkGiveBundle(ids) {
+    if (!docBundles.length) { notify("There are no document bundles yet. Create one under H&S Documents → Bundles.", { kind: "info", timeout: 7000 }); return false; }
+    const v = await ask({ title: `Give a document bundle to ${ids.length} ${ids.length !== 1 ? "people" : "person"}`, message: peopleNamed(ids), ok: "Give bundle",
+      fields: [{ id: "bid", label: "Document bundle", required: true, placeholder: "Choose a bundle…", options: docBundles.map(b => ({ value: String(b.id), label: `${b.name} (${(b.docIds || []).length} documents)` })) }] });
+    if (!v) return false;
+    const b = docBundles.find(x => String(x.id) === v.bid); if (!b) return false;
+    const added = ids.filter(id => !(b.memberIds || []).includes(id));
+    if (!added.length) { notify(`Everyone ticked already has "${b.name}".`, { kind: "info" }); return true; }
+    const n = await assignBundle(b, added);
+    if (n) notify(`"${b.name}" given to ${n} ${n !== 1 ? "people" : "person"} as required reading.`, { undo: () => { unassignBundle(b, added); notify(`"${b.name}" taken off again.`, { kind: "info" }); } });
+    return true;
+  }
+  async function saveUsersBulk(updated) {
+    setAllUsers(p => p.map(u => updated.find(x => x.id === u.id) || u));
+    for (const u of updated) { await dbSaveUser(u); await dbSaveUserProfile(u); }
+  }
+  async function bulkSetManager(ids) {
+    const managerNames = allUsers.filter(u => u.role === "manager" && (u.status || "active") !== "leaver").map(u => u.name).sort();
+    const v = await ask({ title: `Set the line manager for ${ids.length} ${ids.length !== 1 ? "people" : "person"}`, message: peopleNamed(ids), ok: "Set line manager",
+      fields: [{ id: "manager", label: "Line manager", required: true, suggestions: managerNames, placeholder: "Type or pick a name",
+        help: "Pick a name from the list so they appear in that manager's My Team (the name must match a Line manager account exactly)." }] });
+    if (!v) return false;
+    const name = v.manager.trim().replace(/\s+/g, " ");
+    const people = allUsers.filter(u => ids.includes(String(u.id)));
+    const before = people.map(u => ({ ...u }));
+    await saveUsersBulk(people.map(u => ({ ...u, manager: name })));
+    const known = managerNames.some(x => x.toLowerCase() === name.toLowerCase());
+    notify(`Line manager set to ${name} for ${people.length} ${people.length !== 1 ? "people" : "person"}.${known ? "" : " (No Line manager account has that name yet, so they won't appear in anyone's My Team.)"}`, { kind: known ? "success" : "warn", undo: () => { saveUsersBulk(before); notify("Line managers put back.", { kind: "info" }); } });
+    return true;
+  }
+  async function bulkMarkLeavers(ids) {
+    const people = allUsers.filter(u => ids.includes(String(u.id)) && String(u.id) !== String(user.id) && (u.status || "active") !== "leaver");
+    if (!people.length) { notify("Everyone ticked is already a leaver.", { kind: "info" }); return false; }
+    const ok = await ask({ title: `Mark ${people.length} ${people.length !== 1 ? "people" : "person"} as leavers?`, danger: true, ok: "Mark as leavers",
+      message: `${peopleNamed(people.map(u => String(u.id)))}\n\nLeavers can no longer sign in and drop out of reminders and compliance figures. Their training records, certificates and history are kept, and you can make them active again from Edit.` });
+    if (!ok) return false;
+    const before = people.map(u => ({ ...u }));
+    await saveUsersBulk(people.map(u => ({ ...u, status: "leaver" })));
+    notify(`${people.length} ${people.length !== 1 ? "people" : "person"} marked as leavers.`, { undo: () => { saveUsersBulk(before); notify("Put back as they were.", { kind: "info" }); } });
+    return true;
+  }
 
   // Scores the quiz against the module's own pass mark (passMarkOf: default 70%,
   // set per module in Create/Edit Module). The phone player does the same.
@@ -2244,13 +2429,18 @@ export default function App() {
 
   // Style factory for the top-nav tab buttons (active tab gets a coloured underline).
   // ── Shared nav styles ──
+  // Narrower screens get tighter menu items so the whole admin bar (including Sign Out) fits;
+  // if it still doesn't, the right-hand group wraps onto a second row instead of being cut off.
+  const navTight = winW < 2100;
   const navBtn = (active, col=T.accentLt) => ({
-    padding:"16px 16px", background:"none", border:"none",
+    padding:navTight?"16px 9px":"16px 16px", background:"none", border:"none",
     borderBottom:`3px solid ${active?col:"transparent"}`,
     color:active?col:darkMode?"#94a3b8":"#475569",
     fontWeight:active?700:500, cursor:"pointer", fontSize:12,
-    textTransform:"uppercase", letterSpacing:.8,
+    textTransform:"uppercase", letterSpacing:navTight?.4:.8,
     fontFamily:font, transition:"color .2s",
+    // long labels ("Risk Assessments") go onto two lines rather than widening the bar
+    maxWidth:navTight?118:"none", lineHeight:1.25, textAlign:"center",
   });
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -2861,6 +3051,7 @@ export default function App() {
               else if(myActions.length) notifications.push({type:"report",urgent:false,title:`${myActions.length} open corrective action${myActions.length!==1?"s":""}`,detail:`You have been assigned action${myActions.length!==1?"s":""} from an investigation`,nav:{tab:"actions"}});
               return <NotificationBell notifications={notifications} onNavigate={n=>{ setStab(n.tab); if(n.editId) setQuickEditId(n.editId); }} Z={T} font={font}/>;
             })()}
+            <QuickSearch getItems={quickItems} Z={T} font={font} compact={isMobile}/>
             <div style={{width:1,height:20,background:T.headerBgMd,margin:"0 4px"}}/>
             <button title={`Theme: ${theme} — click to cycle`} onClick={()=>{
               const order=["dark","light","slate","forest","graphite","arctic","sand","rose"];
@@ -2949,14 +3140,17 @@ export default function App() {
               {/* Stat tiles */}
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12,marginBottom:24}}>
                 {[
-                  { label:"Assigned",   value:myMods.length,          color:T.accentLt,    sub:"modules total" },
-                  { label:"Up to Date", value:upToDate.length,         color:"#10b981",     sub:"completed & valid" },
-                  { label:"Not Started",value:notStarted.length,       color:notStarted.length>0?"#f59e0b":"#10b981", sub:"awaiting completion" },
-                  { label:"Expired",    value:expired.length,          color:expired.length>0?"#ef4444":"#10b981",    sub:"need renewal" },
-                  { label:"Expiring",   value:expiring.length,         color:expiring.length>0?"#f59e0b":"#10b981",   sub:`within ${EXPIRY_WARNING_DAYS} days` },
-                  { label:"Documents",  value:unreadDocs.length,       color:unreadDocs.length>0?"#f59e0b":"#10b981", sub:"need acknowledgement" },
+                  { label:"Assigned",   value:myMods.length,          color:T.accentLt,    sub:"modules total", go:"training" },
+                  { label:"Up to Date", value:upToDate.length,         color:"#10b981",     sub:"completed & valid", go:"history" },
+                  { label:"Not Started",value:notStarted.length,       color:notStarted.length>0?"#f59e0b":"#10b981", sub:"awaiting completion", go:"training" },
+                  { label:"Expired",    value:expired.length,          color:expired.length>0?"#ef4444":"#10b981",    sub:"need renewal", go:"training" },
+                  { label:"Expiring",   value:expiring.length,         color:expiring.length>0?"#f59e0b":"#10b981",   sub:`within ${EXPIRY_WARNING_DAYS} days`, go:"training" },
+                  { label:"Documents",  value:unreadDocs.length,       color:unreadDocs.length>0?"#f59e0b":"#10b981", sub:"need acknowledgement", go:"documents" },
                 ].map((s,i)=>(
-                  <div key={i} style={{background:T.overlay,borderRadius:12,padding:"14px 16px",border:`1px solid ${s.value>0&&s.color!=="#10b981"?s.color+"44":T.borderMd}`}}>
+                  // each figure opens the page behind it (click, or Tab + Enter)
+                  <div key={i} role="button" tabIndex={0} data-testid="dash-figure" onClick={()=>setStab(s.go)} onKeyDown={e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); setStab(s.go); } }}
+                    aria-label={`${s.label}: ${s.value} ${s.sub}. Open ${s.go==="history"?"History":s.go==="documents"?"Documents":"My Training"}.`} title={`Open ${s.go==="history"?"History":s.go==="documents"?"Documents":"My Training"}`}
+                    style={{background:T.overlay,borderRadius:12,padding:"14px 16px",cursor:"pointer",border:`1px solid ${s.value>0&&s.color!=="#10b981"?s.color+"44":T.borderMd}`}}>
                     <div style={{fontSize:22,fontWeight:900,color:s.color,lineHeight:1,marginBottom:3}}>{s.value}</div>
                     <div style={{fontSize:12,fontWeight:700,color:T.white}}>{s.label}</div>
                     <div style={{fontSize:10,color:T.muted,marginTop:1}}>{s.sub}</div>
@@ -3751,7 +3945,7 @@ export default function App() {
       };
       const detail = [`${n.results} training result${n.results!==1?"s":""}`, `${n.assigned} assigned module${n.assigned!==1?"s":""}`,
         `${n.docs} document confirmation${n.docs!==1?"s":""}`, `${n.dse} DSE assessment${n.dse!==1?"s":""}`, `${n.certs} external certificate${n.certs!==1?"s":""}`].join(", ");
-      if (!window.confirm(`Remove ${u?.name||"this staff member"} completely?\n\nThis permanently deletes their staff record, sign-in account and personal records: ${detail}, plus their training and reading history, machinery competences and preferences. It can't be undone.\n\nIncidents they reported, investigations and the Audit Trail are kept.\n\nIf they have left the company, cancel and set their status to Leaver instead — that keeps their training record for audits.`)) return;
+      if (!(await ask({ title: `Remove ${u?.name||"this staff member"} completely?`, danger: true, ok: "Remove permanently", message: `This permanently deletes their staff record, sign-in account and personal records: ${detail}, plus their training and reading history, machinery competences and preferences. It can't be undone.\n\nIncidents they reported, investigations and the Audit Trail are kept.\n\nIf they have left the company, cancel and set their status to Leaver instead — that keeps their training record for audits.` }))) return;
       setAllUsers(p=>p.filter(u=>u.id!==uid));
       const strip = o => { const c={...o}; delete c[sid]; delete c[uid]; return c; };
       setAssigns(strip); setComps(strip); setDocAcknowledgements(strip); setDseReports(strip); setAdminResponses(strip); setExtCerts(strip); setMachineComps(strip);
@@ -3763,7 +3957,8 @@ export default function App() {
       await dbDeleteUser(uid);
       const ok = await dbDeletePersonRecords(uid);
       auditEvent("staff", sid, "remove", `Removed staff member and their records (${detail})${ok ? "" : " — some records could not be deleted"}`, {}, u?.name || sid);
-      if (!ok) alert("The staff member was removed, but some of their records couldn't be deleted. Try again later or check the Audit Trail.");
+      if (!ok) notify("The staff member was removed, but some of their records couldn't be deleted. Try again later or check the Audit Trail.", { kind: "error" });
+      else notify(`${u?.name||"Staff member"} and their records were removed.`);
     };
 
     return (
@@ -3799,8 +3994,8 @@ export default function App() {
         )}
         {tempPwNotice && <TempPasswordsModal {...tempPwNotice} onClose={()=>setTempPwNotice(null)} Z={T} font={font}/>}
         {/* Nav */}
-        <div style={{background:`linear-gradient(90deg,${T.navyDk},${T.navyMd})`,borderBottom:`1px solid ${T.border}`,padding:isMobile?"0 12px":"0 28px",display:"flex",alignItems:"center",position:"relative"}}>
-          <div style={{marginRight:isMobile?8:28,padding:"12px 0",flexShrink:0}}><ZeusLogo darkMode={darkMode}/></div>
+        <div style={{background:`linear-gradient(90deg,${T.navyDk},${T.navyMd})`,borderBottom:`1px solid ${T.border}`,padding:isMobile?"0 12px":navTight?"0 16px":"0 28px",display:"flex",alignItems:"center",position:"relative",flexWrap:isMobile?"nowrap":"wrap",rowGap:0}}>
+          <div style={{marginRight:isMobile?8:navTight?14:28,padding:"12px 0",flexShrink:0}}><ZeusLogo darkMode={darkMode}/></div>
           {!isMobile && <><div style={{width:1,height:28,background:T.headerBgMd,marginRight:8}}/><Pill label="ADMIN" col="navy"/><div style={{width:1,height:20,background:T.headerBgMd,margin:"0 12px"}}/></>}
           {!isMobile && (()=>{
             const TRAINING_TABS=["assign","modules","create","reports"]; const trainingActive=TRAINING_TABS.includes(atab);
@@ -3808,39 +4003,19 @@ export default function App() {
             return (<>
               <button onClick={()=>setAtab("dashboard")} style={navBtn(atab==="dashboard",T.gold)}>Dashboard</button>
               <button onClick={()=>setAtab("users")} style={navBtn(atab==="users",T.gold)}>Staff</button>
-              <div style={{position:"relative",display:"inline-block"}} onMouseEnter={e=>e.currentTarget.querySelector(".training-dd").style.display="block"} onMouseLeave={e=>e.currentTarget.querySelector(".training-dd").style.display="none"}>
-                <button style={{...navBtn(trainingActive,T.gold),display:"flex",alignItems:"center",gap:5}}>Training<span style={{fontSize:9,opacity:.7,marginTop:1}}>▼</span></button>
-                <div className="training-dd" style={{display:"none",position:"absolute",top:"100%",left:0,zIndex:200,minWidth:160,background:`linear-gradient(135deg,${T.navyDk},${T.navyMd})`,border:`1px solid ${T.borderMd}`,borderRadius:10,boxShadow:"0 8px 32px rgba(0,0,0,0.35)",overflow:"hidden",paddingTop:4,paddingBottom:4}}>
-                  {[["assign","Assign Training"],["modules","Training Library"],["create","Create Module"],["reports","Reports"]].map(([id,label])=>(<button key={id} onClick={()=>setAtab(id)} style={{display:"block",width:"100%",textAlign:"left",padding:"10px 18px",background:atab===id?`rgba(245,158,11,0.12)`:"transparent",border:"none",color:atab===id?T.gold:T.white,fontWeight:atab===id?700:500,fontSize:13,cursor:"pointer",fontFamily:font,transition:"background .15s",letterSpacing:.3}}>{label}</button>))}
-                </div>
-              </div>
+              <NavMenu label="Training" active={trainingActive} items={[["assign","Assign Training"],["modules","Training Library"],["create","Create Module"],["reports","Reports"]]} current={atab} onPick={setAtab} btnStyle={navBtn(trainingActive,T.gold)} Z={T} font={font}/>
               <button onClick={()=>setAtab("firesafety")} style={navBtn(atab==="firesafety",T.gold)}>Fire Safety</button>
               <button onClick={()=>setAtab("firstaid")} style={navBtn(atab==="firstaid",T.gold)}>First Aid</button>
               <button onClick={()=>setAtab("incidents")} style={navBtn(atab==="incidents",T.gold)}>Incidents</button>
               <button onClick={()=>setAtab("ra")} style={navBtn(atab==="ra",T.gold)}>Risk Assessments</button>
               <button onClick={()=>setAtab("inspections")} style={navBtn(atab==="inspections",T.gold)}>Inspections</button>
               {(()=>{ const CON_TABS=["contractors","permits"]; const conActive=CON_TABS.includes(atab); return (
-                <div style={{position:"relative",display:"inline-block"}} onMouseEnter={e=>e.currentTarget.querySelector(".con-dd").style.display="block"} onMouseLeave={e=>e.currentTarget.querySelector(".con-dd").style.display="none"}>
-                  <button style={{...navBtn(conActive,T.gold),display:"flex",alignItems:"center",gap:5}}>Contractors<span style={{fontSize:9,opacity:.7,marginTop:1}}>▼</span></button>
-                  <div className="con-dd" style={{display:"none",position:"absolute",top:"100%",left:0,zIndex:200,minWidth:180,background:`linear-gradient(135deg,${T.navyDk},${T.navyMd})`,border:`1px solid ${T.borderMd}`,borderRadius:10,boxShadow:"0 8px 32px rgba(0,0,0,0.35)",overflow:"hidden",paddingTop:4,paddingBottom:4}}>
-                    {[["contractors","Contractors"],["permits","Permits"]].map(([id,label])=>(<button key={id} onClick={()=>setAtab(id)} style={{display:"block",width:"100%",textAlign:"left",padding:"10px 18px",background:atab===id?`rgba(245,158,11,0.12)`:"transparent",border:"none",color:atab===id?T.gold:T.white,fontWeight:atab===id?700:500,fontSize:13,cursor:"pointer",fontFamily:font,transition:"background .15s",letterSpacing:.3}}>{label}</button>))}
-                  </div>
-                </div>
+                <NavMenu label="Contractors" active={conActive} items={[["contractors","Contractors"],["permits","Permits"]]} current={atab} onPick={setAtab} btnStyle={navBtn(conActive,T.gold)} Z={T} font={font}/>
               ); })()}
               {(()=>{ const DOC_TABS=["documents","coshh","audit"]; const docActive=DOC_TABS.includes(atab); return (
-                <div style={{position:"relative",display:"inline-block"}} onMouseEnter={e=>e.currentTarget.querySelector(".doc-dd").style.display="block"} onMouseLeave={e=>e.currentTarget.querySelector(".doc-dd").style.display="none"}>
-                  <button style={{...navBtn(docActive,T.gold),display:"flex",alignItems:"center",gap:5}}>Documents<span style={{fontSize:9,opacity:.7,marginTop:1}}>▼</span></button>
-                  <div className="doc-dd" style={{display:"none",position:"absolute",top:"100%",left:0,zIndex:200,minWidth:180,background:`linear-gradient(135deg,${T.navyDk},${T.navyMd})`,border:`1px solid ${T.borderMd}`,borderRadius:10,boxShadow:"0 8px 32px rgba(0,0,0,0.35)",overflow:"hidden",paddingTop:4,paddingBottom:4}}>
-                    {[["documents","H&S Documents"],["coshh","COSHH Register"],["audit","Audit Trail"]].map(([id,label])=>(<button key={id} onClick={()=>setAtab(id)} style={{display:"block",width:"100%",textAlign:"left",padding:"10px 18px",background:atab===id?`rgba(245,158,11,0.12)`:"transparent",border:"none",color:atab===id?T.gold:T.white,fontWeight:atab===id?700:500,fontSize:13,cursor:"pointer",fontFamily:font,transition:"background .15s",letterSpacing:.3}}>{label}</button>))}
-                  </div>
-                </div>
+                <NavMenu label="Documents" active={docActive} items={[["documents","H&S Documents"],["coshh","COSHH Register"],["audit","Audit Trail"]]} current={atab} onPick={setAtab} btnStyle={navBtn(docActive,T.gold)} Z={T} font={font}/>
               ); })()}
-              <div style={{position:"relative",display:"inline-block"}} onMouseEnter={e=>e.currentTarget.querySelector(".me-dd").style.display="block"} onMouseLeave={e=>e.currentTarget.querySelector(".me-dd").style.display="none"}>
-                <button style={{...navBtn(meActive,T.gold),display:"flex",alignItems:"center",gap:5}}>Machinery &amp; Equipment<span style={{fontSize:9,opacity:.7,marginTop:1}}>▼</span></button>
-                <div className="me-dd" style={{display:"none",position:"absolute",top:"100%",left:0,zIndex:200,minWidth:180,background:`linear-gradient(135deg,${T.navyDk},${T.navyMd})`,border:`1px solid ${T.borderMd}`,borderRadius:10,boxShadow:"0 8px 32px rgba(0,0,0,0.35)",overflow:"hidden",paddingTop:4,paddingBottom:4}}>
-                  {[["machinery","Machinery Competence"],["equipment","Equipment Register"]].map(([id,label])=>(<button key={id} onClick={()=>setAtab(id)} style={{display:"block",width:"100%",textAlign:"left",padding:"10px 18px",background:atab===id?`rgba(245,158,11,0.12)`:"transparent",border:"none",color:atab===id?T.gold:T.white,fontWeight:atab===id?700:500,fontSize:13,cursor:"pointer",fontFamily:font,transition:"background .15s",letterSpacing:.3}}>{label}</button>))}
-                </div>
-              </div>
+              <NavMenu label="Machinery & Equipment" active={meActive} items={[["machinery","Machinery Competence"],["equipment","Equipment Register"]]} current={atab} onPick={setAtab} btnStyle={navBtn(meActive,T.gold)} Z={T} font={font}/>
             </>);
           })()}
           <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:isMobile?6:10}}>
@@ -3936,6 +4111,7 @@ export default function App() {
               else if(soonReviews.length) notifications.push({type:"document",urgent:false,title:`${soonReviews.length} document${soonReviews.length!==1?"s":""} due for review soon`,detail:soonReviews.map(d=>d.title).join(", "),nav:{tab:"documents"}});
               return <NotificationBell notifications={notifications} onNavigate={n=>{setAtab(n.tab);if(n.view)setAdminReportView(n.view);}} Z={T} font={font}/>;
             })()}
+            <QuickSearch getItems={quickItems} Z={T} font={font} compact={winW<2200}/>
             <div style={{width:1,height:20,background:T.headerBgMd,margin:"0 4px"}}/>
             {/* My Training — lets an admin see/complete their own assigned training via the staff view */}
             <button onClick={()=>{ setStab("training"); setView("staff"); }}
@@ -4059,8 +4235,14 @@ export default function App() {
               });
             });
 
+            // Each figure opens the list behind it, already filtered (click, or Tab + Enter)
+            const showStaff = progress => { setStaffFilterSearch(""); setStaffFilterManager("all"); setStaffStatusFilter("all"); setStaffGroupByTeam(false); setStaffFilterProgress(progress); setAtab("users"); };
+            const showOpenIncidents = () => { setPagePreset({tab:"incidents",status:"open"}); setAtab("incidents"); };
             const card = (icon,label,value,sub,col,urgent,onClick) => (
-              <div onClick={onClick} style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:14,padding:"18px 20px",border:`1px solid ${urgent?"rgba(239,68,68,0.4)":col?"rgba(245,158,11,0.25)":T.border}`,cursor:onClick?"pointer":"default",transition:"transform .15s,box-shadow .15s"}}
+              <div onClick={onClick} role={onClick?"button":undefined} tabIndex={onClick?0:undefined} title={onClick?`Show ${label.toLowerCase()}`:undefined}
+                aria-label={onClick?`${label}: ${value}${sub?`, ${sub}`:""}. Show these.`:undefined} data-testid={onClick?"dash-figure":undefined}
+                onKeyDown={e=>{ if(onClick&&(e.key==="Enter"||e.key===" ")){ e.preventDefault(); onClick(); } }}
+                style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:14,padding:"18px 20px",border:`1px solid ${urgent?"rgba(239,68,68,0.4)":col?"rgba(245,158,11,0.25)":T.border}`,cursor:onClick?"pointer":"default",transition:"transform .15s,box-shadow .15s"}}
                 onMouseEnter={e=>{if(onClick){e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 8px 24px rgba(0,0,0,0.3)";}}}
                 onMouseLeave={e=>{e.currentTarget.style.transform="";e.currentTarget.style.boxShadow="";}}>
                 <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:8}}>
@@ -4116,14 +4298,14 @@ export default function App() {
                 {/* Stat grid — order is draggable per-admin via the ⠿⠿ handle, saved to Supabase */}
                 {(() => {
                   const statCardDefs = [
-                    { id:"trainingIncomplete", node: card(E("📚",""),"Training Incomplete",overdueTraining.length,`of ${staffList.length} staff`,null,overdueTraining.length>0,()=>setAtab("assign")) },
+                    { id:"trainingIncomplete", node: card(E("📚",""),"Training Incomplete",overdueTraining.length,`of ${staffList.length} staff`,null,overdueTraining.length>0,()=>showStaff("incomplete")) },
                     { id:"expiringExpired", node: card(E("🔄",""),"Expiring/Expired",expiringTraining.length,"training renewals",expiringTraining.length>0,false,()=>{setAtab("reports");setAdminReportView("expiry");}) },
-                    { id:"openIncidents", node: card(E("⚠️",""),"Open Incidents",openIncidents2.length,`${riddorOpen2.length} RIDDOR unreported`,null,riddorOpen2.length>0,()=>setAtab("incidents")) },
-                    { id:"unreadDocuments", node: card(E("📄",""),"Unread Documents",unreadDocs.length,"assigned but unacknowledged",unreadDocs.length>0,false,()=>setAtab("documents")) },
+                    { id:"openIncidents", node: card(E("⚠️",""),"Open Incidents",openIncidents2.length,`${riddorOpen2.length} RIDDOR unreported`,null,riddorOpen2.length>0,showOpenIncidents) },
+                    { id:"unreadDocuments", node: card(E("📄",""),"Unread Documents",unreadDocs.length,"assigned but unacknowledged",unreadDocs.length>0,false,()=>{setAtab("reports");setAdminReportView("documents");}) },
                     { id:"equipmentOverdue", node: card(E("🔧",""),"Equipment Overdue",overdueEquipment.length,"inspection overdue",null,overdueEquipment.length>0,()=>setAtab("equipment")) },
-                    { id:"outOfService", node: card(E("📋",""),"Out of Service",outOfService.length,"equipment items",null,false,()=>setAtab("equipment")) },
+                    { id:"outOfService", node: card(E("📋",""),"Out of Service",outOfService.length,"equipment items",null,false,()=>{setPagePreset({tab:"equipment",status:"inactive"});setAtab("equipment");}) },
                     { id:"quizFailures", node: card(E("❌",""),"Quiz Failures",unreviewedFailures.length,"unreviewed",unreviewedFailures.length>0,false,()=>{setAtab("reports");setAdminReportView("failures");}) },
-                    { id:"reviewsOverdue", node: card(E("📅",""),"Reviews Overdue",overdueDocReviews.length+overdueRAReviews.length,"docs & RAs",overdueDocReviews.length+overdueRAReviews.length>0,false,()=>setAtab("documents")) },
+                    { id:"reviewsOverdue", node: card(E("📅",""),"Reviews Overdue",overdueDocReviews.length+overdueRAReviews.length,"docs & RAs",overdueDocReviews.length+overdueRAReviews.length>0,false,()=>setAtab(overdueDocReviews.length||!overdueRAReviews.length?"documents":"ra")) },
                     { id:"onSiteNow", node: (()=>{
                       const onSiteWorkers = [];
                       (contractors||[]).forEach(c=>{
@@ -4232,9 +4414,9 @@ export default function App() {
                           <div style={{fontSize:13,fontWeight:700,color:T.white,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{u.name}</div>
                           <div style={{fontSize:11,color:T.muted}}>{d}/{a} modules · {pct}%</div>
                         </div>
-                        <button onClick={()=>setAtab("assign")} style={{background:"rgba(37,99,235,0.1)",color:T.accentLt,border:`1px solid ${T.accent}33`,borderRadius:7,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font,flexShrink:0}}>Assign →</button>
+                        <button onClick={()=>{setBulkTarget("individual");setTarget(String(u.id));setAtab("assign");}} style={{background:"rgba(37,99,235,0.1)",color:T.accentLt,border:`1px solid ${T.accent}33`,borderRadius:7,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font,flexShrink:0}}>Assign →</button>
                       </>);
-                    },()=>setAtab("assign"))
+                    },()=>showStaff("incomplete"))
                   )}
 
                   {/* Open incidents */}
@@ -4249,7 +4431,7 @@ export default function App() {
                         {inc.riddor&&!inc.riddorReported&&<span style={{fontSize:10,fontWeight:700,color:"#f87171",background:"rgba(239,68,68,0.1)",padding:"2px 7px",borderRadius:6,border:"1px solid rgba(239,68,68,0.25)",flexShrink:0}}>RIDDOR ⚠</span>}
                         <button onClick={()=>{setFocusIncidentId(inc.id);setAtab("incidents");}} style={{background:"rgba(239,68,68,0.1)",color:"#f87171",border:"1px solid rgba(239,68,68,0.2)",borderRadius:7,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font,flexShrink:0}}>View →</button>
                       </>
-                    ),()=>setAtab("incidents"))
+                    ),showOpenIncidents)
                   )}
 
                   {/* Equipment overdue */}
@@ -4512,7 +4694,7 @@ export default function App() {
                         giveNewStarterBundles(newUsers.map(u=>u.id));
                         setCsvPreview([]);
                         setShowCsvImport(false);
-                        alert(`✓ Imported ${toAdd.length} staff.${skipped>0?` ${skipped} skipped (email already exists).`:""} Default password: pass123`);
+                        notify(`✓ Imported ${toAdd.length} staff.${skipped>0?` ${skipped} skipped (email already exists).`:""} Default password: pass123`, { timeout: 10000 });
                       }} style={{background:`linear-gradient(135deg,${T.green},#059669)`,color:"#fff",border:"none",borderRadius:10,padding:"10px 24px",cursor:"pointer",fontFamily:font,fontWeight:700,fontSize:13,boxShadow:"0 4px 14px rgba(16,185,129,0.3)"}}>
                         ✓ Import {csvPreview.length} Staff
                       </button>
@@ -4619,12 +4801,39 @@ export default function App() {
                     const pct=a?Math.min(100, Math.round(d/a*100)):0;
                     if (staffFilterProgress==="compliant" && pct!==100) return false;
                     if (staffFilterProgress==="inprogress" && (pct===100||pct===0)) return false;
-                    if (staffFilterProgress==="overdue" && pct!==0) return false;
+                    if (staffFilterProgress==="overdue" && (a===0 || pct!==0)) return false;   // nothing started (people with no modules are under "No Modules")
+                    if (staffFilterProgress==="incomplete" && !(a>0 && d<a)) return false;    // dashboard "Training Incomplete"
                     if (staffFilterProgress==="none" && a!==0) return false;
                   }
                   return true;
                 });
                 const activeFilters = (staffFilterManager!=="all"?1:0)+(staffFilterSearch?1:0)+(staffFilterProgress!=="all"?1:0)+(staffStatusFilter!=="all"?1:0);
+                // Tick boxes for bulk actions. Ticks survive filtering, so you can tick people from different searches.
+                const shownIds = filteredStaff.map(u=>String(u.id));
+                const selIds = staffSel.filter(id=>staff.some(u=>String(u.id)===id));
+                const allShownSel = shownIds.length>0 && shownIds.every(id=>selIds.includes(id));
+                const someShownSel = shownIds.some(id=>selIds.includes(id));
+                const toggleSel = id => setStaffSel(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
+                const toggleMany = (ids, on) => setStaffSel(p=>on?[...new Set([...p,...ids])]:p.filter(id=>!ids.includes(id)));
+                const runBulk = async fn => { if (await fn(selIds)) setStaffSel([]); };
+                // Group by Team: sorted by line manager, with a heading (and tick box) per team
+                const teamOf2 = u => (u.manager||"").trim() || "No line manager";
+                const ordered = staffGroupByTeam ? [...filteredStaff].sort((a,b)=>(teamOf2(a)==="No line manager")-(teamOf2(b)==="No line manager") || teamOf2(a).localeCompare(teamOf2(b)) || a.name.localeCompare(b.name)) : filteredStaff;
+                const teamHead = (u,i,mobile) => {
+                  if (!staffGroupByTeam || (i>0 && teamOf2(ordered[i-1])===teamOf2(u))) return null;
+                  const ids = ordered.filter(x=>teamOf2(x)===teamOf2(u)).map(x=>String(x.id));
+                  const on = ids.every(id=>selIds.includes(id)), some = ids.some(id=>selIds.includes(id));
+                  return (
+                    <div key={`team-${teamOf2(u)}`} data-testid="team-head" style={{display:"flex",alignItems:"center",gap:10,padding:mobile?"10px 4px 6px":"10px 20px",background:mobile?"transparent":T.overlay,borderTop:i>0&&!mobile?`1px solid ${T.border}`:"none",fontSize:12,fontWeight:800,color:T.gold,letterSpacing:.3}}>
+                      <input type="checkbox" checked={on} ref={el=>{ if(el) el.indeterminate=!on&&some; }} onChange={()=>toggleMany(ids,!on)} aria-label={`Tick everyone in ${teamOf2(u)}'s team`} style={{width:16,height:16,cursor:"pointer"}}/>
+                      <span>{teamOf2(u)==="No line manager"?"No line manager":`${teamOf2(u)}'s team`}</span>
+                      <span style={{color:T.muted,fontWeight:600}}>· {ids.length}</span>
+                    </div>
+                  );
+                };
+                const bulkBtn = (label, fn, danger) => (
+                  <button onClick={()=>runBulk(fn)} style={{background:danger?"rgba(239,68,68,0.12)":T.overlay,color:danger?"#f87171":T.white,border:`1px solid ${danger?"rgba(239,68,68,0.35)":T.borderMd}`,borderRadius:9,padding:"8px 13px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font,whiteSpace:"nowrap"}}>{label}</button>
+                );
                 return (
                   <>
                     <div style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:14,padding:"14px 18px",marginBottom:14,border:`1px solid ${T.border}`,display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
@@ -4651,6 +4860,7 @@ export default function App() {
                       <select value={staffFilterProgress} onChange={e=>setStaffFilterProgress(e.target.value)} style={selStyle}>
                         <option value="all">All Progress</option>
                         <option value="compliant">✓ Compliant</option>
+                        <option value="incomplete">Not complete (any)</option>
                         <option value="inprogress">In Progress</option>
                         <option value="overdue">Overdue</option>
                         <option value="none">No Modules</option>
@@ -4667,18 +4877,39 @@ export default function App() {
                       </span>
                     </div>
 
+                    {/* Bulk actions for the ticked people */}
+                    {selIds.length>0 && (
+                      <div role="region" aria-label="Bulk actions" data-testid="bulk-bar" style={{position:"sticky",top:8,zIndex:20,background:`linear-gradient(135deg,${T.accent},${T.blue})`,borderRadius:14,padding:"10px 14px",marginBottom:14,display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",boxShadow:"0 10px 30px rgba(0,0,0,.35)"}}>
+                        <span style={{fontWeight:800,fontSize:13,color:"#fff",marginRight:6}}>{selIds.length} ticked{selIds.some(id=>!shownIds.includes(id))?` (${selIds.filter(id=>!shownIds.includes(id)).length} not shown)`:""}</span>
+                        {bulkBtn(E("📚 ","")+"Assign a module", bulkAssignModule)}
+                        {bulkBtn(E("📦 ","")+"Give a document bundle", bulkGiveBundle)}
+                        {bulkBtn(E("👤 ","")+"Set line manager", bulkSetManager)}
+                        {bulkBtn(E("👋 ","")+"Mark as leavers", bulkMarkLeavers, true)}
+                        <button onClick={()=>setStaffSel([])} style={{marginLeft:"auto",background:"transparent",border:"1px solid rgba(255,255,255,.45)",color:"#fff",borderRadius:9,padding:"7px 12px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font}}>Clear ticks</button>
+                      </div>
+                    )}
+
                     {/* Staff Table */}
                     {isMobile ? (
                       <div>
                         {filteredStaff.length===0 && <div style={{padding:"32px 20px",textAlign:"center",color:T.muted,fontSize:14}}>{staff.length===0?"No staff members yet.":"No staff match filters."}</div>}
-                        {filteredStaff.map((u)=>{
+                        {filteredStaff.length>0 && (
+                          <label style={{display:"flex",alignItems:"center",gap:10,fontSize:13,color:T.muted,padding:"4px 4px 10px",cursor:"pointer"}}>
+                            <input type="checkbox" checked={allShownSel} ref={el=>{ if(el) el.indeterminate=!allShownSel&&someShownSel; }} onChange={()=>toggleMany(shownIds,!allShownSel)} style={{width:20,height:20}}/>
+                            Tick everyone shown ({shownIds.length})
+                          </label>
+                        )}
+                        {ordered.map((u,i)=>{
                           const a=(assigns[u.id]||[]).length, d=(assigns[u.id]||[]).filter(mid=>(comps[u.id]||{})[mid]).length;
                           const pct=a?Math.min(100, Math.round(d/a*100)):0;
                           const barColor=pct===100?T.green:pct>=50?T.accent:"#ef4444";
                           const lastActive=lastLoginMap[u.id];
                           return (
-                            <MobileCard key={u.id}>
+                            <React.Fragment key={u.id}>
+                            {teamHead(u,i,true)}
+                            <MobileCard>
                               <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:4}}>
+                                <input type="checkbox" checked={selIds.includes(String(u.id))} onChange={()=>toggleSel(String(u.id))} aria-label={`Tick ${u.name}`} style={{width:20,height:20,flexShrink:0}}/>
                                 <Avatar name={u.name} size={36}/>
                                 <div>
                                   <div style={{fontWeight:700,fontSize:15,color:T.white}}>{u.name}</div>
@@ -4694,22 +4925,28 @@ export default function App() {
                                 <button onClick={()=>removeStaff(u.id)} style={{flex:1,background:"rgba(239,68,68,0.1)",color:"#f87171",border:"1px solid rgba(239,68,68,0.2)",borderRadius:8,padding:"10px",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:font}}>Remove</button>
                               </div>
                             </MobileCard>
+                            </React.Fragment>
                           );
                         })}
                       </div>
                     ) : (
                     <div style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:16,overflow:"hidden",border:`1px solid ${T.border}`}}>
-                      <div style={{display:"grid",gridTemplateColumns:"2fr 2fr 2fr 2fr 2fr 120px 160px",padding:"12px 20px",background:T.headerBg,fontSize:11,fontWeight:700,letterSpacing:1,color:T.muted,textTransform:"uppercase",columnGap:0}}>
+                      <div style={{display:"grid",gridTemplateColumns:"34px 2fr 2fr 2fr 2fr 2fr 120px 160px",padding:"12px 20px",background:T.headerBg,fontSize:11,fontWeight:700,letterSpacing:1,color:T.muted,textTransform:"uppercase",columnGap:0,alignItems:"center"}}>
+                        <span><input type="checkbox" checked={allShownSel} ref={el=>{ if(el) el.indeterminate=!allShownSel&&someShownSel; }} onChange={()=>toggleMany(shownIds,!allShownSel)} aria-label={`Tick everyone shown (${shownIds.length})`} title="Tick everyone shown" disabled={!shownIds.length} style={{width:16,height:16,cursor:"pointer"}}/></span>
                         <span style={{paddingRight:12}}>Name</span><span style={{paddingRight:12}}>Email</span><span style={{paddingRight:12}}>Job Title</span><span style={{paddingRight:12}}>Manager</span><span style={{paddingRight:12}}>Progress</span><span style={{paddingRight:12}}>Last Active</span><span></span>
                       </div>
                       {filteredStaff.length===0 && <div style={{padding:"32px 20px",textAlign:"center",color:T.muted,fontSize:14}}>{staff.length===0?"No staff members yet. Add one above.":"No staff match the current filters."}</div>}
-                      {filteredStaff.map((u,i)=>{
+                      {ordered.map((u,i)=>{
                         const a=(assigns[u.id]||[]).length, d=(assigns[u.id]||[]).filter(mid=>(comps[u.id]||{})[mid]).length;
                         const pct=a?Math.min(100, Math.round(d/a*100)):0;
                         const barColor=pct===100?T.green:pct>=50?T.accent:"#ef4444";
                         const lastActive=lastLoginMap[u.id];
+                        const ticked=selIds.includes(String(u.id));
                         return (
-                          <div key={u.id} style={{display:"grid",gridTemplateColumns:"2fr 2fr 2fr 2fr 2fr 120px 160px",padding:"14px 20px",borderTop:i>0?`1px solid ${T.border}`:"none",alignItems:"center",columnGap:0,opacity:u.status==="leaver"?0.6:1}}>
+                          <React.Fragment key={u.id}>
+                          {teamHead(u,i,false)}
+                          <div data-testid="staff-row" style={{display:"grid",gridTemplateColumns:"34px 2fr 2fr 2fr 2fr 2fr 120px 160px",padding:"14px 20px",borderTop:i>0||staffGroupByTeam?`1px solid ${T.border}`:"none",alignItems:"center",columnGap:0,opacity:u.status==="leaver"?0.6:1,background:ticked?"rgba(37,99,235,0.10)":"transparent"}}>
+                            <span><input type="checkbox" checked={ticked} onChange={()=>toggleSel(String(u.id))} aria-label={`Tick ${u.name}`} style={{width:16,height:16,cursor:"pointer"}}/></span>
                             <div style={{display:"flex",alignItems:"center",gap:10,paddingRight:12,minWidth:0}}>
                               <Avatar name={u.name} size={32}/>
                               <div style={{minWidth:0}}>
@@ -4728,6 +4965,7 @@ export default function App() {
                               <button onClick={()=>removeStaff(u.id)} style={{flex:1,background:"rgba(239,68,68,0.1)",color:"#f87171",border:"1px solid rgba(239,68,68,0.2)",borderRadius:8,padding:"6px 8px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font,whiteSpace:"nowrap"}}>Remove</button>
                             </div>
                           </div>
+                          </React.Fragment>
                         );
                       })}
                     </div>)}
@@ -4790,10 +5028,10 @@ export default function App() {
                 // Hidden modules are excluded from new assignments — staff who already have them keep their records.
                 const assignableModules = allModules.filter(m=>!m._hidden);
 
-                const bulkAssignMod = (mid) => {
+                const bulkAssignMod = async (mid) => {
                   if (!targetStaff) return;
                   const m = allModules.find(x=>x.id===mid);
-                  if (!window.confirm(`Assign "${m?.title||mid}" to ${targetLabel}?`)) return;
+                  if (!(await ask({ title: "Assign module", message: `Assign "${m?.title||mid}" to ${targetLabel}?`, ok: "Assign" }))) return;
                   setAssigns(p => {
                     const next = {...p};
                     const affected = {};
@@ -4807,10 +5045,10 @@ export default function App() {
                     return next;
                   });
                 };
-                const bulkUnassignMod = (mid) => {
+                const bulkUnassignMod = async (mid) => {
                   if (!targetStaff) return;
                   const m = allModules.find(x=>x.id===mid);
-                  if (!window.confirm(`Remove "${m?.title||mid}" from ${targetLabel}? Staff who have already completed it will keep their completion record.`)) return;
+                  if (!(await ask({ title: "Remove module", message: `Remove "${m?.title||mid}" from ${targetLabel}?\n\nStaff who have already completed it keep their completion record.`, ok: "Remove", danger: true }))) return;
                   setAssigns(p => {
                     const next = {...p};
                     const affected = {};
@@ -4822,9 +5060,9 @@ export default function App() {
                     return next;
                   });
                 };
-                const bulkAssignAll = () => {
+                const bulkAssignAll = async () => {
                   if (!targetStaff) return;
-                  if (!window.confirm(`Assign ALL ${assignableModules.length} modules to ${targetLabel}? This will add every module to their training plan.`)) return;
+                  if (!(await ask({ title: "Assign every module", message: `Assign ALL ${assignableModules.length} modules to ${targetLabel}?\n\nThis adds every module to their training plan.`, ok: "Assign all" }))) return;
                   setAssigns(p => {
                     const next = {...p};
                     const affected = {};
@@ -4933,7 +5171,7 @@ export default function App() {
                                       ? <EvidenceLinks evidence={c.recorded.evidence} label={evidenceLabel(c,0)} Z={T}/>
                                       : <button onClick={()=>setEvidenceFor({uid:String(target),mid:m.id})} title={c.recorded.session?"Attach the signed sign-in sheet (linked to everyone at that session)":"Attach a certificate or old-system record"}
                                           style={{background:"transparent",color:T.accentLt,border:`1px solid ${T.accent}55`,borderRadius:8,padding:"3px 9px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font}}>{E("📎 ","")}{c.recorded.session?"Attach sign-in sheet":"Attach evidence"}</button>}
-                                    <button onClick={()=>{ if(window.confirm(`Remove the recorded completion of "${m.title}"?`)) removeRecordedCompletion(target,m.id); }}
+                                    <button onClick={()=>removeRecordedCompletion(target,m.id)} title="Remove this recorded completion (you can undo it straight after)"
                                       style={{background:"transparent",color:T.muted,border:"none",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font,textDecoration:"underline"}}>Undo</button>
                                   </span>);
                                 return <span style={{fontSize:11,fontWeight:700,color:isPassed(c)?T.green:T.amber,marginRight:10,flexShrink:0}}>{isPassed(c)?"Completed":"Attempted"} {dd} · {scoreText(c)}</span>;
@@ -5057,16 +5295,16 @@ export default function App() {
                           👁 Unhide
                         </button>
                       ) : (
-                        <button onClick={()=>{
-                          if(!window.confirm(`Hide "${m.title||"this module"}" from the Training Library?\n\nIt won't appear here or in the assignment picker for new assignments, but staff who already have it assigned or completed keep their records. You can unhide it again at any time.`)) return;
+                        <button onClick={async()=>{
+                          if(!(await ask({ title: `Hide "${m.title||"this module"}"?`, ok: "Hide module", message: `Hide it from the Training Library?\n\nIt won't appear here or in the assignment picker for new assignments, but staff who already have it assigned or completed keep their records. You can unhide it again at any time.` }))) return;
                           setModuleHidden(m,true);
                         }} style={{background:T.overlay,color:T.muted,border:`1px solid ${T.borderMd}`,borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font}}>
                           🙈 Hide
                         </button>
                       )}
                       {m._custom && !m._override && (
-                        <button onClick={()=>{
-                          if(!window.confirm(`Delete "${m.title||"this module"}"?\n\nThis will permanently remove the module, its slides and quiz. Staff who have already completed it will keep their completion record. This cannot be undone.`)) return;
+                        <button onClick={async()=>{
+                          if(!(await ask({ title: `Delete "${m.title||"this module"}"?`, danger: true, ok: "Delete module", message: "This permanently removes the module, its slides and quiz. Staff who have already completed it keep their completion record.\n\nThis can't be undone." }))) return;
                           setCustomModules(prev=>prev.filter(x=>x.id!==m.id));
                           dbDeleteCustomModule(m.id);
                           setAtab("modules");
@@ -5075,8 +5313,8 @@ export default function App() {
                         </button>
                       )}
                       {m._override && (
-                        <button onClick={()=>{
-                          if(!window.confirm(`Reset "${m.title||"this module"}" to its original built-in version?\n\nAny customisations you've made will be lost. This cannot be undone.`)) return;
+                        <button onClick={async()=>{
+                          if(!(await ask({ title: `Reset "${m.title||"this module"}"?`, danger: true, ok: "Reset to original", message: "Reset it to its original built-in version? Any customisations you've made will be lost.\n\nThis can't be undone." }))) return;
                           setCustomModules(prev=>prev.filter(x=>x.id!==m.id));
                           dbDeleteCustomModule(m.id);
                           setAtab("modules");
@@ -5176,8 +5414,8 @@ export default function App() {
                         </div>
                         <button
                           disabled={bulkDocSelectedDocs.length===0||targetStaff2.length===0}
-                          onClick={()=>{
-                            if(!window.confirm(`Assign ${bulkDocSelectedDocs.length} document${bulkDocSelectedDocs.length!==1?"s":""} to ${targetStaff2.length} staff member${targetStaff2.length!==1?"s":""}?`)) return;
+                          onClick={async()=>{
+                            if(!(await ask({ title: "Assign documents", ok: "Assign", message: `Assign ${bulkDocSelectedDocs.length} document${bulkDocSelectedDocs.length!==1?"s":""} to ${targetStaff2.length} staff member${targetStaff2.length!==1?"s":""} as required reading?` }))) return;
                             setDocAssignments(p=>{
                               const n={...p};
                               bulkDocSelectedDocs.forEach(did=>{
@@ -5309,7 +5547,7 @@ export default function App() {
 
           {atab==="incidents" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
-            <LazyAdminIncidentTab incidents={incidents} setIncidents={setIncidents} dbDeleteIncident={dbDeleteIncident} staff={staff} focusIncidentId={focusIncidentId} setFocusIncidentId={setFocusIncidentId} showAdminReportForm={showAdminReportForm} setShowAdminReportForm={setShowAdminReportForm}
+            <LazyAdminIncidentTab incidents={incidents} setIncidents={setIncidents} dbDeleteIncident={dbDeleteIncident} staff={staff} focusIncidentId={focusIncidentId} setFocusIncidentId={setFocusIncidentId} preset={pagePreset&&pagePreset.tab==="incidents"?pagePreset:null} clearPreset={()=>setPagePreset(null)} showAdminReportForm={showAdminReportForm} setShowAdminReportForm={setShowAdminReportForm}
               investigations={investigations} setInvestigations={setInvestigations}
               onOpenInvestigation={id=>{ setInvestigationView(id); setAtab("investigation"); }}
               equipment={equipment} setEquipment={setEquipment}
@@ -5342,7 +5580,7 @@ export default function App() {
 
           {atab==="equipment" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
-            <LazyEquipmentTrackerTab equipment={equipment} setEquipment={setEquipment} staff={staff} Z={T} font={font}/>
+            <LazyEquipmentTrackerTab equipment={equipment} setEquipment={setEquipment} preset={pagePreset&&pagePreset.tab==="equipment"?pagePreset:null} clearPreset={()=>setPagePreset(null)} staff={staff} Z={T} font={font}/>
             </React.Suspense>
           )}
 
@@ -5357,6 +5595,7 @@ export default function App() {
               dbSaveContractorInductions={dbSaveContractorInductions}
               dbSaveContractorCerts={dbSaveContractorCerts}
               dbSaveContractorVisits={dbSaveContractorVisits}
+              focusContractorId={focusContractorId} setFocusContractorId={setFocusContractorId}
               staff={staff} T={T} font={font}/>
             </React.Suspense>
           )}

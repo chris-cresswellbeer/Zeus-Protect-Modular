@@ -1,4 +1,5 @@
 import React from "react";
+import { notify, ask } from "../shared/Feedback";
 import { E } from "../lib/emoji";
 
 /**
@@ -13,7 +14,7 @@ function TempPasswordsModal({ items = [], failures = [], title, onClose, Z, font
   const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   function print() {
     const w = window.open("", "_blank");
-    if (!w) { alert("Allow pop-ups for this site to print the list."); return; }
+    if (!w) { notify("Allow pop-ups for this site to print the list.", { kind: "error" }); return; }
     w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Zeus Protect – temporary passwords</title>
       <style>body{font-family:Arial,sans-serif;padding:24px;color:#0f172a}h1{font-size:18px}p{font-size:12px;color:#475569}
       table{border-collapse:collapse;width:100%;font-size:13px}th,td{border:1px solid #cbd5e1;padding:8px;text-align:left}
@@ -62,7 +63,7 @@ function TempPasswordsModal({ items = [], failures = [], title, onClose, Z, font
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {items.length > 0 && <button onClick={print} style={{ background: `linear-gradient(135deg,${Z.accent},${Z.blue})`, color: "#fff", border: "none", borderRadius: 10, padding: "10px 18px", fontWeight: 800, cursor: "pointer", fontFamily: font }}>{E("🖨 ","")}Print</button>}
           {items.length > 0 && <button onClick={copy} style={{ background: Z.overlay, color: Z.white, border: `1px solid ${Z.borderMd}`, borderRadius: 10, padding: "10px 18px", fontWeight: 700, cursor: "pointer", fontFamily: font }}>Copy</button>}
-          <button onClick={() => { if (!items.length || window.confirm("Close? The temporary passwords won't be shown again.")) onClose(); }}
+          <button onClick={async () => { if (!items.length || await ask({ title: "Close the list?", message: "The temporary passwords won't be shown again. Make sure you've printed or noted them.", ok: "Close", danger: true })) onClose(); }}
             style={{ marginLeft: "auto", background: "transparent", color: Z.muted, border: `1px solid ${Z.borderMd}`, borderRadius: 10, padding: "10px 18px", fontWeight: 700, cursor: "pointer", fontFamily: font }}>Close</button>
         </div>
       </div>

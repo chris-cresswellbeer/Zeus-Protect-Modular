@@ -1,4 +1,5 @@
 import React from "react";
+import { ask } from "../../shared/Feedback";
 import { useWindowWidth } from "../../shared/hooks";
 import { PERMIT_TYPES } from "../../data/seedPermits";
 import { PermitForm } from "./PermitForm";
@@ -217,7 +218,7 @@ function PermitsTab({ permits, setPermits, dbSavePermit, dbDeletePermit, staff, 
                 <button onClick={()=>printPermit(p)} style={{background:"rgba(16,185,129,0.1)",color:T.green,border:"1px solid rgba(16,185,129,0.25)",borderRadius:6,padding:"4px 8px",cursor:"pointer",fontFamily:font,fontWeight:700,fontSize:11}}>🖨</button>
                 {p.status==="active"&&<button onClick={()=>{const u={...p,status:"closed",closedAt:new Date().toISOString()};setPermits(prev=>prev.map(x=>x.id===p.id?u:x));dbSavePermit(u);}} style={{background:"rgba(100,116,139,0.1)",color:"#94a3b8",border:"1px solid rgba(100,116,139,0.25)",borderRadius:6,padding:"4px 7px",cursor:"pointer",fontFamily:font,fontWeight:700,fontSize:10}}>Close</button>}
                 {p.status==="draft"&&<button onClick={()=>{const u={...p,status:"active"};setPermits(prev=>prev.map(x=>x.id===p.id?u:x));dbSavePermit(u);}} style={{background:"rgba(16,185,129,0.1)",color:T.green,border:"1px solid rgba(16,185,129,0.25)",borderRadius:6,padding:"4px 7px",cursor:"pointer",fontFamily:font,fontWeight:700,fontSize:10}}>Issue</button>}
-                <button onClick={()=>{if(window.confirm("Delete this permit?")){{setPermits(prev=>prev.filter(x=>x.id!==p.id));dbDeletePermit(p.id);}}}} style={{background:"rgba(239,68,68,0.08)",color:"#f87171",border:"1px solid rgba(239,68,68,0.15)",borderRadius:6,padding:"4px 8px",cursor:"pointer",fontFamily:font,fontWeight:700,fontSize:11}}>🗑</button>
+                <button onClick={async()=>{if(await ask({ title: "Delete this permit?", message: "The permit and its sign-on records are removed.", ok: "Delete", danger: true })){{setPermits(prev=>prev.filter(x=>x.id!==p.id));dbDeletePermit(p.id);}}}} style={{background:"rgba(239,68,68,0.08)",color:"#f87171",border:"1px solid rgba(239,68,68,0.15)",borderRadius:6,padding:"4px 8px",cursor:"pointer",fontFamily:font,fontWeight:700,fontSize:11}}>🗑</button>
               </div>
             </div>
           );

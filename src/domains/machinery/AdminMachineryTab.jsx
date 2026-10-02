@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { ask } from "../../shared/Feedback";
 import { useWindowWidth } from "../../shared/hooks";
 import { Avatar } from "../../shared/primitives";
 import { HelpTip } from "../../shared/HelpTip";
@@ -89,8 +90,8 @@ function AdminMachineryTab({ allStaff, machineComps, setMachineComps, allMachine
     setAddingType(false);
   }
 
-  function deleteCustomType(id) {
-    if (!window.confirm("Remove this custom machine type? Any existing competence records referencing it will no longer show a label.")) return;
+  async function deleteCustomType(id) {
+    if (!(await ask({ title: "Remove this machine type?", message: "Existing competence records for it will no longer show a label.", ok: "Remove", danger: true }))) return;
     setCustomMachineTypes(prev=>prev.filter(t=>t.id!==id));
     dbDeleteCustomMachineType(id);
   }

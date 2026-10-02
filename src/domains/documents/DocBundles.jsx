@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { notify, ask } from "../../shared/Feedback";
 import { E } from "../../lib/emoji";
 import { cleanBundle, bundleProgress } from "./bundles";
 
@@ -228,8 +229,14 @@ function DocBundles({ bundles, docs, staff, allPeople, docAcknowledgements, onSa
   const assigningBundle = bundles.find(b => b.id === assigning);
 
   async function remove(b) {
-    if (!window.confirm(`Delete the bundle "${b.name}"?\n\nThe documents themselves are not deleted.`)) return;
-    const unassign = b.memberIds.length > 0 && window.confirm(`Also take this bundle's documents off the required reading of the ${b.memberIds.length} ${b.memberIds.length !== 1 ? "people" : "person"} who have it?\n\nOK = take them off (except documents in another bundle they have)\nCancel = leave them as required reading\n\nRead confirmations are kept either way.`);
+    const n = b.memberIds.length;
+    const choice = await ask(n ? {
+      title: `Delete the bundle "${b.name}"?`, danger: true,
+      message: `The documents themselves are not deleted, and read confirmations are kept.\n\n${n} ${n !== 1 ? "people have" : "person has"} this bundle. Should its documents stay on their required reading?`,
+      choices: [{ id: "keep", label: "Delete, keep their reading" }, { id: "unassign", label: "Delete and take documents off", danger: true }],
+    } : { title: `Delete the bundle "${b.name}"?`, message: "The documents themselves are not deleted.", ok: "Delete bundle", danger: true });
+    if (!choice) return;
+    const unassign = choice === "unassign";
     await onDelete(b, { unassign });
     if (open === b.id) setOpen(null);
   }
@@ -292,7 +299,7 @@ function DocBundles({ bundles, docs, staff, allPeople, docAcknowledgements, onSa
                     <div style={{ display: "flex", alignItems: "center" }}>
                       <div style={{ ...label(Z), flex: 1 }}>Who has it</div>
                       {members.length > 1 && (
-                        <button onClick={() => { if (window.confirm(`Take "${b.name}" away from all ${members.length} people?\n\nIts documents come off their required reading (except documents in another bundle they have). Read confirmations are kept.`)) onUnassign(b, members); }}
+                        <button onClick={async () => { if (await ask({ title: `Take "${b.name}" away from everyone?`, danger: true, ok: `Remove all ${members.length}`, message: `Its documents come off the required reading of all ${members.length} people (except documents in another bundle they have). Read confirmations are kept.` })) onUnassign(b, members); }}
                           style={{ ...btn(Z, "danger"), padding: "4px 10px", fontSize: 11 }}>Remove everyone</button>
                       )}
                     </div>
@@ -302,7 +309,8 @@ function DocBundles({ bundles, docs, staff, allPeople, docAcknowledgements, onSa
                         <span style={{ flex: 1, fontWeight: 600 }}>{nameOf(p.uid)}</span>
                         <span style={chip(Z, p.done ? "#10b981" : "#f59e0b")}>{p.done ? "All read ✓" : `${p.read} of ${p.total} read`}</span>
                         <button aria-label={`Remove ${nameOf(p.uid)}`} title="Take this bundle away from this person"
-                          onClick={() => { if (window.confirm(`Take "${b.name}" away from ${nameOf(p.uid)}?\n\nIts documents come off their required reading (except documents in another bundle they have). Read confirmations are kept.`)) onUnassign(b, [p.uid]); }}
+                          onClick={async () => { const uid = p.uid, who = nameOf(uid); await onUnassign(b, [uid]);
+                            notify(`Took "${b.name}" away from ${who}.`, { undo: () => onAssign(b, [uid]) }); }}
                           style={{ ...btn(Z), padding: "3px 9px", fontSize: 11 }}>Remove</button>
                       </div>
                     ))}

@@ -89,7 +89,7 @@ import { DocBundles, MyBundles } from "./domains/documents/DocBundles";
 import { SlideVideo } from "./shared/SlideVideo";
 import { parseRoute, routeHash, routeAllowed } from "./lib/router";
 import { notify, ask, notifyAfterReload, setFeedbackTheme } from "./shared/Feedback";
-import { confirmLeave, unsavedLabels, setDraftUser } from "./lib/unsaved";
+import { confirmLeave, unsavedLabels, setDraftUser, clearDrafts } from "./lib/unsaved";
 import { mapBundleRows, bundleRow, addAssignments, removeAssignments, bundlesFor, bundleNamesOf, withoutDoc, withoutMember } from "./domains/documents/bundles";
 import { ExternalCertsSection } from "./domains/documents/ExternalCertsSection";
 import { PreviewModal } from "./domains/documents/PreviewModal";
@@ -151,6 +151,10 @@ import { applyLightThemeFix, isLightTheme } from "./lib/lightThemeFix";
 import { mergeInvestigation, changedSince } from "./domains/incidents/investigationMerge";
 import { QuickSearch } from "./shared/QuickSearch";
 import { NavMenu } from "./shared/NavMenu";
+import { useSort, sortRows, SortButton } from "./shared/Sortable";
+import { getProgress, saveProgress, clearProgress, resumeLabel } from "./lib/moduleProgress";
+import { mapDueRows, dueInfo, dueText, formatDue, addDays, DUE_CHOICES, overdueByPerson, today as todayISO } from "./lib/dueDates";
+import { startSession, stopSession, setSessionTheme } from "./shared/SessionTimeout";
 import { loadWelcomeVideo, showWelcome, hideWelcome, WelcomeReplay, WelcomeVideoSettings } from "./shared/WelcomeVideo";
 import { useRemembered, clearRemembered } from "./lib/remembered";
 import { setAuditUser, primeAudit, primeAuditList, primeAuditMap, auditRecord, auditList, auditDelete, auditEvent } from "./lib/audit";
@@ -414,6 +418,12 @@ export default function App() {
   const [staffFilterManager,  setStaffFilterManager]  = useRemembered("staff.manager", "all");
   const [staffFilterSearch,   setStaffFilterSearch]   = useState("");
   const [staffSel, setStaffSel] = useState([]); // Staff list: ticked people (string ids) for bulk actions
+  const [staffSort, setStaffSortBy] = useSort("staff", { by: "name", dir: "asc" }); // Staff list column sort (shared/Sortable.jsx)
+  // Due dates on assigned training (lib/dueDates.js): { uid: { mid: "YYYY-MM-DD" } }, from training_assigns.due_date
+  const [dueDates, setDueDates] = useState({});
+  const [assignDueChoice, setAssignDueChoice] = useRemembered("assign.dueChoice", "");   // Assign Training: due date for new assignments
+  const [assignDueDate, setAssignDueDate] = useRemembered("assign.dueDate", "");
+  const newAssignDue = () => assignDueChoice === "date" ? (assignDueDate || null) : assignDueChoice ? addDays(Number(assignDueChoice)) : null;
   const [showBulkReset, setShowBulkReset] = useState(false);
   const [docFolder, setDocFolder] = useRemembered("docs.folder", "all"); // active folder filter
   const [showBulkDocAssign, setShowBulkDocAssign] = useState(false);
@@ -461,13 +471,11 @@ export default function App() {
   // NOTE: lockout counters live only in memory — a page refresh resets them. For real brute-force
   // protection this would need to be enforced server-side.
   const [loginAttempts, setLoginAttempts] = useState({}); // { email: { count, lockedUntil } }
-  const inactivityTimer = React.useRef(null);
   // Supabase sign-in mode (lib/auth.js): true while the person must replace a temporary password.
   const [mustChangePw, setMustChangePw] = useState(false);
   const [signingIn, setSigningIn] = useState(false);   // Supabase sign-in: loading data after the password check
   // Temporary passwords to show the admin once: { title, items:[{name,login,password}], failures:[{name,error}] }
   const [tempPwNotice, setTempPwNotice] = useState(null);
-  const INACTIVITY_MINUTES = 30;
   const MAX_LOGIN_ATTEMPTS = 5;
   const LOCKOUT_MINUTES = 15;
 
@@ -536,12 +544,15 @@ export default function App() {
     meta.content = 'width=device-width, initial-scale=1, maximum-scale=1';
   }, []);
 
-  // ── Inactivity timeout — log out after 30 minutes of no interaction ──────────
+  // ── Inactivity timeout — sign out after 30 minutes of no activity ───────────
+  // shared/SessionTimeout.jsx: 2-minute countdown warning with "Stay signed in";
+  // a playing video counts as activity. Same on the phone layout.
   useEffect(() => {
-    if (!user) return; // only run when logged in
-    const reset = () => {
-      clearTimeout(inactivityTimer.current);
-      inactivityTimer.current = setTimeout(() => {
+    if (!user) { stopSession(); return; }
+    startSession({
+      Z: T, font,
+      onSignOut: () => logout(),
+      onExpire: () => {
         if (AUTH_MODE === "supabase") {
           notifyAfterReload("You were signed out after 30 minutes without activity. Sign in again to carry on where you were.", { kind: "info", timeout: 0 });
           signOut().finally(() => window.location.reload());
@@ -549,37 +560,16 @@ export default function App() {
         }
         setUser(null); setViewRaw("login"); setMod(null); setMustChangePw(false);
         notify("You were signed out after 30 minutes without activity. Sign in again to carry on where you were.", { kind: "info", timeout: 0 });
-      }, INACTIVITY_MINUTES * 60 * 1000);
-    };
-    const events = ["mousemove","keydown","mousedown","touchstart","scroll","click"];
-    events.forEach(e => window.addEventListener(e, reset, { passive: true }));
-    reset(); // start timer immediately on login
-    return () => {
-      clearTimeout(inactivityTimer.current);
-      events.forEach(e => window.removeEventListener(e, reset));
-    };
+      },
+    });
+    return () => stopSession();
   }, [user]); // eslint-disable-line
-
-  // ── Show inactivity warning banner 2 mins before logout ─────────────────────
-  const [showInactivityWarning, setShowInactivityWarning] = useState(false);
-  const warningTimer = React.useRef(null);
+  useEffect(() => { setSessionTheme(T, font); }, [theme]); // eslint-disable-line
+  // Remember the slide reached in a module so it can be carried on later (lib/moduleProgress.js)
   useEffect(() => {
-    if (!user) { setShowInactivityWarning(false); return; }
-    const resetWarning = () => {
-      setShowInactivityWarning(false);
-      clearTimeout(warningTimer.current);
-      warningTimer.current = setTimeout(() => {
-        setShowInactivityWarning(true);
-      }, (INACTIVITY_MINUTES - 2) * 60 * 1000);
-    };
-    const events = ["mousemove","keydown","mousedown","touchstart","scroll","click"];
-    events.forEach(e => window.addEventListener(e, resetWarning, { passive: true }));
-    resetWarning();
-    return () => {
-      clearTimeout(warningTimer.current);
-      events.forEach(e => window.removeEventListener(e, resetWarning));
-    };
-  }, [user]); // eslint-disable-line
+    if (!mod || !user || view !== "staff" || qsub || step < 1) return;
+    saveProgress(user.id, mod, step);
+  }, [mod && mod.id, step]); // eslint-disable-line
 
   // Runs ONCE on first render. Each table is fetched in parallel, then converted
   // from database shape (snake_case columns, one row per record) into the
@@ -668,6 +658,7 @@ export default function App() {
         const aRows = rows(aRes);
         if (aRows && aRows.length) {
           setAssigns(mapAssignRows(aRows));
+          setDueDates(mapDueRows(aRows));
         } else {
           // Normalise INIT_ASSIGN keys to strings
           const normalised = {};
@@ -1059,6 +1050,12 @@ export default function App() {
       if (okRows(cRes)) setComps(cur => mergeNested(cur, mapCompRows(cRes.data), recent, "c"));
       if (okRows(ackRes)) setDocAcknowledgements(cur => mergeNested(cur, mapAckRows(ackRes.data), recent, "k"));
       if (okRows(aRes)) setAssigns(cur => mergeAssigns(cur, mapAssignRows(aRes.data), recent));
+      if (okRows(aRes)) setDueDates(cur => {
+        // due dates for people with a save in flight keep their on-screen value
+        const fresh = mapDueRows(aRes.data), now = Date.now();
+        recent.forEach((t, key) => { if (now - t <= RECENT_MS && key.startsWith("a:")) { const u = key.slice(2); if (cur[u]) fresh[u] = cur[u]; else delete fresh[u]; } });
+        return stableJSON(fresh) === stableJSON(cur) ? cur : fresh;
+      });
       // Required reading given elsewhere (e.g. an admin assigning a bundle) appears without a reload.
       if (okRows(daRes)) setDocAssignments(cur => mergeAssigns(cur, mapDocAssignRows(daRes.data), recent, "d"));
       if (!bdRes.error && Array.isArray(bdRes.data)) setDocBundles(cur => {
@@ -1201,7 +1198,8 @@ export default function App() {
   // too long for an "integer" column, see user_id_text_columns.sql — silently lost
   // ALL their assignments.) If anything is refused, the admin is told why and the
   // screen goes back to what is really stored.
-  async function dbSaveAssigns(newAssigns) {
+  // due (optional): { uid: { mid: "YYYY-MM-DD" } } — due dates for modules being ADDED now.
+  async function dbSaveAssigns(newAssigns, due) {
     Object.keys(newAssigns).forEach(uid => markWrite(`a:${uid}`));
     const failed = [];
     for (const [uid, mids] of Object.entries(newAssigns)) {
@@ -1213,7 +1211,11 @@ export default function App() {
       const add = want.filter(m => !have.has(m));
       const drop = [...have].filter(m => !want.includes(m));
       if (add.length) {
-        const { error } = await sb.from("training_assigns").insert(add.map(m => ({ user_id: suid, module_id: m })));
+        // due_date is only sent when there is one, so assigning never depends on that column
+        const { error } = await sb.from("training_assigns").insert(add.map(m => {
+          const d = due && due[suid] && due[suid][m];
+          return d ? { user_id: suid, module_id: m, due_date: d } : { user_id: suid, module_id: m };
+        }));
         if (error) failed.push({ uid: suid, error });
       }
       for (const m of drop) {
@@ -1229,6 +1231,47 @@ export default function App() {
       refreshSharedRecords();
     }
     return failed.length === 0;
+  }
+
+  // Change (or clear, with null) the due date of existing assignments.
+  // entries: [{ uid, mid, due }]. Shows an error if the database refuses.
+  async function dbSetDueDates(entries) {
+    const failed = [];
+    setDueDates(p => {
+      const n = { ...p };
+      entries.forEach(({ uid, mid, due }) => { const u = String(uid); const m = { ...(n[u] || {}) }; if (due) m[String(mid)] = due; else delete m[String(mid)]; if (Object.keys(m).length) n[u] = m; else delete n[u]; });
+      return n;
+    });
+    for (const { uid, mid, due } of entries) {
+      markWrite(`a:${uid}`);
+      const { error } = await sb.from("training_assigns").update({ due_date: due || null }).match({ user_id: String(uid), module_id: String(mid) });
+      if (error) failed.push(error);
+    }
+    if (failed.length) notify(`The due date couldn't be saved.\n${String(failed[0]).slice(0, 240)}\nIf this mentions "due_date", run assign_due_dates.sql in the Supabase SQL Editor.`, { kind: "error" });
+    return !failed.length;
+  }
+  // Record due dates locally for modules just assigned (the rows were inserted with them).
+  const noteDue = due => { if (!due) return; setDueDates(p => { const n = { ...p }; Object.entries(due).forEach(([u, ms]) => { n[u] = { ...(n[u] || {}), ...ms }; }); return n; }); };
+  // Training Matrix cell actions (domains/training/TrainingMatrixView.jsx)
+  async function matrixAssign(uid, mid) {
+    const k = String(uid), cur = assigns[k] || [];
+    if (cur.includes(mid)) return;
+    const m = allModules.find(x => String(x.id) === String(mid)), u = allUsers.find(x => String(x.id) === k);
+    setAssigns(p => ({ ...p, [k]: [...cur, mid] }));
+    const ok = await dbSaveAssigns({ [k]: [...cur, mid] });
+    if (ok) notify(`"${m ? m.title : mid}" assigned to ${u ? u.name : "them"}.`, { undo: () => { setAssigns(p => ({ ...p, [k]: (p[k] || []).filter(x => x !== mid) })); dbSaveAssigns({ [k]: (assigns[k] || []).filter(x => x !== mid) }); } });
+  }
+  const openInAssign = (uid, then) => { setBulkTarget("individual"); setTarget(String(uid)); setAtab("assign"); if (then) then(); };
+  // Ask for a due date (or none) for one assignment.
+  async function askDueDate(uid, mid) {
+    const u = allUsers.find(x => String(x.id) === String(uid)), m = allModules.find(x => String(x.id) === String(mid));
+    const cur = ((dueDates[String(uid)] || {})[String(mid)]) || "";
+    const v = await ask({ title: "Due date", message: `${u ? u.name : "This person"} — ${m ? m.title : "this module"}`, ok: "Save",
+      fields: [{ id: "due", label: "Complete by", type: "date", value: cur || addDays(14), help: "Clear the date for no due date." }] });
+    if (!v) return;
+    const due = (v.due || "").trim() || null;
+    if (due === (cur || null)) return;
+    if (await dbSetDueDates([{ uid, mid, due }])) notify(due ? `Due date set: ${formatDue(due)}.` : "Due date removed.", { undo: () => dbSetDueDates([{ uid, mid, due: cur || null }]) });
   }
 
   // One row per (user, module). Retaking a module overwrites the previous result.
@@ -1938,14 +1981,16 @@ export default function App() {
 
   // ── Manager actions (My Team tab, role "manager") — each one is audited ──────────
   // Add modules to a team member's assignments (managers can add, not remove).
-  function managerAssign(member, moduleIds) {
+  function managerAssign(member, moduleIds, dueDate) {
     const uid = String(member.id);
     const current = assigns[uid] || [];
     const added = moduleIds.filter(id => !current.includes(id));
     if (!added.length) return;
     const next = [...current, ...added];
+    const due = dueDate ? { [uid]: Object.fromEntries(added.map(id => [id, dueDate])) } : null;
     setAssigns(p => ({ ...p, [uid]: next }));
-    dbSaveAssigns({ [uid]: next });
+    if (due) noteDue(due);
+    dbSaveAssigns({ [uid]: next }, due);
     const titles = added.map(id => (allModules.find(m => m.id === id) || {}).title || id);
     auditEvent("training_assign", uid, "assign", `Assigned by line manager: ${titles.join(", ")}`, { modules: { from: null, to: titles } }, member.name);
   }
@@ -2283,6 +2328,8 @@ export default function App() {
     try { window.history.replaceState(null, "", window.location.pathname + window.location.search); } catch { /* */ }
     // ...and forget their remembered filters (lib/remembered.js)
     clearRemembered();
+    // ...and their unsaved-form drafts on this computer (lib/unsaved.jsx)
+    clearDrafts(user && user.id);
     hideWelcome(); setWelcomePending(false);
     if (AUTH_MODE === "supabase") { signOut().finally(() => window.location.reload()); return; }
     setMustChangePw(false); setUser(null); setViewRaw("login"); setMod(null);
@@ -2350,14 +2397,17 @@ export default function App() {
   async function bulkAssignModule(ids) {
     const mods = allModules.filter(m => !m._hidden);
     const v = await ask({ title: `Assign a module to ${ids.length} ${ids.length !== 1 ? "people" : "person"}`, message: peopleNamed(ids), ok: "Assign",
-      fields: [{ id: "mid", label: "Module", required: true, placeholder: "Choose a module…", options: mods.map(m => ({ value: String(m.id), label: `${m.title}${m.level === "Mandatory" ? " (mandatory)" : ""}` })) }] });
+      fields: [{ id: "mid", label: "Module", required: true, placeholder: "Choose a module…", options: mods.map(m => ({ value: String(m.id), label: `${m.title}${m.level === "Mandatory" ? " (mandatory)" : ""}` })) },
+               { id: "due", label: "Due by (optional)", type: "date", help: "Leave empty for no due date." }] });
     if (!v) return false;
     const m = mods.find(x => String(x.id) === v.mid); if (!m) return false;
-    const affected = {}, added = [];
-    ids.forEach(id => { const cur = assigns[id] || []; if (!cur.includes(m.id)) { affected[id] = [...cur, m.id]; added.push(id); } });
+    const d = (v.due || "").trim() || null;
+    const affected = {}, added = [], due = {};
+    ids.forEach(id => { const cur = assigns[id] || []; if (!cur.includes(m.id)) { affected[id] = [...cur, m.id]; added.push(id); if (d) due[id] = { [m.id]: d }; } });
     if (!added.length) { notify(`Everyone ticked already has "${m.title}".`, { kind: "info" }); return true; }
     setAssigns(p => ({ ...p, ...affected }));
-    await dbSaveAssigns(affected);
+    if (d) noteDue(due);
+    await dbSaveAssigns(affected, d ? due : null);
     notify(`"${m.title}" assigned to ${added.length} ${added.length !== 1 ? "people" : "person"}${added.length < ids.length ? ` (${ids.length - added.length} already had it)` : ""}.`, { undo: () => {
       const back = {}; added.forEach(id => { back[id] = (affected[id] || []).filter(x => x !== m.id); });
       setAssigns(p => { const n = { ...p }; added.forEach(id => { n[id] = (n[id] || []).filter(x => x !== m.id); }); return n; });
@@ -2420,6 +2470,7 @@ export default function App() {
     setQsub(true);
     const certId = pct>=mark ? "ZSL-" + (user.id.toString(36) + mod.id + Date.now().toString(36)).toUpperCase().slice(-8) : null;
     if (pct>=mark) {
+      clearProgress(user.id, mod);   // passed: no place to carry on from (lib/moduleProgress.js)
       setShowCelebration(true);
       const rec = {score:pct, date:new Date().toISOString().slice(0,10), answers:{...qans}, certId, moduleVersion: mod.version||1};
       setComps(p=>({...p,[user.id]:{...p[user.id],[mod.id]:rec}}));
@@ -2451,15 +2502,17 @@ export default function App() {
   // Narrower screens get tighter menu items so the whole admin bar (including Sign Out) fits;
   // if it still doesn't, the right-hand group wraps onto a second row instead of being cut off.
   const navTight = winW < 2100;
+  const navCompact = winW < 1900;   // laptop screens: icon-only My Training, no first name, tighter items
+  const navTiny = winW < 1500;      // small laptops (1366–1440): smaller type; theme button left to My Account
   const navBtn = (active, col=T.accentLt) => ({
-    padding:navTight?"16px 9px":"16px 16px", background:"none", border:"none",
+    padding:navTiny?"16px 5px":navCompact?"16px 7px":navTight?"16px 9px":"16px 16px", background:"none", border:"none",
     borderBottom:`3px solid ${active?col:"transparent"}`,
     color:active?col:darkMode?"#94a3b8":"#475569",
-    fontWeight:active?700:500, cursor:"pointer", fontSize:12,
-    textTransform:"uppercase", letterSpacing:navTight?.4:.8,
+    fontWeight:active?700:500, cursor:"pointer", fontSize:navTiny?11:navCompact?11.5:12,
+    textTransform:"uppercase", letterSpacing:navTiny?0:navCompact?.2:navTight?.4:.8,
     fontFamily:font, transition:"color .2s",
     // long labels ("Risk Assessments") go onto two lines rather than widening the bar
-    maxWidth:navTight?118:"none", lineHeight:1.25, textAlign:"center",
+    maxWidth:navCompact?96:navTight?118:"none", lineHeight:1.25, textAlign:"center",
   });
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -2542,6 +2595,7 @@ export default function App() {
         incidents={incidents}
         investigations={investigations}
         allUsers={allUsers}
+        dueDates={dueDates}
         siteInspections={siteInspections}
         permits={mobilePermits}
         theme={theme}
@@ -2729,9 +2783,21 @@ export default function App() {
               <div style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:16,padding:28,textAlign:"left",border:`1px solid ${T.border}`}}>
                 <p style={{margin:0,color:T.slate,lineHeight:1.8,fontSize:15}}>Read through each slide carefully, then complete the knowledge check. A score of <strong style={{color:T.green}}>{passMarkOf(mod)}% or above</strong> is required to pass and receive your Zeus certificate.</p>
               </div>
-              <button onClick={()=>{setStep(1);window.scrollTo({top:0,behavior:"smooth"});}} style={{marginTop:32,background:`linear-gradient(135deg,${T.accent},${T.blue})`,color:T.white,border:"none",borderRadius:12,padding:"14px 44px",fontWeight:800,fontSize:16,cursor:"pointer",fontFamily:font,boxShadow:`0 6px 24px ${T.accent}55`,letterSpacing:.5}}>
+              {(()=>{ const p = getProgress(user.id, mod); if (!p) return null; return (
+                <div style={{marginTop:28,display:"flex",gap:12,justifyContent:"center",flexWrap:"wrap",alignItems:"center"}} data-testid="resume">
+                  <button onClick={()=>{setStep(p.step);window.scrollTo({top:0,behavior:"smooth"});}} data-testid="resume-btn"
+                    style={{background:`linear-gradient(135deg,${T.accent},${T.blue})`,color:T.white,border:"none",borderRadius:12,padding:"14px 36px",fontWeight:800,fontSize:16,cursor:"pointer",fontFamily:font,boxShadow:`0 6px 24px ${T.accent}55`}}>
+                    {resumeLabel(p)} →
+                  </button>
+                  <button onClick={()=>{clearProgress(user.id, mod);setStep(1);window.scrollTo({top:0,behavior:"smooth"});}} data-testid="restart-btn"
+                    style={{background:"transparent",color:T.muted,border:`1px solid ${T.borderMd}`,borderRadius:12,padding:"13px 24px",fontWeight:700,fontSize:14,cursor:"pointer",fontFamily:font}}>
+                    Start from the beginning
+                  </button>
+                  <div style={{width:"100%",fontSize:12,color:T.muted}}>You got to {p.quiz?"the quiz":`slide ${p.step} of ${p.of}`} last time ({new Date(p.at).toLocaleDateString("en-GB",{day:"numeric",month:"short"})}).</div>
+                </div>); })()}
+              {!getProgress(user.id, mod) && <button onClick={()=>{setStep(1);window.scrollTo({top:0,behavior:"smooth"});}} style={{marginTop:32,background:`linear-gradient(135deg,${T.accent},${T.blue})`,color:T.white,border:"none",borderRadius:12,padding:"14px 44px",fontWeight:800,fontSize:16,cursor:"pointer",fontFamily:font,boxShadow:`0 6px 24px ${T.accent}55`,letterSpacing:.5}}>
                 Begin Module →
-              </button>
+              </button>}
             </div>
           )}
 
@@ -2959,10 +3025,15 @@ export default function App() {
     const expired     = completed.filter(m=>{ if(!m.renewalMonths) return false; const ex=getExpiryStatus(myC[m.id].date,m.renewalMonths); return ex?.status==="expired"; });
     const expiring    = completed.filter(m=>{ if(!m.renewalMonths) return false; const ex=getExpiryStatus(myC[m.id].date,m.renewalMonths); return ex?.status==="expiring"; });
     const upToDate    = completed.filter(m=>{ if(!m.renewalMonths) return true; const ex=getExpiryStatus(myC[m.id].date,m.renewalMonths); return !ex||ex.status==="valid"; });
+    // Due dates (lib/dueDates.js): overdue and due-within-a-week, for modules not passed yet
+    const myDue = m => dueInfo(dueDates, user.id, m.id, isPassed(myC[m.id]));
+    const pastDue = myMods.filter(m => (myDue(m)||{}).overdue);
+    const dueSoon = myMods.filter(m => { const d = myDue(m); return d && !d.overdue && d.soon; });
     // Modules needing attention (not started + expired)
     const actionNeeded = [...notStarted, ...expired];
-    // Next due = soonest expiring module or oldest not-started
-    const nextUp = notStarted.length ? notStarted[0] : expiring.length ? expiring[0] : null;
+    // Next up = the not-started module due soonest (then any not started), else the soonest expiring
+    const byDue = (a, b) => ((myDue(a)||{}).due || "9999").localeCompare((myDue(b)||{}).due || "9999");
+    const nextUp = notStarted.length ? [...notStarted].sort(byDue)[0] : expiring.length ? expiring[0] : null;
 
     // ── DSE tracking ────────────────────────────────────────────────────────
     const myDseReports   = dseReports[user.id]||[];
@@ -3031,7 +3102,8 @@ export default function App() {
               const myC   = comps[user.id]||{};
               // Incomplete modules
               const pending = allModules.filter(m=>myIds.includes(m.id)&&!myC[m.id]);
-              pending.forEach(m=>notifications.push({type:"module",urgent:m.level==="Mandatory",title:`Complete: ${m.title}`,detail:m.level==="Mandatory"?"Mandatory module — action required":m.duration,nav:{tab:"training"}}));
+              pending.forEach(m=>{ const d=dueInfo(dueDates,user.id,m.id,false);
+                notifications.push({type:"module",urgent:m.level==="Mandatory"||!!(d&&(d.overdue||d.soon)),title:`Complete: ${m.title}`,detail:d?`${dueText(d)}${m.level==="Mandatory"?" · Mandatory":""}`:m.level==="Mandatory"?"Mandatory module — action required":m.duration,nav:{tab:"training"}}); });
               // Expired or expiring modules
               allModules.filter(m=>myIds.includes(m.id)&&myC[m.id]&&m.renewalMonths).forEach(m=>{
                 const ex = getExpiryStatus(myC[m.id].date, m.renewalMonths);
@@ -3161,7 +3233,7 @@ export default function App() {
                 {[
                   { label:"Assigned",   value:myMods.length,          color:T.accentLt,    sub:"modules total", go:"training" },
                   { label:"Up to Date", value:upToDate.length,         color:"#10b981",     sub:"completed & valid", go:"history" },
-                  { label:"Not Started",value:notStarted.length,       color:notStarted.length>0?"#f59e0b":"#10b981", sub:"awaiting completion", go:"training" },
+                  { label:"Not Started",value:notStarted.length,       color:pastDue.length>0?"#ef4444":notStarted.length>0?"#f59e0b":"#10b981", sub:pastDue.length?`${pastDue.length} past due date`:"awaiting completion", go:"training" },
                   { label:"Expired",    value:expired.length,          color:expired.length>0?"#ef4444":"#10b981",    sub:"need renewal", go:"training" },
                   { label:"Expiring",   value:expiring.length,         color:expiring.length>0?"#f59e0b":"#10b981",   sub:`within ${EXPIRY_WARNING_DAYS} days`, go:"training" },
                   { label:"Documents",  value:unreadDocs.length,       color:unreadDocs.length>0?"#f59e0b":"#10b981", sub:"need acknowledgement", go:"documents" },
@@ -3178,7 +3250,7 @@ export default function App() {
               </div>
 
               {/* Alerts — expired / expiring */}
-              {(myQuickToComplete.length>0||expired.length>0||expiring.length>0||expiredCerts.length>0||expiringCerts.length>0||unreadDocs.length>0||dseNeedsAction||dseExpiring) && (
+              {(myQuickToComplete.length>0||pastDue.length>0||dueSoon.length>0||expired.length>0||expiring.length>0||expiredCerts.length>0||expiringCerts.length>0||unreadDocs.length>0||dseNeedsAction||dseExpiring) && (
                 <div style={{background:"rgba(239,68,68,0.06)",border:"1px solid rgba(239,68,68,0.2)",borderRadius:14,padding:"16px 20px",marginBottom:20}}>
                   <div style={{fontWeight:800,fontSize:13,color:"#f87171",marginBottom:10}}>⚠ Action Required</div>
                   <div style={{display:"flex",flexDirection:"column",gap:8}}>
@@ -3221,6 +3293,16 @@ export default function App() {
                         </div>
                       </div>
                     )}
+                    {[...pastDue, ...dueSoon].map(m=>{ const d=myDue(m); const col=d.overdue?"#f87171":"#fbbf24"; const p=getProgress(user.id,m); return (
+                      <div key={"due"+m.id} data-testid="due-item" style={{display:"flex",alignItems:"center",gap:12,background:d.overdue?"rgba(239,68,68,0.1)":"rgba(245,158,11,0.08)",borderRadius:8,padding:"8px 12px",cursor:"pointer"}} onClick={()=>startMod(m)}>
+                        <span style={{fontSize:20}}>{m.icon}</span>
+                        <div style={{flex:1}}>
+                          <div style={{fontSize:13,fontWeight:700,color:T.white}}>{m.title}</div>
+                          <div style={{fontSize:11,color:col}}>{dueText(d)}{d.overdue?` — it was due ${formatDue(d.due)}`:""}{p?` · ${resumeLabel(p).toLowerCase()}`:""}</div>
+                        </div>
+                        <button style={{background:d.overdue?"linear-gradient(135deg,#ef4444,#dc2626)":"rgba(245,158,11,0.15)",border:d.overdue?"none":"1px solid rgba(245,158,11,0.3)",borderRadius:8,padding:"5px 14px",color:d.overdue?"#fff":"#f59e0b",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,whiteSpace:"nowrap"}}>{p?"Carry on →":"Start →"}</button>
+                      </div>
+                    ); })}
                     {expired.map(m=>(
                       <div key={m.id} style={{display:"flex",alignItems:"center",gap:12,background:"rgba(239,68,68,0.08)",borderRadius:8,padding:"8px 12px",cursor:"pointer"}} onClick={()=>startMod(m)}>
                         <span style={{fontSize:20}}>{m.icon}</span>
@@ -3344,14 +3426,17 @@ export default function App() {
             <div>
               <h2 style={{fontSize:22,fontWeight:900,letterSpacing:-.5,marginBottom:24}}>My Assigned Training <HelpTip dark={true} text="Modules assigned to you by your manager. Work through each one at your own pace — you'll need to pass the quiz at the end to receive your certificate. Modules with an expiry date will need to be repeated periodically."/></h2>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:16}}>
-                {myMods.map(m=>{
+                {/* not done first, soonest due date first; then completed */}
+                {[...myMods].sort((a,b)=>(!!myC[a.id])-(!!myC[b.id]) || byDue(a,b)).map(m=>{
                   const isDone = !!myC[m.id];
+                  const due = myDue(m), prog = !isDone ? getProgress(user.id, m) : null;
                   return (
                     <div key={m.id} style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:18,padding:24,border:`1px solid ${isDone?"rgba(16,185,129,0.25)":T.border}`}}>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"start",marginBottom:12}}>
                         <span style={{fontSize:36}}>{m.icon}</span>
-                        <Pill label={isDone?"Completed":"Pending"} col={isDone?"green":"amber"}/>
+                        <Pill label={isDone?"Completed":due&&due.overdue?"Overdue":"Pending"} col={isDone?"green":due&&due.overdue?"red":"amber"}/>
                       </div>
+                      {due && <div data-testid="due-label" style={{display:"inline-block",fontSize:11,fontWeight:800,color:due.overdue?"#f87171":due.soon?"#fbbf24":T.muted,background:due.overdue?"rgba(239,68,68,0.1)":due.soon?"rgba(245,158,11,0.1)":T.overlay,border:`1px solid ${due.overdue?"rgba(239,68,68,0.35)":due.soon?"rgba(245,158,11,0.3)":T.borderMd}`,borderRadius:99,padding:"2px 10px",marginBottom:8}}>{dueText(due)}{due.overdue||due.days>14?"":` · ${formatDue(due.due)}`}</div>}
                       <h3 style={{margin:"0 0 4px",fontSize:16,fontWeight:800}}>{m.title}</h3>
                       <p style={{color:T.muted,fontSize:12,margin:"0 0 14px"}}>{m.category} · {m.duration} · <span style={{color:m.level==="Mandatory"?"#f87171":T.accentLt}}>{m.level}</span>{m.renewalLabel&&<span style={{color:T.muted}}> · 🔄 {m.renewalLabel} renewal</span>}</p>
                       {isDone && (
@@ -3389,7 +3474,7 @@ export default function App() {
                                   return ex&&ex.status!=="valid" ? "none" : `1px solid ${T.borderMd}`; })()
                               : "none",
                             borderRadius:10,padding:"10px",fontWeight:700,cursor:"pointer",fontSize:13,fontFamily:font}}>
-                          {isDone?(()=>{const ex=m.renewalMonths?getExpiryStatus(myC[m.id].date,m.renewalMonths):null; return ex&&ex.status==="expired"?"Renew Now →":ex&&ex.status==="expiring"?"Renew Soon →":"Review Module"})():"Start →"}
+                          {isDone?(()=>{const ex=m.renewalMonths?getExpiryStatus(myC[m.id].date,m.renewalMonths):null; return ex&&ex.status==="expired"?"Renew Now →":ex&&ex.status==="expiring"?"Renew Soon →":"Review Module"})():prog?`${resumeLabel(prog)} →`:"Start →"}
                         </button>
                         {isDone && !myC[m.id].recorded && (
                           <button onClick={()=>setCert({module:m,score:myC[m.id].score,date:myC[m.id].date,certId:myC[m.id].certId||null})}
@@ -3670,7 +3755,7 @@ export default function App() {
             <LazyMyTeamTab manager={user} users={allUsers} allModules={allModules} assigns={assigns} comps={comps}
               docs={docs} docAssignments={docAssignments} docAcknowledgements={docAcknowledgements}
               dseReports={dseReports} adminResponses={adminResponses} investigations={investigations}
-              onAssign={managerAssign} onSignOffDse={managerSignOffDse} onSignOffAction={managerSignOffAction}
+              dueDates={dueDates} onAssign={managerAssign} onSignOffDse={managerSignOffDse} onSignOffAction={managerSignOffAction}
               onGroupSession={()=>setGroupSessionFor("team")}
               onSessions={()=>setShowSessions("team")}
               Z={T} font={font}/>
@@ -3913,15 +3998,17 @@ export default function App() {
     const tAssigned = assigns[String(target)]||[];
 
     // Assign/unassign one module for one user (saves just that user's list).
+    // Adding one uses the page's "Due by" choice; removing one also drops its due date.
     const toggleAssign = (uid, mid) => {
       const suid = String(uid);
-      setAssigns(p=>{
-        const c=p[suid]||[];
-        const updated = c.includes(mid)?c.filter(x=>x!==mid):[...c,mid];
-        const next = {...p,[suid]:updated};
-        dbSaveAssigns({[suid]: updated});
-        return next;
-      });
+      const c = assigns[suid]||[];
+      const adding = !c.includes(mid);
+      const updated = adding ? [...c,mid] : c.filter(x=>x!==mid);
+      const due = adding && newAssignDue() ? { [suid]: { [mid]: newAssignDue() } } : null;
+      setAssigns(p=>({...p,[suid]:updated}));
+      if (due) noteDue(due);
+      if (!adding) setDueDates(p=>{ if(!(p[suid]||{})[mid]) return p; const m={...p[suid]}; delete m[mid]; return {...p,[suid]:m}; });
+      dbSaveAssigns({[suid]: updated}, due);
     };
 
     // Manual "Add staff" form. id = Date.now() (a large number; the users table stores it as TEXT).
@@ -3984,12 +4071,6 @@ export default function App() {
     return (
       <EmojiCtx.Provider value={emojiMode}>
       <div style={{minHeight:"100vh",background:T.bg,fontFamily:font,color:T.white,overflowX:"hidden"}}>
-        {showInactivityWarning && (
-          <div style={{background:"rgba(245,158,11,0.15)",borderBottom:"1px solid rgba(245,158,11,0.3)",padding:"8px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,fontSize:13,color:"#fbbf24",fontFamily:font}}>
-            <span>⚠ You'll be logged out in 2 minutes due to inactivity.</span>
-            <button onClick={()=>setShowInactivityWarning(false)} style={{background:"rgba(245,158,11,0.2)",border:"1px solid rgba(245,158,11,0.3)",borderRadius:6,color:"#fbbf24",cursor:"pointer",fontSize:12,fontWeight:700,padding:"3px 10px",fontFamily:font}}>Dismiss</button>
-          </div>
-        )}
         <PreviewModal doc={previewDoc} onClose={()=>setPreviewDoc(null)} Z={T} font={font}/>
         {/* ▲/▼ top-of-page / bottom-of-page buttons on long screens (shared/ScrollNav.jsx) */}
         <ScrollNav bottom={24} Z={T} font={font}/>
@@ -4017,29 +4098,29 @@ export default function App() {
         {/* Nav */}
         <div style={{background:`linear-gradient(90deg,${T.navyDk},${T.navyMd})`,borderBottom:`1px solid ${T.border}`,padding:isMobile?"0 12px":navTight?"0 16px":"0 28px",display:"flex",alignItems:"center",position:"relative",flexWrap:isMobile?"nowrap":"wrap",rowGap:0}}>
           <div style={{marginRight:isMobile?8:navTight?14:28,padding:"12px 0",flexShrink:0}}><ZeusLogo darkMode={darkMode}/></div>
-          {!isMobile && <><div style={{width:1,height:28,background:T.headerBgMd,marginRight:8}}/><Pill label="ADMIN" col="navy"/><div style={{width:1,height:20,background:T.headerBgMd,margin:"0 12px"}}/></>}
+          {!isMobile && !navCompact && <><div style={{width:1,height:28,background:T.headerBgMd,marginRight:8}}/><Pill label="ADMIN" col="navy"/><div style={{width:1,height:20,background:T.headerBgMd,margin:"0 12px"}}/></>}
           {!isMobile && (()=>{
             const TRAINING_TABS=["assign","modules","create","reports"]; const trainingActive=TRAINING_TABS.includes(atab);
             const ME_TABS=["machinery","equipment"]; const meActive=ME_TABS.includes(atab);
             return (<>
               <button onClick={()=>setAtab("dashboard")} style={navBtn(atab==="dashboard",T.gold)}>Dashboard</button>
               <button onClick={()=>setAtab("users")} style={navBtn(atab==="users",T.gold)}>Staff</button>
-              <NavMenu label="Training" active={trainingActive} items={[["assign","Assign Training"],["modules","Training Library"],["create","Create Module"],["reports","Reports"]]} current={atab} onPick={setAtab} btnStyle={navBtn(trainingActive,T.gold)} Z={T} font={font}/>
+              <NavMenu label="Training" active={trainingActive} items={[["assign","Assign Training"],["modules","Training Library"],["create","Create Module"],["reports","Reports"]]} current={atab} onPick={setAtab} btnStyle={{...navBtn(trainingActive,T.gold),maxWidth:"none",whiteSpace:"nowrap"}} Z={T} font={font}/>
               <button onClick={()=>setAtab("firesafety")} style={navBtn(atab==="firesafety",T.gold)}>Fire Safety</button>
               <button onClick={()=>setAtab("firstaid")} style={navBtn(atab==="firstaid",T.gold)}>First Aid</button>
               <button onClick={()=>setAtab("incidents")} style={navBtn(atab==="incidents",T.gold)}>Incidents</button>
               <button onClick={()=>setAtab("ra")} style={navBtn(atab==="ra",T.gold)}>Risk Assessments</button>
               <button onClick={()=>setAtab("inspections")} style={navBtn(atab==="inspections",T.gold)}>Inspections</button>
               {(()=>{ const CON_TABS=["contractors","permits"]; const conActive=CON_TABS.includes(atab); return (
-                <NavMenu label="Contractors" active={conActive} items={[["contractors","Contractors"],["permits","Permits"]]} current={atab} onPick={setAtab} btnStyle={navBtn(conActive,T.gold)} Z={T} font={font}/>
+                <NavMenu label="Contractors" active={conActive} items={[["contractors","Contractors"],["permits","Permits"]]} current={atab} onPick={setAtab} btnStyle={{...navBtn(conActive,T.gold),maxWidth:"none",whiteSpace:"nowrap"}} Z={T} font={font}/>
               ); })()}
               {(()=>{ const DOC_TABS=["documents","coshh","audit"]; const docActive=DOC_TABS.includes(atab); return (
-                <NavMenu label="Documents" active={docActive} items={[["documents","H&S Documents"],["coshh","COSHH Register"],["audit","Audit Trail"]]} current={atab} onPick={setAtab} btnStyle={navBtn(docActive,T.gold)} Z={T} font={font}/>
+                <NavMenu label="Documents" active={docActive} items={[["documents","H&S Documents"],["coshh","COSHH Register"],["audit","Audit Trail"]]} current={atab} onPick={setAtab} btnStyle={{...navBtn(docActive,T.gold),maxWidth:"none",whiteSpace:"nowrap"}} Z={T} font={font}/>
               ); })()}
-              <NavMenu label="Machinery & Equipment" active={meActive} items={[["machinery","Machinery Competence"],["equipment","Equipment Register"]]} current={atab} onPick={setAtab} btnStyle={navBtn(meActive,T.gold)} Z={T} font={font}/>
+              <NavMenu label="Machinery & Equipment" active={meActive} items={[["machinery","Machinery Competence"],["equipment","Equipment Register"]]} current={atab} onPick={setAtab} btnStyle={{...navBtn(meActive,T.gold),maxWidth:navTight?124:"none"}} Z={T} font={font}/>
             </>);
           })()}
-          <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:isMobile?6:10}}>
+          <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:isMobile?6:navCompact?6:10}}>
             {isMobile && (<button onClick={()=>setMobileMenuOpen(m=>!m)} style={{background:"none",border:`1px solid ${T.borderMd}`,borderRadius:8,color:T.white,fontSize:20,cursor:"pointer",padding:"4px 10px",lineHeight:1,fontFamily:font,flexShrink:0}}>{mobileMenuOpen?"✕":"☰"}</button>)}
             {(()=>{
               // Admin notification list (same shape as the staff one; nav.tab = admin tab key).
@@ -4055,6 +4136,11 @@ export default function App() {
                 return mandatory.some(m=>!(comps[u.id]||{})[m.id]);
               });
               if(overdueStaff.length) notifications.push({type:"module",urgent:true,title:`${overdueStaff.length} staff with overdue mandatory training`,detail:overdueStaff.map(u=>u.name.split(" ")[0]).slice(0,4).join(", ")+(overdueStaff.length>4?` +${overdueStaff.length-4} more`:"...tap to view"),nav:{tab:"reports"}});
+              // Training past its due date (lib/dueDates.js)
+              const pastDueBy = overdueByPerson(assigns, dueDates, (uid, mid) => isPassed((comps[uid]||{})[mid]));
+              const pastDuePeople = staff.filter(u=>(u.status||"active")!=="leaver" && pastDueBy[String(u.id)]);
+              if(pastDuePeople.length) { const n = pastDuePeople.reduce((t,u)=>t+pastDueBy[String(u.id)],0);
+                notifications.push({type:"module",urgent:true,title:`${n} training assignment${n!==1?"s":""} past the due date`,detail:`${pastDuePeople.length} ${pastDuePeople.length!==1?"people":"person"}: ${pastDuePeople.map(u=>u.name.split(" ")[0]).slice(0,4).join(", ")}${pastDuePeople.length>4?` +${pastDuePeople.length-4} more`:""}`,nav:{tab:"users",staffProgress:"pastdue"}}); }
               // Unread required documents
               const unreadDoc = staff.filter(u=>docs.some(d=>(docAssignments[String(d.id)]||[]).includes(String(u.id))&&!(docAcknowledgements[u.id]||{})[d.id]));
               if(unreadDoc.length) notifications.push({type:"document",urgent:false,title:`${unreadDoc.length} staff with unread required documents`,detail:"Check Documents tab for details",nav:{tab:"reports"}});
@@ -4130,19 +4216,21 @@ export default function App() {
               const soonReviews = docs.filter(d=>d.reviewDate&&d.reviewDate>=today2&&Math.ceil((new Date(d.reviewDate)-new Date())/86400000)<=30);
               if(overdueReviews.length) notifications.push({type:"document",urgent:true,title:`${overdueReviews.length} document${overdueReviews.length!==1?"s":""} overdue for review`,detail:overdueReviews.map(d=>d.title).join(", "),nav:{tab:"documents"}});
               else if(soonReviews.length) notifications.push({type:"document",urgent:false,title:`${soonReviews.length} document${soonReviews.length!==1?"s":""} due for review soon`,detail:soonReviews.map(d=>d.title).join(", "),nav:{tab:"documents"}});
-              return <NotificationBell notifications={notifications} onNavigate={n=>{setAtab(n.tab);if(n.view)setAdminReportView(n.view);}} Z={T} font={font}/>;
+              return <NotificationBell notifications={notifications} onNavigate={n=>{ if(n.staffProgress){ setStaffFilterSearch(""); setStaffFilterManager("all"); setStaffStatusFilter("all"); setStaffFilterProgress(n.staffProgress); } setAtab(n.tab);if(n.view)setAdminReportView(n.view);}} Z={T} font={font}/>;
             })()}
             <QuickSearch getItems={quickItems} Z={T} font={font} compact={winW<2200}/>
-            <div style={{width:1,height:20,background:T.headerBgMd,margin:"0 4px"}}/>
+            {!navCompact && <div style={{width:1,height:20,background:T.headerBgMd,margin:"0 4px"}}/>}
             {/* My Training — lets an admin see/complete their own assigned training via the staff view */}
             <button onClick={()=>{ setStab("training"); setView("staff"); }}
-              title="View your own assigned training"
-              style={{background:T.overlay,border:`1px solid ${T.borderMd}`,borderRadius:8,padding:"5px 12px",color:T.muted,cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font,display:"flex",alignItems:"center",gap:5,transition:"all .15s"}}>
-              {E("📚 ","")}My Training
+              title="My Training: your own assigned training" aria-label="My Training"
+              style={{background:T.overlay,border:`1px solid ${T.borderMd}`,borderRadius:8,padding:navCompact?"5px 9px":"5px 12px",color:T.muted,cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font,display:"flex",alignItems:"center",gap:5,transition:"all .15s",whiteSpace:"nowrap"}}>
+              {navCompact
+                ? <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/></svg>
+                : <>{E("📚 ","")}My Training</>}
             </button>
-            <div style={{width:1,height:20,background:T.headerBgMd,margin:"0 4px"}}/>
+            {!navCompact && <div style={{width:1,height:20,background:T.headerBgMd,margin:"0 4px"}}/>}
             {/* Quick theme cycle button */}
-            <button onClick={()=>{
+            {!navTiny && <button onClick={()=>{
               const order=["dark","light","slate","forest","graphite","arctic","sand","rose"];
               const next=order[(order.indexOf(theme)+1)%order.length];
               setTheme(next);
@@ -4151,17 +4239,17 @@ export default function App() {
             }} style={{background:T.overlay,border:`1px solid ${T.borderMd}`,borderRadius:8,padding:"5px 10px",color:T.muted,cursor:"pointer",fontSize:14,fontFamily:font,display:"flex",alignItems:"center",gap:4,transition:"all .15s"}}
               title={`Theme: ${theme} — click to cycle`}>
               {theme==="dark"?"🌙":theme==="light"?"☀️":theme==="slate"?"◼":theme==="forest"?"🌲":theme==="graphite"?"⬛":theme==="arctic"?"🌌":theme==="sand"?"🏜":"🌸"}
-            </button>
-            <div style={{width:1,height:20,background:T.headerBgMd,margin:"0 4px"}}/>
-            <div onClick={()=>setAtab(atab==="account"?"users":"account")}
-              title="My Account"
-              style={{display:"flex",alignItems:"center",gap:7,cursor:"pointer",padding:"4px 8px 4px 4px",borderRadius:10,transition:"background .15s",background:atab==="account"?T.overlay:"transparent",border:atab==="account"?`1px solid ${T.borderMd}`:"1px solid transparent"}}
+            </button>}
+            {!navCompact && <div style={{width:1,height:20,background:T.headerBgMd,margin:"0 4px"}}/>}
+            <button type="button" onClick={()=>setAtab(atab==="account"?"users":"account")}
+              title={`My Account (${user.name})`} aria-label={`My Account (${user.name})`}
+              style={{display:"flex",alignItems:"center",gap:7,cursor:"pointer",padding:"4px 8px 4px 4px",borderRadius:10,transition:"background .15s",background:atab==="account"?T.overlay:"transparent",border:atab==="account"?`1px solid ${T.borderMd}`:"1px solid transparent",fontFamily:font,color:"inherit"}}
               onMouseEnter={e=>{ if(atab!=="account") e.currentTarget.style.background=T.overlay; }}
               onMouseLeave={e=>{ e.currentTarget.style.background=atab==="account"?T.overlay:"transparent"; }}>
               <Avatar name={user.name} size={32}/>
-              <span style={{fontSize:13,color:atab==="account"?T.white:T.muted,fontWeight:600}}>{user.name.split(" ")[0]}</span>
-            </div>
-            <button onClick={logout} style={{background:"none",border:"none",color:T.muted,cursor:"pointer",fontSize:11,fontFamily:font}}>Sign Out</button>
+              {!navCompact && <span style={{fontSize:13,color:atab==="account"?T.white:T.muted,fontWeight:600}}>{user.name.split(" ")[0]}</span>}
+            </button>
+            <button onClick={logout} style={{background:"none",border:"none",color:T.muted,cursor:"pointer",fontSize:11,fontFamily:font,whiteSpace:"nowrap"}}>Sign Out</button>
           </div>
         </div>
 
@@ -4320,6 +4408,9 @@ export default function App() {
                 {(() => {
                   const statCardDefs = [
                     { id:"trainingIncomplete", node: card(E("📚",""),"Training Incomplete",overdueTraining.length,`of ${staffList.length} staff`,null,overdueTraining.length>0,()=>showStaff("incomplete")) },
+                    { id:"trainingPastDue", node: (()=>{ const by = overdueByPerson(assigns, dueDates, (uid, mid) => isPassed((comps[uid]||{})[mid]));
+                        const people = staffList.filter(u=>(u.status||"active")!=="leaver" && by[String(u.id)]); const n = people.reduce((t,u)=>t+by[String(u.id)],0);
+                        return card(E("⏰",""),"Training Past Due",people.length,n?`${n} assignment${n!==1?"s":""} late`:"none late",null,people.length>0,()=>showStaff("pastdue")); })() },
                     { id:"expiringExpired", node: card(E("🔄",""),"Expiring/Expired",expiringTraining.length,"training renewals",expiringTraining.length>0,false,()=>{setAtab("reports");setAdminReportView("expiry");}) },
                     { id:"openIncidents", node: card(E("⚠️",""),"Open Incidents",openIncidents2.length,`${riddorOpen2.length} RIDDOR unreported`,null,riddorOpen2.length>0,showOpenIncidents) },
                     { id:"unreadDocuments", node: card(E("📄",""),"Unread Documents",unreadDocs.length,"assigned but unacknowledged",unreadDocs.length>0,false,()=>{setAtab("reports");setAdminReportView("documents");}) },
@@ -4828,6 +4919,7 @@ export default function App() {
                     if (staffFilterProgress==="inprogress" && (pct===100||pct===0)) return false;
                     if (staffFilterProgress==="overdue" && (a===0 || pct!==0)) return false;   // nothing started (people with no modules are under "No Modules")
                     if (staffFilterProgress==="incomplete" && !(a>0 && d<a)) return false;    // dashboard "Training Incomplete"
+                    if (staffFilterProgress==="pastdue" && !(assigns[u.id]||[]).some(mid=>{ const di=dueInfo(dueDates,u.id,mid,isPassed((comps[u.id]||{})[mid])); return di&&di.overdue; })) return false;
                     if (staffFilterProgress==="none" && a!==0) return false;
                   }
                   return true;
@@ -4843,7 +4935,13 @@ export default function App() {
                 const runBulk = async fn => { if (await fn(selIds)) setStaffSel([]); };
                 // Group by Team: sorted by line manager, with a heading (and tick box) per team
                 const teamOf2 = u => (u.manager||"").trim() || "No line manager";
-                const ordered = staffGroupByTeam ? [...filteredStaff].sort((a,b)=>(teamOf2(a)==="No line manager")-(teamOf2(b)==="No line manager") || teamOf2(a).localeCompare(teamOf2(b)) || a.name.localeCompare(b.name)) : filteredStaff;
+                // Column sort (click a heading); with Group by Team, sorted within each team
+                const pctOf = u => { const a=(assigns[u.id]||[]).length; if(!a) return null; return Math.round((assigns[u.id]||[]).filter(mid=>(comps[u.id]||{})[mid]).length/a*100); };
+                const ordered = sortRows(filteredStaff, staffSort, {
+                  name: u=>u.name, email: u=>String(u.email||"").toLowerCase(), job: u=>u.jobTitle, manager: u=>u.manager,
+                  progress: pctOf, last: u=>lastLoginMap[u.id]||"0000",
+                }, staffGroupByTeam ? (a,b)=>((teamOf2(a)==="No line manager")-(teamOf2(b)==="No line manager") || teamOf2(a).localeCompare(teamOf2(b))) : null);
+                const sh = (label, by) => <SortButton label={label} by={by} sort={staffSort} onSort={setStaffSortBy} Z={T} font={font}/>;
                 const teamHead = (u,i,mobile) => {
                   if (!staffGroupByTeam || (i>0 && teamOf2(ordered[i-1])===teamOf2(u))) return null;
                   const ids = ordered.filter(x=>teamOf2(x)===teamOf2(u)).map(x=>String(x.id));
@@ -4886,8 +4984,9 @@ export default function App() {
                         <option value="all">All Progress</option>
                         <option value="compliant">✓ Compliant</option>
                         <option value="incomplete">Not complete (any)</option>
+                        <option value="pastdue">Past due date</option>
                         <option value="inprogress">In Progress</option>
-                        <option value="overdue">Overdue</option>
+                        <option value="overdue">Not started</option>
                         <option value="none">No Modules</option>
                       </select>
                       {/* Clear */}
@@ -4958,7 +5057,7 @@ export default function App() {
                     <div style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:16,overflow:"hidden",border:`1px solid ${T.border}`}}>
                       <div style={{display:"grid",gridTemplateColumns:"34px 2fr 2fr 2fr 2fr 2fr 120px 160px",padding:"12px 20px",background:T.headerBg,fontSize:11,fontWeight:700,letterSpacing:1,color:T.muted,textTransform:"uppercase",columnGap:0,alignItems:"center"}}>
                         <span><input type="checkbox" checked={allShownSel} ref={el=>{ if(el) el.indeterminate=!allShownSel&&someShownSel; }} onChange={()=>toggleMany(shownIds,!allShownSel)} aria-label={`Tick everyone shown (${shownIds.length})`} title="Tick everyone shown" disabled={!shownIds.length} style={{width:16,height:16,cursor:"pointer"}}/></span>
-                        <span style={{paddingRight:12}}>Name</span><span style={{paddingRight:12}}>Email</span><span style={{paddingRight:12}}>Job Title</span><span style={{paddingRight:12}}>Manager</span><span style={{paddingRight:12}}>Progress</span><span style={{paddingRight:12}}>Last Active</span><span></span>
+                        <span style={{paddingRight:12}}>{sh("Name","name")}</span><span style={{paddingRight:12}}>{sh("Email","email")}</span><span style={{paddingRight:12}}>{sh("Job Title","job")}</span><span style={{paddingRight:12}}>{sh("Manager","manager")}</span><span style={{paddingRight:12}}>{sh("Progress","progress")}</span><span style={{paddingRight:12}}>{sh("Last Active","last")}</span><span></span>
                       </div>
                       {filteredStaff.length===0 && <div style={{padding:"32px 20px",textAlign:"center",color:T.muted,fontSize:14}}>{staff.length===0?"No staff members yet. Add one above.":"No staff match the current filters."}</div>}
                       {ordered.map((u,i)=>{
@@ -5056,19 +5155,14 @@ export default function App() {
                 const bulkAssignMod = async (mid) => {
                   if (!targetStaff) return;
                   const m = allModules.find(x=>x.id===mid);
-                  if (!(await ask({ title: "Assign module", message: `Assign "${m?.title||mid}" to ${targetLabel}?`, ok: "Assign" }))) return;
-                  setAssigns(p => {
-                    const next = {...p};
-                    const affected = {};
-                    targetStaff.forEach(u => {
-                      if (!(next[u.id]||[]).includes(mid)) {
-                        next[u.id] = [...(next[u.id]||[]), mid];
-                        affected[u.id] = next[u.id];
-                      }
-                    });
-                    if (Object.keys(affected).length) dbSaveAssigns(affected);
-                    return next;
-                  });
+                  const d = newAssignDue();
+                  if (!(await ask({ title: "Assign module", message: `Assign "${m?.title||mid}" to ${targetLabel}?${d?`\n\nDue by ${formatDue(d)}.`:""}`, ok: "Assign" }))) return;
+                  const affected = {}, due = {};
+                  targetStaff.forEach(u => { const k=String(u.id); const cur=assigns[k]||[]; if (!cur.includes(mid)) { affected[k]=[...cur,mid]; if (d) due[k]={[mid]:d}; } });
+                  if (!Object.keys(affected).length) return;
+                  setAssigns(p => ({...p, ...affected}));
+                  if (d) noteDue(due);
+                  dbSaveAssigns(affected, d ? due : null);
                 };
                 const bulkUnassignMod = async (mid) => {
                   if (!targetStaff) return;
@@ -5087,14 +5181,14 @@ export default function App() {
                 };
                 const bulkAssignAll = async () => {
                   if (!targetStaff) return;
-                  if (!(await ask({ title: "Assign every module", message: `Assign ALL ${assignableModules.length} modules to ${targetLabel}?\n\nThis adds every module to their training plan.`, ok: "Assign all" }))) return;
-                  setAssigns(p => {
-                    const next = {...p};
-                    const affected = {};
-                    targetStaff.forEach(u => { next[u.id] = assignableModules.map(m=>m.id); affected[u.id] = next[u.id]; });
-                    if (Object.keys(affected).length) dbSaveAssigns(affected);
-                    return next;
-                  });
+                  const d = newAssignDue();
+                  if (!(await ask({ title: "Assign every module", message: `Assign ALL ${assignableModules.length} modules to ${targetLabel}?\n\nThis adds every module to their training plan.${d?` Newly added modules are due by ${formatDue(d)}.`:""}`, ok: "Assign all" }))) return;
+                  const affected = {}, due = {};
+                  targetStaff.forEach(u => { const k=String(u.id); const cur=assigns[k]||[]; affected[k] = assignableModules.map(m=>m.id);
+                    if (d) { const add = affected[k].filter(x=>!cur.includes(x)); if (add.length) due[k] = Object.fromEntries(add.map(x=>[x,d])); } });
+                  setAssigns(p => ({...p, ...affected}));
+                  if (d) noteDue(due);
+                  dbSaveAssigns(affected, d ? due : null);
                 };
 
                 const selStyle2 = {background:T.navyMd,border:`1px solid ${T.borderMd}`,borderRadius:10,padding:"9px 14px",color:T.white,fontSize:13,cursor:"pointer",fontFamily:font,outline:"none"};
@@ -5155,6 +5249,16 @@ export default function App() {
                           </button>
                         </div>
                       )}
+
+                      {/* Due date for assignments made on this page (lib/dueDates.js) */}
+                      <div style={{marginTop:16,paddingTop:16,borderTop:`1px solid ${T.border}`,display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+                        <label htmlFor="assign-due" style={{fontSize:11,fontWeight:700,letterSpacing:1,color:T.muted,textTransform:"uppercase"}}>Due by</label>
+                        <select id="assign-due" value={assignDueChoice} onChange={e=>setAssignDueChoice(e.target.value)} style={selStyle2} data-testid="assign-due">
+                          {DUE_CHOICES.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
+                        </select>
+                        {assignDueChoice==="date" && <input type="date" value={assignDueDate} min={todayISO()} onChange={e=>setAssignDueDate(e.target.value)} aria-label="Due date" data-testid="assign-due-date" style={{...selStyle2,colorScheme:"dark"}}/>}
+                        <span style={{fontSize:12,color:T.muted}}>{newAssignDue() ? `Modules you assign now must be completed by ${formatDue(newAssignDue())}.` : "Applies to modules you assign on this page. Optional."}</span>
+                      </div>
                     </div>
 
                     {/* Module list */}
@@ -5180,6 +5284,15 @@ export default function App() {
                                   </div>
                                 </div>
                               </div>
+                              {bulkTarget==="individual" && on && !isPassed((comps[String(target)]||{})[m.id]) && (()=>{
+                                // Due date for this assignment: click to set or change
+                                const di = dueInfo(dueDates, target, m.id, false);
+                                return (
+                                  <button onClick={()=>askDueDate(target,m.id)} data-testid="due-chip" title="Set or change the due date"
+                                    style={{background:di&&di.overdue?"rgba(239,68,68,0.14)":di&&di.soon?"rgba(245,158,11,0.12)":"transparent",color:di&&di.overdue?"#f87171":di&&di.soon?"#fbbf24":di?T.slate||T.white:T.muted,border:`1px ${di?"solid":"dashed"} ${di&&di.overdue?"rgba(239,68,68,0.45)":T.borderMd}`,borderRadius:8,padding:"5px 10px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:11,marginRight:8,flexShrink:0,whiteSpace:"nowrap"}}>
+                                    {di ? dueText(di) : "+ Due date"}
+                                  </button>);
+                              })()}
                               {bulkTarget==="individual" && (()=>{
                                 // Completion status + "Record as completed" (training done before the portal)
                                 const c=(comps[String(target)]||{})[m.id];
@@ -5566,7 +5679,10 @@ export default function App() {
 
           {atab==="reports" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
-            <LazyReportsTab staff={staff} assigns={assigns} comps={comps} docs={docs} docAssignments={docAssignments} docAcknowledgements={docAcknowledgements} reportView={adminReportView} setReportView={setAdminReportView} dseReports={dseReports} adminResponses={adminResponses} setAdminResponses={setAdminResponses} darkMode={darkMode} Z={T} font={font} modules={allModules} machineComps={machineComps} allMachineTypes={allMachineTypes} lastLoginMap={lastLoginMap} extCerts={extCerts} quizFailures={quizFailures} setQuizFailures={setQuizFailures} incidents={incidents} inspections={siteInspections} ras={ras} investigations={investigations} setAtab={setAtab} userName={user?.name||""} onExportPDF={u=>generateStaffPDF(u,allModules,assigns,comps,docs,docAssignments,docAcknowledgements,extCerts,machineComps,lastLoginMap,T,allMachineTypes)}/>
+            <LazyReportsTab staff={staff} assigns={assigns} comps={comps} docs={docs} docAssignments={docAssignments} docAcknowledgements={docAcknowledgements} reportView={adminReportView} setReportView={setAdminReportView} dseReports={dseReports} adminResponses={adminResponses} setAdminResponses={setAdminResponses} darkMode={darkMode} Z={T} font={font} modules={allModules} machineComps={machineComps} allMachineTypes={allMachineTypes} lastLoginMap={lastLoginMap} extCerts={extCerts} quizFailures={quizFailures} setQuizFailures={setQuizFailures} incidents={incidents} inspections={siteInspections} ras={ras} investigations={investigations} setAtab={setAtab} userName={user?.name||""}
+              dueDates={dueDates} onMatrixAssign={matrixAssign} onMatrixDue={askDueDate} onMatrixOpen={uid=>openInAssign(uid)}
+              onMatrixRecord={(uid,mid)=>openInAssign(uid, ()=>setRecordFor({uid:String(uid),mid}))}
+              onExportPDF={u=>generateStaffPDF(u,allModules,assigns,comps,docs,docAssignments,docAcknowledgements,extCerts,machineComps,lastLoginMap,T,allMachineTypes)}/>
             </React.Suspense>
           )}
 

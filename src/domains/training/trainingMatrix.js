@@ -7,6 +7,7 @@
  *   valid     – completed and in date                      (green)
  *   expiring  – completed, expires within EXPIRY_WARNING_DAYS (amber)
  *   expired   – completed but past its renewal date        (red)
+ *   overdue   – assigned, not completed, past its due date  (red, "!")
  *   missing   – assigned but never completed               (light red)
  *   na        – not assigned and not completed             (grey — not required)
  *
@@ -28,6 +29,7 @@ const MATRIX_STATUS = {
   valid:    { key: "valid",    label: "Complete — in date",                     symbol: "✓", fill: "C6EFCE", text: "006100" },
   expiring: { key: "expiring", label: `Expiring within ${EXPIRY_WARNING_DAYS} days`, symbol: "!", fill: "FFEB9C", text: "9C5700" },
   expired:  { key: "expired",  label: "Expired — renewal overdue",              symbol: "✗", fill: "F8696B", text: "FFFFFF" },
+  overdue:  { key: "overdue",  label: "Not completed — past due date",          symbol: "!", fill: "C00000", text: "FFFFFF" },
   missing:  { key: "missing",  label: "Assigned — not completed",               symbol: "○", fill: "FFC7CE", text: "9C0006" },
   na:       { key: "na",       label: "Not required",                           symbol: "",  fill: "F2F2F2", text: "808080" },
 };
@@ -35,10 +37,15 @@ const MATRIX_STATUS = {
 const fmtDate = d => { if (!d) return ""; const [y, m, day] = String(d).slice(0, 10).split("-"); return y && m && day ? `${day}/${m}/${y.slice(2)}` : String(d); };
 const fmtLong = d => { if (!d) return ""; const [y, m, day] = String(d).slice(0, 10).split("-"); return y && m && day ? `${day}/${m}/${y}` : String(d); };
 
-function cellFor(user, mod, assigns, comps) {
+function cellFor(user, mod, assigns, comps, dueDates) {
   const assigned = (assigns[user.id] || []).map(String).includes(String(mod.id));
   const comp = (comps[user.id] || {})[mod.id];
-  if (!comp || !isPassed(comp, mod)) return { status: assigned ? "missing" : "na", assigned };
+  if (!comp || !isPassed(comp, mod)) {
+    // due date (lib/dueDates.js): an assignment not done by then is "overdue"
+    const due = assigned ? ((dueDates || {})[String(user.id)] || {})[String(mod.id)] || "" : "";
+    const today = new Date().toISOString().slice(0, 10);
+    return { status: !assigned ? "na" : due && due < today ? "overdue" : "missing", assigned, due };
+  }
   const ex = mod.renewalMonths ? getExpiryStatus(comp.date, mod.renewalMonths) : null;
   return {
     status: ex ? (ex.status === "expired" ? "expired" : ex.status === "expiring" ? "expiring" : "valid") : "valid",
@@ -54,7 +61,7 @@ function cellFor(user, mod, assigns, comps) {
  *   staff, modules, assigns, comps  — as held in App.jsx
  *   filter: { manager, department, search, includeLeavers, onlyNonCompliant, allModules }
  */
-function buildTrainingMatrix({ staff, modules, assigns, comps, filter = {} }) {
+function buildTrainingMatrix({ staff, modules, assigns, comps, dueDates, filter = {} }) {
   const q = (filter.search || "").trim().toLowerCase();
   let people = (staff || []).filter(u =>
     (filter.includeLeavers || (u.status || "active") !== "leaver") &&
@@ -75,7 +82,7 @@ function buildTrainingMatrix({ staff, modules, assigns, comps, filter = {} }) {
     .sort((a, b) => String(a.category || "").localeCompare(String(b.category || "")) || String(a.title).localeCompare(String(b.title)));
 
   let rows = people.map(u => {
-    const cells = cols.map(m => cellFor(u, m, assigns, comps));
+    const cells = cols.map(m => cellFor(u, m, assigns, comps, dueDates));
     const assignedCells = cells.filter(c => c.assigned);
     const ok = assignedCells.filter(c => c.status === "valid" || c.status === "expiring").length;
     return {
@@ -88,7 +95,7 @@ function buildTrainingMatrix({ staff, modules, assigns, comps, filter = {} }) {
   rows.sort((a, b) => String(a.user.name).localeCompare(String(b.user.name)));
 
   const colStats = cols.map((m, ci) => {
-    const s = { assigned: 0, valid: 0, expiring: 0, expired: 0, missing: 0 };
+    const s = { assigned: 0, valid: 0, expiring: 0, expired: 0, missing: 0, overdue: 0 };
     rows.forEach(r => { const c = r.cells[ci]; if (!c.assigned) return; s.assigned++; s[c.status] = (s[c.status] || 0) + 1; });
     s.pct = s.assigned ? Math.round((s.valid + s.expiring) / s.assigned * 100) : null;
     return s;
@@ -102,14 +109,16 @@ function buildTrainingMatrix({ staff, modules, assigns, comps, filter = {} }) {
     withTraining: rows.filter(r => r.pct !== null).length,     // staff who have at least one module assigned
     expired: rows.reduce((s, r) => s + r.cells.filter(c => c.assigned && c.status === "expired").length, 0),
     expiring: rows.reduce((s, r) => s + r.cells.filter(c => c.assigned && c.status === "expiring").length, 0),
-    missing: rows.reduce((s, r) => s + r.cells.filter(c => c.status === "missing").length, 0),
+    missing: rows.reduce((s, r) => s + r.cells.filter(c => c.status === "missing" || c.status === "overdue").length, 0),   // all not completed
+    overdue: rows.reduce((s, r) => s + r.cells.filter(c => c.status === "overdue").length, 0),                               // of which past due
   };
   return { cols, rows, colStats, totals };
 }
 
 function cellText(c) {
   if (c.status === "na") return "";
-  if (c.status === "missing") return "Not done";
+  if (c.status === "overdue") return `Due ${fmtDate(c.due)}`;
+  if (c.status === "missing") return c.due ? `Due ${fmtDate(c.due)}` : "Not done";
   if (c.status === "expired") return `Exp ${fmtDate(c.expires)}`;
   if (c.status === "expiring") return `Due ${fmtDate(c.expires)}`;
   return fmtDate(c.completed);
@@ -121,7 +130,7 @@ function exportTrainingMatrixXlsx(matrix, { filterText = "", companyName = "Zeus
   const today = new Date().toISOString().slice(0, 10);
   const FIXED = 4;                                     // Name, Job title, Manager, Compliance
   const lastCol = colName(FIXED + cols.length - 1);
-  const st = k => ({ fill: MATRIX_STATUS[k].fill, color: MATRIX_STATUS[k].text, h: "center", v: "center", border: true, size: 9, bold: k === "expired" });
+  const st = k => ({ fill: MATRIX_STATUS[k].fill, color: MATRIX_STATUS[k].text, h: "center", v: "center", border: true, size: 9, bold: k === "expired" || k === "overdue" });
   const head = { bold: true, fill: "1F3864", color: "FFFFFF", border: true, v: "center", wrap: true };
   const pctStyle = p => ({ numFmt: "0%", h: "center", border: true, bold: true,
     fill: p === null ? "F2F2F2" : p >= 1 ? "C6EFCE" : p >= 0.8 ? "FFEB9C" : "FFC7CE", color: p === null ? "808080" : p >= 1 ? "006100" : p >= 0.8 ? "9C5700" : "9C0006" });
@@ -163,29 +172,29 @@ function exportTrainingMatrixXlsx(matrix, { filterText = "", companyName = "Zeus
   s1.push([{ v: "* completed although not assigned — shown for information, not counted in compliance. Compliance = assigned modules complete and in date ÷ assigned modules.", s: { italic: true, color: "595959", size: 9 } }]);
 
   // ── Sheet 2: detail list ──
-  const dHead = ["Name", "Job title", "Line manager", "Department", "Module", "Category", "Renewal", "Assigned", "Status", "Completed", "Score %", "Expires", "Days left", "Certificate ID", "Module version", "How completed", "Evidence on file"];
+  const dHead = ["Name", "Job title", "Line manager", "Department", "Module", "Category", "Renewal", "Assigned", "Due date", "Status", "Completed", "Score %", "Expires", "Days left", "Certificate ID", "Module version", "How completed", "Evidence on file"];
   const s2 = [dHead.map(h => ({ v: h, s: head }))];
   rows.forEach(r => r.cells.forEach((c, ci) => {
     if (c.status === "na") return;
     const m = cols[ci];
     s2.push([r.user.name, r.user.jobTitle || "", r.user.manager || "", r.user.department || "", m.title, m.category || "", m.renewalLabel || (m.renewalMonths ? `${m.renewalMonths} months` : "No renewal"),
-      c.assigned ? "Yes" : "No", { v: MATRIX_STATUS[c.status].label, s: { fill: MATRIX_STATUS[c.status].fill, color: MATRIX_STATUS[c.status].text } },
+      c.assigned ? "Yes" : "No", fmtLong(c.due), { v: MATRIX_STATUS[c.status].label, s: { fill: MATRIX_STATUS[c.status].fill, color: MATRIX_STATUS[c.status].text } },
       fmtLong(c.completed), typeof c.score === "number" ? c.score : (c.score ? Number(c.score) || c.score : ""), fmtLong(c.expires),
       c.daysLeft === null || c.daysLeft === undefined ? "" : c.daysLeft, c.certId || "", c.version || "", c.how || "",
       c.evidence === "No" ? { v: "No", s: { fill: "FFEB9C", color: "9C5700" } } : (c.evidence || "")]);
   }));
 
   // ── Sheet 3: per-module summary ──
-  const s3 = [["Module", "Category", "Renewal", "Staff assigned", "Complete (in date)", "Expiring", "Expired", "Not completed", "Compliance"].map(h => ({ v: h, s: head }))];
+  const s3 = [["Module", "Category", "Renewal", "Staff assigned", "Complete (in date)", "Expiring", "Expired", "Not completed", "Of which past due", "Compliance"].map(h => ({ v: h, s: head }))];
   cols.forEach((m, ci) => { const s = colStats[ci];
-    s3.push([m.title, m.category || "", m.renewalLabel || "", s.assigned, s.valid, s.expiring, s.expired, s.missing, s.pct === null ? "—" : { v: s.pct / 100, s: pctStyle(s.pct / 100) }]); });
+    s3.push([m.title, m.category || "", m.renewalLabel || "", s.assigned, s.valid, s.expiring, s.expired, s.missing + s.overdue, s.overdue, s.pct === null ? "—" : { v: s.pct / 100, s: pctStyle(s.pct / 100) }]); });
 
   const blob = buildXlsx([
     { name: "Training Matrix", rows: s1, merges, freeze: { row: 6, col: 1 }, landscape: true,
       cols: [26, 24, 20, 12, ...cols.map(() => 11.5)], rowHeights: { 0: 24, 2: 42, 4: 30, 5: 190 } },
     { name: "Detail", rows: s2, freeze: { row: 1, col: 1 }, autoFilter: `A1:${colName(dHead.length - 1)}${s2.length}`,
-      cols: [24, 24, 20, 16, 34, 20, 12, 10, 30, 12, 9, 12, 10, 18, 10, 18, 12] },
-    { name: "By Module", rows: s3, freeze: { row: 1, col: 1 }, cols: [36, 22, 12, 14, 16, 10, 10, 14, 12] },
+      cols: [24, 24, 20, 16, 34, 20, 12, 10, 12, 30, 12, 9, 12, 10, 18, 10, 18, 12] },
+    { name: "By Module", rows: s3, freeze: { row: 1, col: 1 }, cols: [36, 22, 12, 14, 16, 10, 10, 14, 14, 12] },
   ]);
   downloadBlob(blob, filename || `Training_Matrix_${today}.xlsx`);
   return blob;

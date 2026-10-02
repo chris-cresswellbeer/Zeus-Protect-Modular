@@ -22,6 +22,7 @@ import App from "./App.jsx";
 import { startPrivateFiles } from "./lib/fileAccess";
 import { FeedbackHost } from "./shared/Feedback";
 import { WelcomeHost } from "./shared/WelcomeVideo";
+import { SessionWarningHost } from "./shared/SessionTimeout";
 
 // New sign-in only: swap links to private files (documents, fire safety,
 // incident photos) for short-lived signed links as they appear on screen.
@@ -54,5 +55,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
     <FeedbackHost />
     {/* the welcome video on someone's very first sign-in (shared/WelcomeVideo.jsx) */}
     <WelcomeHost />
+    {/* "Still there?" countdown before the 30-minute sign-out (shared/SessionTimeout.jsx) */}
+    <SessionWarningHost />
   </React.StrictMode>
 );

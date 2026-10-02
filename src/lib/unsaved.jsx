@@ -15,16 +15,36 @@
  *   • closing or reloading the tab asks first (the browser's own warning);
  *   • a draft is kept on this device (localStorage, per person and form), so the work
  *     can be restored after a sign-out for inactivity, a closed tab or a crash.
- * Drafts never leave the device and are removed once saved, cancelled or discarded.
+ * Drafts never leave the device and are removed once saved, cancelled or discarded,
+ * when the person signs out (clearDrafts), and after DRAFT_DAYS on their own — so a
+ * half-typed injury report isn't left on a shared computer. A sign-out for inactivity
+ * keeps them (that's when they're needed).
  */
 import React from "react";
 import { ask } from "../shared/Feedback";
 
 const open = new Map();          // key → { label, discard }
 let userId = "anon";
-export const setDraftUser = id => { userId = id ? String(id) : "anon"; };
+export const setDraftUser = id => { userId = id ? String(id) : "anon"; purgeOldDrafts(); };
 const storeKey = key => `zp.draft.${userId}.${key}`;
 const MAX_DRAFT = 1500000;       // characters; bigger drafts (e.g. many photos) aren't kept
+export const DRAFT_DAYS = 7;
+const tooOld = at => !at || Date.now() - new Date(at).getTime() > DRAFT_DAYS * 86400000;
+
+/** Delete every draft older than DRAFT_DAYS (anyone's, on this device). */
+export function purgeOldDrafts() {
+  try {
+    Object.keys(localStorage).filter(k => k.startsWith("zp.draft.")).forEach(k => {
+      let at = null; try { at = JSON.parse(localStorage.getItem(k)).at; } catch { /* unreadable */ }
+      if (tooOld(at)) localStorage.removeItem(k);
+    });
+  } catch { /* storage blocked */ }
+}
+/** Sign out: delete this person's drafts on this device. */
+export function clearDrafts(id) {
+  const u = String(id || userId);
+  try { Object.keys(localStorage).filter(k => k.startsWith(`zp.draft.${u}.`)).forEach(k => localStorage.removeItem(k)); } catch { /* */ }
+}
 
 export const unsavedLabels = () => [...open.values()].map(v => v.label);
 
@@ -48,7 +68,13 @@ if (typeof window !== "undefined") {
 }
 
 const stable = v => JSON.stringify(v, (k, x) => (x && typeof x === "object" && !Array.isArray(x)) ? Object.keys(x).sort().reduce((o, kk) => { o[kk] = x[kk]; return o; }, {}) : x);
-function readDraft(key) { try { const s = localStorage.getItem(storeKey(key)); return s ? JSON.parse(s) : null; } catch { return null; } }
+function readDraft(key) {
+  try {
+    const s = localStorage.getItem(storeKey(key)); const d = s ? JSON.parse(s) : null;
+    if (d && tooOld(d.at)) { localStorage.removeItem(storeKey(key)); return null; }
+    return d;
+  } catch { return null; }
+}
 function writeDraft(key, value) {
   try { const s = JSON.stringify({ value, at: new Date().toISOString() }); if (s.length <= MAX_DRAFT) localStorage.setItem(storeKey(key), s); } catch { /* full or blocked */ }
 }

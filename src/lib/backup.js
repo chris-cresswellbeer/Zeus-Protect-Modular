@@ -26,7 +26,7 @@ export const BACKUP_TABLES = [
   "incidents", "investigations", "site_inspections", "equipment", "machine_completions", "custom_machine_types",
   "risk_assessments", "coshh_assessments", "custom_chemicals", "msds_files",
   "fire_wardens", "fire_drills", "fire_alarm_tests", "fire_extinguishers", "fire_emerg_lighting", "fire_fra_reviews",
-  "first_aid_register", "contractors", "contractor_inductions", "contractor_certs", "contractor_visits", "permits",
+  "first_aid_register", "app_settings", "contractors", "contractor_inductions", "contractor_certs", "contractor_visits", "permits",
   "audit_log",
 ];
 const PAGE = 1000;               // Supabase returns at most 1000 rows per request

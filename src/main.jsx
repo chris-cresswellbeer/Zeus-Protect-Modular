@@ -21,6 +21,7 @@ import ReactDOM from "react-dom/client";
 import App from "./App.jsx";
 import { startPrivateFiles } from "./lib/fileAccess";
 import { FeedbackHost } from "./shared/Feedback";
+import { WelcomeHost } from "./shared/WelcomeVideo";
 
 // New sign-in only: swap links to private files (documents, fire safety,
 // incident photos) for short-lived signed links as they appear on screen.
@@ -51,5 +52,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
     <App />
     {/* on-page messages and confirmation windows (shared/Feedback.jsx) */}
     <FeedbackHost />
+    {/* the welcome video on someone's very first sign-in (shared/WelcomeVideo.jsx) */}
+    <WelcomeHost />
   </React.StrictMode>
 );

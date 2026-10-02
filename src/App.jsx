@@ -151,6 +151,7 @@ import { applyLightThemeFix, isLightTheme } from "./lib/lightThemeFix";
 import { mergeInvestigation, changedSince } from "./domains/incidents/investigationMerge";
 import { QuickSearch } from "./shared/QuickSearch";
 import { NavMenu } from "./shared/NavMenu";
+import { loadWelcomeVideo, showWelcome, hideWelcome, WelcomeReplay, WelcomeVideoSettings } from "./shared/WelcomeVideo";
 import { useRemembered, clearRemembered } from "./lib/remembered";
 import { setAuditUser, primeAudit, primeAuditList, primeAuditMap, auditRecord, auditList, auditDelete, auditEvent } from "./lib/audit";
 
@@ -473,6 +474,15 @@ export default function App() {
   // Global font stack + responsive breakpoints (desktop layouts collapse at ≤1024px).
   const font = "'Barlow','Trebuchet MS',system-ui,sans-serif";
   useEffect(() => { setFeedbackTheme(T, font); }, [theme]); // eslint-disable-line
+  // Welcome video (shared/WelcomeVideo.jsx): set by finishLogin() on someone's very first
+  // sign-in; shown once they're in the portal (after choosing their password, if asked to).
+  const [welcomePending, setWelcomePending] = useState(false);
+  const [showWelcomeSettings, setShowWelcomeSettings] = useState(false);
+  useEffect(() => {
+    if (!welcomePending || !user || mustChangePw) return;
+    setWelcomePending(false);
+    loadWelcomeVideo().then(v => { if (v) showWelcome({ video: v, name: user.name, Z: T, font }); });
+  }, [welcomePending, user, mustChangePw]); // eslint-disable-line
   const winW = useWindowWidth();
   const isMobile = winW <= 1024;
   const isSmall = winW <= 480;
@@ -2239,7 +2249,14 @@ export default function App() {
     setLoginAttempts(p => { const n={...p}; delete n[emailKey]; delete n[email.toLowerCase().trim()]; return n; });
     const ts = new Date().toISOString().slice(0,16).replace("T"," ");
     setLastLoginMap(p=>({...p, [u.id]: ts}));
-    dbRecordLogin(u.id, ts);
+    // First ever sign-in? (no login recorded for them yet) → welcome video. Checked BEFORE
+    // this login is recorded; if the check fails, no video (never shown to someone by mistake).
+    (async () => {
+      let first = false;
+      try { const r = await sb.from("last_logins").select("user_id").eq("user_id", String(u.id)); first = !r.error && Array.isArray(r.data) && r.data.length === 0; } catch { /* */ }
+      await dbRecordLogin(u.id, ts);
+      if (first) setWelcomePending(true);
+    })();
     // Restore saved theme for this user
     const profiles = Array.isArray(window.__userProfiles) ? window.__userProfiles : [];
     const profile = profiles.find(r => String(r.user_id) === String(u.id));
@@ -2266,6 +2283,7 @@ export default function App() {
     try { window.history.replaceState(null, "", window.location.pathname + window.location.search); } catch { /* */ }
     // ...and forget their remembered filters (lib/remembered.js)
     clearRemembered();
+    hideWelcome(); setWelcomePending(false);
     if (AUTH_MODE === "supabase") { signOut().finally(() => window.location.reload()); return; }
     setMustChangePw(false); setUser(null); setViewRaw("login"); setMod(null);
     setAdminReportView("staff"); setShowHiddenModules(false); setStaffFilterManager("all"); setDocFolder("all"); setStaffFilterProgress("all");
@@ -2298,6 +2316,7 @@ export default function App() {
         ["firesafety", "Fire Safety", "wardens extinguishers drills"], ["firstaid", "First Aid", "first aiders"], ["contractors", "Contractors", ""], ["permits", "Permits", "permit to work"],
         ["machinery", "Machinery Competence", "forklift"], ["equipment", "Equipment Register", "equipment"], ["account", "My Account", "password"]];
       ADMIN_PAGES.forEach(([t, l, w]) => items.push({ id: `p:a:${t}`, group: "Pages", icon: "🧭", label: l, sub: "Admin page", words: w, run: () => toAdmin(t) }));
+      items.push({ id: "p:a:welcome", group: "Pages", icon: "🎬", label: "Welcome video", sub: "Staff → the video new staff see when they first sign in", words: "first sign in login new starter induction tour", run: () => toAdmin("users", () => setShowWelcomeSettings(true)) });
       // people
       allUsers.forEach(u => {
         const leaver = (u.status || "active") === "leaver";
@@ -3609,6 +3628,7 @@ export default function App() {
           )}
 
           {stab==="account" && <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}><LazyAccountTab user={user} passwords={passwords} onSetPassword={savePasswordFor} authMode={AUTH_MODE} onChangeOwnPassword={async (oldPw,newPw)=>{ if (!(await authCheckPassword(user.email, oldPw))) return { ok:false, error:"Current password is incorrect." }; return changeOwnPassword(newPw); }} darkMode={darkMode} setDarkMode={setDarkMode} theme={theme} setTheme={setTheme} onSaveTheme={k=>dbSaveTheme(user.id,k)} emojiMode={emojiMode} onSaveEmojiMode={v=>{setEmojiMode(v);dbSaveEmojiMode(user.id,v);}} Z={T} font={font}/></React.Suspense>}
+          {stab==="account" && <WelcomeReplay name={user.name} Z={T} font={font}/>}
 
           {/* Floating hazard report button — mobile only */}
           {isMobile && stab!=="dashboard" && (
@@ -3993,6 +4013,7 @@ export default function App() {
           />
         )}
         {tempPwNotice && <TempPasswordsModal {...tempPwNotice} onClose={()=>setTempPwNotice(null)} Z={T} font={font}/>}
+        {showWelcomeSettings && <WelcomeVideoSettings user={user} onClose={()=>setShowWelcomeSettings(false)} Z={T} font={font}/>}
         {/* Nav */}
         <div style={{background:`linear-gradient(90deg,${T.navyDk},${T.navyMd})`,borderBottom:`1px solid ${T.border}`,padding:isMobile?"0 12px":navTight?"0 16px":"0 28px",display:"flex",alignItems:"center",position:"relative",flexWrap:isMobile?"nowrap":"wrap",rowGap:0}}>
           <div style={{marginRight:isMobile?8:navTight?14:28,padding:"12px 0",flexShrink:0}}><ZeusLogo darkMode={darkMode}/></div>
@@ -4493,6 +4514,10 @@ export default function App() {
                   <button onClick={()=>setStaffGroupByTeam(g=>!g)}
                     style={{background:staffGroupByTeam?`linear-gradient(135deg,${T.navyMd},${T.navy})`:T.overlay,color:staffGroupByTeam?T.gold:T.muted,border:`1px solid ${staffGroupByTeam?T.gold:T.borderMd}`,borderRadius:10,padding:"10px 16px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:13,display:"flex",alignItems:"center",gap:6}}>
                     👥 {staffGroupByTeam?"By Team ✓":"Group by Team"}
+                  </button>
+                  <button onClick={()=>setShowWelcomeSettings(true)} title="The video new staff see the first time they sign in"
+                    style={{background:T.overlay,color:T.white,border:`1px solid ${T.borderMd}`,borderRadius:10,padding:"10px 16px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:13,display:"flex",alignItems:"center",gap:6}}>
+                    {E("🎬 ","")}Welcome video
                   </button>
                   <button onClick={()=>setShowCsvImport(v=>!v)}
                     style={{background:showCsvImport?"rgba(239,68,68,0.1)":"rgba(16,185,129,0.1)",color:showCsvImport?"#f87171":T.green,border:showCsvImport?"1px solid rgba(239,68,68,0.25)":"1px solid rgba(16,185,129,0.25)",borderRadius:10,padding:"10px 16px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:13,display:"flex",alignItems:"center",gap:6}}>
@@ -5622,6 +5647,7 @@ export default function App() {
             <LazyAccountTab user={user} passwords={passwords} onSetPassword={savePasswordFor} authMode={AUTH_MODE} onChangeOwnPassword={async (oldPw,newPw)=>{ if (!(await authCheckPassword(user.email, oldPw))) return { ok:false, error:"Current password is incorrect." }; return changeOwnPassword(newPw); }} darkMode={darkMode} setDarkMode={setDarkMode} theme={theme} setTheme={setTheme} onSaveTheme={k=>dbSaveTheme(user.id,k)} emojiMode={emojiMode} onSaveEmojiMode={v=>{setEmojiMode(v);dbSaveEmojiMode(user.id,v);}} Z={T} font={font}/>
             </React.Suspense>
           )}
+          {atab==="account" && <WelcomeReplay name={user.name} Z={T} font={font}/>}
         </div>
         {/* Global hover/focus CSS for this portal (same block in the staff and admin views — keep in sync).
             ⚠ Attribute selectors like [style*="cursor:pointer"] / [style*="borderBottom"] rely on

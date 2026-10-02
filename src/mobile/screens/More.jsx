@@ -7,6 +7,7 @@ import React from "react";
 import { ALL_THEMES } from "../../theme/tokens";
 import { Screen, SectionLabel, Row, StatusChip, PrimaryButton } from "../ui";
 import { promptInstall, isStandalone } from "../registerSW";
+import { WelcomeReplay } from "../../shared/WelcomeVideo";
 
 // ─── More ────────────────────────────────────────────────────────────────────
 
@@ -81,6 +82,9 @@ function More({
           </div>
         ))}
       </div>
+
+      {/* the welcome video shown at first sign-in, to watch again (only when one is set) */}
+      <div style={{ marginTop: -8, marginBottom: 18 }}><WelcomeReplay name={user && user.name} Z={Z} font={font}/></div>
 
       {onSwitchToDesktop && (
         <button

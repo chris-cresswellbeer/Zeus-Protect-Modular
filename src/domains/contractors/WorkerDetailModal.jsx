@@ -1,4 +1,5 @@
 import React from "react";
+import { notify, ask } from "../../shared/Feedback";
 import { useWindowWidth } from "../../shared/hooks";
 import { Avatar } from "../../shared/primitives";
 import { sb } from "../../lib/supabase";
@@ -105,15 +106,17 @@ function WorkerDetailModal({ worker, companyId, contractorInductions, setContrac
                               setCertUploading(ct.id);
                               const path=`contractor_certs/${wid}_${ct.id}_${file.name.replace(/[^a-zA-Z0-9._-]/g,"_")}`;
                               const { error } = await sb.storage.upload("documents",path,file);
-                              if (error) { console.error("Cert upload failed:", error); alert("Upload failed: " + error); setCertUploading(null); return; }
+                              if (error) { console.error("Cert upload failed:", error); notify("Upload failed: " + error, { kind: "error" }); setCertUploading(null); return; }
                               const fileUrl=sb.storage.getPublicUrl("documents",path);
-                              const issued=prompt("Issue date (YYYY-MM-DD):","")||"";
-                              const expiry=prompt("Expiry date (YYYY-MM-DD):","")||"";
+                              const input=e.target;
+                              const v=await ask({ title:`${ct.label||ct.name||"Certificate"} dates`, message:`"${file.name}" has been uploaded. Add its dates so the portal can warn you before it expires (leave blank if not known).`, ok:"Save", cancel:"Skip dates",
+                                fields:[{ id:"issued", label:"Issue date", type:"date" },{ id:"expiry", label:"Expiry date", type:"date" }] });
+                              const issued=(v&&v.issued)||"", expiry=(v&&v.expiry)||"";
                               const newCerts={...certs,[ct.id]:{fileName:file.name,fileUrl,issuedDate:issued,expiryDate:expiry}};
                               setContractorCerts(p=>({...p,[wid]:newCerts}));
                               dbSaveContractorCerts(wid,newCerts);
                               setCertUploading(null);
-                              e.target.value="";
+                              input.value="";
                             }}/>
                         </label>
                       )}

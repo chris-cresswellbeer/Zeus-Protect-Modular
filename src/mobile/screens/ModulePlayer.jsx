@@ -4,7 +4,7 @@
 //
 // The single meaningful departure from the desktop player in App.jsx is the
 // quiz: the desktop stacks every question on one scroll, which does not survive
-// a phone. Scoring is unchanged — 70% to pass, unlimited retakes, answer review.
+// a phone. Scoring uses the module's pass mark (70% unless set otherwise), unlimited retakes, answer review.
 //
 // Slide progress is reported upward on every step so it can be persisted and
 // resumed after the app is killed.
@@ -13,9 +13,11 @@ import React from "react";
 import { Screen, PrimaryButton, GhostButton } from "../ui";
 import { sanitizeHtml } from "../../lib/sanitizeHtml";
 import { isHtmlContent, ensureRteStyles } from "../../domains/training/slideTextUtils";
+import { useFileUrl } from "../../lib/fileAccess";
+import { videoSource } from "../../lib/videoLink";
 
 // Must match the desktop pass mark in App.jsx submitQuiz (also 70).
-const PASS_MARK = 70;
+import { PASS_MARK, passMarkOf } from "../../domains/training/completion";
 
 function ModulePlayer({
   mod, user, initialSlide = 0, offline,
@@ -24,6 +26,7 @@ function ModulePlayer({
 }) {
   const slides = mod.content || [];
   const quiz = mod.quiz || [];
+  const passMark = passMarkOf(mod);   // this module's pass mark (default 70%)
 
   // stage: "intro" | "slide" | "quiz" | "result"
   const [stage, setStage] = React.useState(initialSlide > 0 ? "slide" : "intro");
@@ -55,7 +58,7 @@ function ModulePlayer({
       let correct = 0;
       quiz.forEach((q, i) => { if (next[i] === q.answer) correct++; });
       const pct = Math.round((correct / quiz.length) * 100);
-      const passed = pct >= PASS_MARK;
+      const passed = pct >= passMark;
       const record = {
         moduleId: mod.id,
         score: pct,
@@ -99,7 +102,7 @@ function ModulePlayer({
             }}>
               <p style={{ margin: 0, color: Z.slate, lineHeight: 1.7, fontSize: 13.5 }}>
                 Take your time — each slide saves as you go. You need{" "}
-                <strong style={{ color: Z.green }}>{PASS_MARK}% or above</strong> on the knowledge
+                <strong style={{ color: Z.green }}>{passMark}% or above</strong> on the knowledge
                 check to earn your Zeus certificate, and you can retake it as many times as you need.
               </p>
             </div>
@@ -241,8 +244,8 @@ function ModulePlayer({
             <p style={{ color: Z.muted, margin: "0 0 20px", fontSize: 13.5 }}>
               {result.correct} of {result.total} correct
               {result.passed
-                ? ` — comfortably above the ${PASS_MARK}% pass mark.`
-                : ` — you need ${PASS_MARK}% to pass. Have another go whenever you're ready.`}
+                ? ` — comfortably above the ${passMark}% pass mark.`
+                : ` — you need ${passMark}% to pass. Have another go whenever you're ready.`}
             </p>
 
             {result.passed && (
@@ -305,21 +308,30 @@ function slideImages(slide) {
 
 // No loading="lazy": inside the player's fixed, nested scroll container some
 // Android WebViews never fire the intersection that triggers the load.
-function SlideImage({ src, Z }) {
+function SlideImage({ src: stored, Z, deck }) {
+  // Private files (new sign-in) need a signed link first; null while it's fetched,
+  // so the image isn't tried with the old link and wrongly shown as failed.
+  const src = useFileUrl(stored);
   const [failed, setFailed] = React.useState(false);
   React.useEffect(() => setFailed(false), [src]);
+  if (!src) return null;
   if (failed) return <MediaFallback kind="image" src={src} Z={Z} />;
   return (
     <img
       src={src} alt="" decoding="async" onError={() => setFailed(true)}
-      style={{ width: "100%", maxHeight: 320, objectFit: "contain", display: "block" }}
+      style={deck
+        // a whole PowerPoint slide: as large as the screen allows (also in landscape)
+        ? { width: "100%", maxHeight: "calc(100vh - 170px)", objectFit: "contain", display: "block", background: "#fff" }
+        : { width: "100%", maxHeight: 320, objectFit: "contain", display: "block" }}
     />
   );
 }
 
-function SlideVideo({ src, Z }) {
+function SlideVideo({ src: stored, Z }) {
+  const src = useFileUrl(stored);   // signed link for private files (see SlideImage)
   const [failed, setFailed] = React.useState(false);
   React.useEffect(() => setFailed(false), [src]);
+  if (!src) return null;
   if (failed) return <div style={{ marginTop: 16 }}><MediaFallback kind="video" src={src} Z={Z} /></div>;
   // .mov/HEVC from an iPhone plays in Safari but not Chrome on Android — the
   // fallback makes that visible instead of an empty black box.
@@ -331,6 +343,19 @@ function SlideVideo({ src, Z }) {
         background: "#000", border: `1px solid ${Z.borderMd}`,
       }}
     />
+  );
+}
+
+// A YouTube / Vimeo / Stream link (lib/videoLink.js) — embedded player, 16:9.
+function SlideVideoEmbed({ src, title, Z }) {
+  return (
+    <div data-testid="slide-video-embed" style={{ marginTop: 16, borderRadius: 14, overflow: "hidden", background: "#000", border: `1px solid ${Z.borderMd}` }}>
+      <div style={{ position: "relative", paddingTop: "56.25%" }}>
+        <iframe src={src} title={title || "Training video"} loading="lazy" allowFullScreen
+          allow="autoplay; encrypted-media; picture-in-picture; fullscreen" referrerPolicy="strict-origin-when-cross-origin"
+          style={{ position: "absolute", inset: 0, width: "100%", height: "100%", border: 0 }} />
+      </div>
+    </div>
   );
 }
 
@@ -359,15 +384,20 @@ function SlideCard({ slide, Z, font, onHotspotStatus }) {
 
   const images = slideImages(slide);
   const isHotspot = !!(slide.hotspots && slide.hotspots.length > 0);
-  const videoSrc = slide.video && (slide.video.url || slide.video.data);
+  const deckFirst = !!((slide.images || [])[0] && slide.images[0].deck) && images.length > 0;
+  const vs = videoSource(slide.video);                // uploaded file, direct link, or embed
+  const videoSrc = vs && vs.src;
 
+  const deck = deckFirst && !isHotspot;               // imported PowerPoint slide: show it large
   return (
-    <div style={{
-      background: `linear-gradient(135deg,${Z.navyMd},${Z.navy})`, borderRadius: 20,
-      padding: "22px 20px", border: `1px solid ${Z.border}`, boxShadow: "0 8px 40px rgba(0,0,0,.4)",
+    <div data-testid="slide-card" data-deck={deck ? "1" : undefined} style={{
+      background: `linear-gradient(135deg,${Z.navyMd},${Z.navy})`, borderRadius: deck ? 16 : 20,
+      padding: deck ? "12px 8px 14px" : "22px 20px", border: `1px solid ${Z.border}`, boxShadow: "0 8px 40px rgba(0,0,0,.4)",
     }}>
       {slide.heading && (
-        <h2 style={{
+        <h2 style={deck ? {
+          fontSize: 14, fontWeight: 800, color: Z.muted, margin: "0 6px 10px", lineHeight: 1.25,
+        } : {
           fontSize: 20, fontWeight: 900, color: Z.white, margin: "0 0 15px",
           letterSpacing: -0.4, paddingBottom: 13,
           borderBottom: `1px solid ${Z.borderMd}`, lineHeight: 1.2,
@@ -375,14 +405,36 @@ function SlideCard({ slide, Z, font, onHotspotStatus }) {
           {slide.heading}
         </h2>
       )}
-      {slide.text && <SlideBody text={slide.text} Z={Z} />}
-
-      {videoSrc && (
-        <SlideVideo src={videoSrc} Z={Z} />
+      {/* A whole PowerPoint slide (imported from PDF) comes first, like the desktop player. */}
+      {!isHotspot && deckFirst && (
+        <div style={{ display: "grid", gap: 10, marginBottom: slide.text || videoSrc ? 16 : 0 }}>
+          {images.map((src, i) => (
+            <button
+              key={i}
+              onClick={() => setZoom(src)}
+              aria-label="View full size"
+              style={{
+                padding: 0, border: `1px solid ${Z.borderMd}`, borderRadius: 14,
+                overflow: "hidden", background: Z.overlay, cursor: "zoom-in", lineHeight: 0,
+              }}
+            >
+              <SlideImage src={src} Z={Z} deck />
+            </button>
+          ))}
+          <div data-testid="deck-hint" style={{ fontSize: 11.5, color: Z.muted, textAlign: "center", marginTop: -2 }}>
+            Tap the slide to enlarge it, or turn your phone sideways.
+          </div>
+        </div>
       )}
 
+      {slide.text && (deck ? <div style={{ padding: "0 8px" }}><SlideBody text={slide.text} Z={Z} /></div> : <SlideBody text={slide.text} Z={Z} />)}
+
+      {vs && vs.kind === "embed" && <SlideVideoEmbed src={vs.src} title={slide.video.name} Z={Z} />}
+      {vs && vs.kind === "file" && <SlideVideo src={vs.src} Z={Z} />}
+      {vs && vs.kind === "unknown" && <div style={{ marginTop: 16 }}><MediaFallback kind="video" src={vs.src} Z={Z} /></div>}
+
       {/* Plain images are hidden on a hotspot slide — the activity owns the image. */}
-      {!isHotspot && images.length > 0 && (
+      {!isHotspot && images.length > 0 && !deckFirst && (
         <div style={{ display: "grid", gap: 10, marginTop: slide.text || videoSrc ? 16 : 0 }}>
           {images.map((src, i) => (
             <button
@@ -399,6 +451,7 @@ function SlideCard({ slide, Z, font, onHotspotStatus }) {
           ))}
         </div>
       )}
+
 
       {isHotspot && images.length > 0 && (
         <MobileHotspot

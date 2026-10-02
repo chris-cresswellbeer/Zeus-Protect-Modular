@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { E } from "../../lib/emoji";
 import { buildTrainingMatrix, exportTrainingMatrixXlsx, MATRIX_STATUS, matrixCellText } from "./trainingMatrix";
+import { useRemembered } from "../../lib/remembered";
 
 /**
  * TrainingMatrixView — Reports → "Training Matrix".
@@ -10,13 +11,13 @@ import { buildTrainingMatrix, exportTrainingMatrixXlsx, MATRIX_STATUS, matrixCel
  * Read-only: nothing here changes any data.
  */
 function TrainingMatrixView({ staff, modules, assigns, comps, Z, font }) {
-  const [manager, setManager] = useState("all");
-  const [department, setDepartment] = useState("all");
+  const [manager, setManager] = useRemembered("matrix.manager", "all");
+  const [department, setDepartment] = useRemembered("matrix.department", "all");
   const [search, setSearch] = useState("");
-  const [includeLeavers, setIncludeLeavers] = useState(false);
-  const [onlyNonCompliant, setOnlyNonCompliant] = useState(false);
-  const [allModules, setAllModules] = useState(false);
-  const [showDates, setShowDates] = useState(false);
+  const [includeLeavers, setIncludeLeavers] = useRemembered("matrix.leavers", false);
+  const [onlyNonCompliant, setOnlyNonCompliant] = useRemembered("matrix.nonCompliant", false);
+  const [allModules, setAllModules] = useRemembered("matrix.allModules", false);
+  const [showDates, setShowDates] = useRemembered("matrix.dates", false);
 
   const filter = { manager, department, search, includeLeavers, onlyNonCompliant, allModules };
   const matrix = useMemo(() => buildTrainingMatrix({ staff, modules, assigns, comps, filter }),
@@ -133,7 +134,7 @@ function TrainingMatrixView({ staff, modules, assigns, comps, Z, font }) {
                   <td style={{ textAlign: "center", fontWeight: 800, color: pctColor(r.pct), borderBottom: `1px solid ${Z.border}`, padding: "0 6px" }}>{r.pct === null ? "—" : `${r.pct}%`}</td>
                   {r.cells.map((c, ci) => {
                     const m = cols[ci];
-                    const tip = `${r.user.name} — ${m.title}\n${MATRIX_STATUS[c.status].label}${c.completed ? `\nCompleted ${c.completed}${c.score != null ? ` (${c.score}%)` : ""}` : ""}${c.expires ? `\nExpires ${c.expires}` : ""}${c.status !== "na" && !c.assigned ? "\n(completed but not assigned)" : ""}`;
+                    const tip = `${r.user.name} — ${m.title}\n${MATRIX_STATUS[c.status].label}${c.completed ? `\nCompleted ${c.completed}${c.recorded ? " (recorded — done before the portal)" : c.score != null ? ` (${c.score}%)` : ""}` : ""}${c.expires ? `\nExpires ${c.expires}` : ""}${c.status !== "na" && !c.assigned ? "\n(completed but not assigned)" : ""}`;
                     return (
                       <td key={m.id} title={tip} data-status={c.status} style={{ padding: 2, borderBottom: `1px solid ${Z.border}` }}>
                         <div style={{ height: 26, borderRadius: 5, display: "flex", alignItems: "center", justifyContent: "center", fontSize: showDates ? 10 : 13, whiteSpace: "nowrap", opacity: c.status !== "na" && !c.assigned ? 0.6 : 1, ...cellStyle(c.status) }}>
@@ -156,7 +157,7 @@ function TrainingMatrixView({ staff, modules, assigns, comps, Z, font }) {
         </div>
       )}
       <p style={{ fontSize: 11, color: Z.muted, marginTop: 10 }}>
-        Compliance = assigned modules that are complete and in date ÷ assigned modules. Faded cells were completed without being assigned and don't count. Hover a cell for dates and scores.
+        Compliance = assigned modules that are complete and in date ÷ assigned modules. Faded cells were completed without being assigned and don't count. Hidden modules aren't shown or counted. Hover a cell for dates and scores.
       </p>
     </div>
   );

@@ -1,10 +1,12 @@
 import React from "react";
+import { ask } from "../../shared/Feedback";
 import { useState, useEffect, useRef } from "react";
 import { useWindowWidth } from "../../shared/hooks";
 import { E } from "../../lib/emoji";
 import { ACCEPT_IMAGES } from "../../lib/constants";
 import { InvestigationDashboard } from "./InvestigationDashboard";
 import { mergeInvestigation, changedSince } from "./investigationMerge";
+import { useFormGuard, DraftBanner } from "../../lib/unsaved";
 
 /**
  * InvestigationTab — admin incident investigations (root cause + corrective actions).
@@ -96,6 +98,12 @@ function InvestigationTab({ incidents, setIncidents, staff, investigations, setI
     }
   },[liveCopy]); // eslint-disable-line
 
+  // Unsaved-changes warning + draft on this device (lib/unsaved.jsx). "Unsaved" = differs
+  // from the version last read or saved (baseRef), so other people's saves don't count.
+  const invGuard = useFormGuard({ key: `investigation.${activeId || "none"}`, label: "the investigation you're editing",
+    active: view === "detail" && !!invForm, value: invForm, onRestore: v => setInvForm({ ...v }),
+    changed: view === "detail" && !!invForm && changedSince(baseRef.current || { ...BLANK_INV, photos: [], actions: [] }, invForm) });
+
   // Commit a version into App state (→ auto-saved to Supabase). `theirs` is the
   // database copy the person has now seen, so App.jsx won't merge it in again.
   function commitInvestigation(data, theirs) {
@@ -104,6 +112,7 @@ function InvestigationTab({ incidents, setIncidents, staff, investigations, setI
     baseRef.current = data;
     setInvForm({...data});
     setConflict(null);
+    invGuard.saved();
     setSaved(true);
     setTimeout(()=>setSaved(false), 2000);
   }
@@ -129,6 +138,7 @@ function InvestigationTab({ incidents, setIncidents, staff, investigations, setI
     baseRef.current = theirs;
     setInvForm(theirs ? {...theirs} : {...BLANK_INV, photos:[], actions:[]});
     setConflict(null);
+    invGuard.saved();
   }
 
   // Builds an HTML investigation report and downloads it as a .html file (Blob + <a download>),
@@ -380,6 +390,7 @@ function InvestigationTab({ incidents, setIncidents, staff, investigations, setI
       {/* Detail / edit view */}
       {view==="detail" && inc && invForm && (
         <div>
+          <DraftBanner guard={invGuard} Z={Z} font={font} what="this investigation"/>
           {/* Someone else saved this investigation while it was open here */}
           {!conflict && changedSince(baseRef.current, investigations[activeId]) && (
             <div role="alert" style={{background:"rgba(245,158,11,0.12)",border:"1px solid rgba(245,158,11,0.45)",borderRadius:12,padding:"12px 16px",marginBottom:16,display:"flex",gap:12,alignItems:"center",flexWrap:"wrap"}}>
@@ -648,12 +659,18 @@ function InvestigationTab({ incidents, setIncidents, staff, investigations, setI
               <div style={{background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:10,padding:"12px 14px",marginBottom:16}}>
                 <div style={{fontSize:12,fontWeight:800,color:"#f87171",marginBottom:6}}>You both changed:</div>
                 {conflict.conflicts.map((c,i)=>{
-                  const show = v => { const t = v==null||v==="" ? "(blank)" : typeof v==="object" ? JSON.stringify(v) : String(v); return t.length>140 ? t.slice(0,140)+"…" : t; };
+                  // Long text: start the snippet just before where the two versions differ,
+                  // so "Theirs" and "Yours" don't look identical.
+                  const txt = v => v==null||v==="" ? "(blank)" : typeof v==="object" ? JSON.stringify(v) : String(v);
+                  const tA = txt(c.theirs), tB = txt(c.mine);
+                  let common = 0; while (common < tA.length && common < tB.length && tA[common] === tB[common]) common++;
+                  const from = common > 60 ? common - 40 : 0;
+                  const show = t => { const u = (from ? "…" : "") + t.slice(from); return u.length>160 ? u.slice(0,160)+"…" : u; };
                   return (
                     <div key={i} style={{fontSize:12,color:Z.white,marginBottom:8}}>
                       <div style={{fontWeight:700}}>{c.label}</div>
-                      <div style={{color:Z.muted}}>Theirs: <span style={{color:Z.white}}>{show(c.theirs)}</span></div>
-                      <div style={{color:Z.muted}}>Yours: <span style={{color:Z.white}}>{show(c.mine)}</span></div>
+                      <div style={{color:Z.muted}}>Theirs: <span style={{color:Z.white}}>{show(tA)}</span></div>
+                      <div style={{color:Z.muted}}>Yours: <span style={{color:Z.white}}>{show(tB)}</span></div>
                     </div>
                   );
                 })}
@@ -667,11 +684,11 @@ function InvestigationTab({ incidents, setIncidents, staff, investigations, setI
                 style={{background:`linear-gradient(135deg,${Z.accent},${Z.blue})`,color:"#fff",border:"none",borderRadius:10,padding:"11px 16px",fontWeight:800,cursor:"pointer",fontFamily:font,fontSize:13,textAlign:"left"}}>
                 {conflict.conflicts.length ? "Combine — keep their other changes, use mine where we both changed" : "Combine both sets of changes and save"}
               </button>
-              <button onClick={()=>{ if (window.confirm("Save your version and discard the other person's changes listed above?")) commitInvestigation(invForm, conflict.theirs); }}
+              <button onClick={async()=>{ if (await ask({ title: "Keep your version?", message: "Save your version and discard the other person's changes listed above?", ok: "Save mine", danger: true })) commitInvestigation(invForm, conflict.theirs); }}
                 style={{background:"transparent",color:"#f87171",border:"1px solid rgba(239,68,68,0.4)",borderRadius:10,padding:"10px 16px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:13,textAlign:"left"}}>
                 Overwrite with my version (their changes are lost)
               </button>
-              <button onClick={()=>{ if (window.confirm("Discard your unsaved changes and load the latest saved version?")) loadTheirVersion(conflict.theirs); }}
+              <button onClick={async()=>{ if (await ask({ title: "Load their version?", message: "Discard your unsaved changes and load the latest saved version?", ok: "Discard mine", danger: true })) loadTheirVersion(conflict.theirs); }}
                 style={{background:"transparent",color:Z.white,border:`1px solid ${Z.borderMd}`,borderRadius:10,padding:"10px 16px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:13,textAlign:"left"}}>
                 Discard my changes and load their version
               </button>

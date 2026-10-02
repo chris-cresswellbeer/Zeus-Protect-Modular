@@ -5,6 +5,8 @@
 
 import React from "react";
 import { Screen, SectionLabel, PrimaryButton } from "../ui";
+import { MyBundles } from "../../domains/documents/DocBundles";
+import { bundleNamesOf } from "../../domains/documents/bundles";
 
 // Same icon mapping as the desktop Documents tab.
 const EXT_ICONS = {
@@ -15,13 +17,15 @@ const EXT_ICONS = {
 // Props: docs (all documents), required (docs assigned to this user), acknowledgements
 // ({[docId]:{date}} for THIS user), onAcknowledge(doc) → queued write, onPreview(doc)
 // → opens the shared PreviewModal via App.jsx. The file-type icon comes from the file
-// name's extension, falling back to doc.ext.
-function Documents({ docs, required, acknowledgements, onAcknowledge, onPreview, Z, font }) {
+// name's extension, falling back to doc.ext. bundles = the document bundles given to
+// this user (progress cards at the top, and a bundle label on each document in one).
+function Documents({ docs, required, acknowledgements, onAcknowledge, onPreview, bundles = [], userId, Z, font }) {
   const unread = required.filter((d) => !acknowledgements[d.id]);
   const others = docs.filter((d) => !required.find((r) => r.id === d.id));
 
   return (
     <Screen Z={Z}>
+      <MyBundles bundles={bundles} userId={userId} docs={docs} acks={{ [userId]: acknowledgements }} Z={Z} font={font} compact />
       {required.length > 0 && (
         <>
           <SectionLabel Z={Z} color={unread.length ? Z.gold : Z.green}>
@@ -41,6 +45,9 @@ function Documents({ docs, required, acknowledgements, onAcknowledge, onPreview,
                     <span style={{ fontSize: 26, flexShrink: 0 }}>{EXT_ICONS[ext] || "📄"}</span>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 14.5, fontWeight: 800, color: Z.white }}>{d.title}</div>
+                      {bundleNamesOf(bundles, d.id).length > 0 && (
+                        <div style={{ fontSize: 11.5, color: "#60a5fa", fontWeight: 700, marginTop: 2 }}>📚 {bundleNamesOf(bundles, d.id).join(", ")}</div>
+                      )}
                       <div style={{ fontSize: 11.5, color: Z.muted, marginTop: 2 }}>
                         Updated {d.date} · {d.size}{ext ? ` · ${ext}` : ""}
                       </div>

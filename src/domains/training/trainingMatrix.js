@@ -13,12 +13,14 @@
  * A module completed WITHOUT being assigned still shows its real status (flag
  * `assigned:false`) — it just doesn't count towards that person's compliance.
  * Compliance = assigned modules that are valid or expiring ÷ assigned modules.
+ * Hidden modules (_hidden, retired in the Training Library) are never shown or counted.
  * (A major new module version clears completions, so those show as "missing".)
  *
  * exportTrainingMatrixXlsx() writes a 3-sheet workbook: the coloured matrix,
  * a filterable one-row-per-person-per-module detail list, and a per-module summary.
  * Pure JS — no React — so it can be tested on its own.
  */
+import { isPassed } from "./completion";
 import { getExpiryStatus, EXPIRY_WARNING_DAYS } from "../../lib/dates";
 import { buildXlsx, downloadBlob, colName } from "../../lib/xlsxWriter";
 
@@ -36,12 +38,14 @@ const fmtLong = d => { if (!d) return ""; const [y, m, day] = String(d).slice(0,
 function cellFor(user, mod, assigns, comps) {
   const assigned = (assigns[user.id] || []).map(String).includes(String(mod.id));
   const comp = (comps[user.id] || {})[mod.id];
-  if (!comp) return { status: assigned ? "missing" : "na", assigned };
+  if (!comp || !isPassed(comp, mod)) return { status: assigned ? "missing" : "na", assigned };
   const ex = mod.renewalMonths ? getExpiryStatus(comp.date, mod.renewalMonths) : null;
   return {
     status: ex ? (ex.status === "expired" ? "expired" : ex.status === "expiring" ? "expiring" : "valid") : "valid",
     assigned, completed: comp.date || "", expires: ex ? ex.expiryDate : "", daysLeft: ex ? ex.daysLeft : null,
-    score: comp.score, certId: comp.certId || "", version: comp.moduleVersion || null,
+    score: comp.recorded ? "Recorded" : comp.score, recorded: !!comp.recorded, certId: comp.certId || "", version: comp.moduleVersion || null,
+    how: comp.recorded ? (comp.recorded.session ? "Group session" : "Recorded by admin") : "Portal quiz",
+    evidence: comp.recorded ? ((comp.recorded.evidence || []).length ? "Yes" : "No") : "",
   };
 }
 
@@ -59,13 +63,15 @@ function buildTrainingMatrix({ staff, modules, assigns, comps, filter = {} }) {
     (!q || [u.name, u.jobTitle, u.manager, u.department].some(v => String(v || "").toLowerCase().includes(q))));
 
   // Columns: modules assigned to / completed by anyone shown (or every module).
+  // Hidden (retired) modules are left out entirely — they don't count towards
+  // anyone's compliance. Unhide a module in the Training Library to bring it back.
   const used = new Set();
   people.forEach(u => {
     (assigns[u.id] || []).forEach(id => used.add(String(id)));
     Object.keys(comps[u.id] || {}).forEach(id => used.add(String(id)));
   });
   const cols = (modules || [])
-    .filter(m => filter.allModules || used.has(String(m.id)))
+    .filter(m => !m._hidden && (filter.allModules || used.has(String(m.id))))
     .sort((a, b) => String(a.category || "").localeCompare(String(b.category || "")) || String(a.title).localeCompare(String(b.title)));
 
   let rows = people.map(u => {
@@ -157,7 +163,7 @@ function exportTrainingMatrixXlsx(matrix, { filterText = "", companyName = "Zeus
   s1.push([{ v: "* completed although not assigned — shown for information, not counted in compliance. Compliance = assigned modules complete and in date ÷ assigned modules.", s: { italic: true, color: "595959", size: 9 } }]);
 
   // ── Sheet 2: detail list ──
-  const dHead = ["Name", "Job title", "Line manager", "Department", "Module", "Category", "Renewal", "Assigned", "Status", "Completed", "Score %", "Expires", "Days left", "Certificate ID", "Module version"];
+  const dHead = ["Name", "Job title", "Line manager", "Department", "Module", "Category", "Renewal", "Assigned", "Status", "Completed", "Score %", "Expires", "Days left", "Certificate ID", "Module version", "How completed", "Evidence on file"];
   const s2 = [dHead.map(h => ({ v: h, s: head }))];
   rows.forEach(r => r.cells.forEach((c, ci) => {
     if (c.status === "na") return;
@@ -165,7 +171,8 @@ function exportTrainingMatrixXlsx(matrix, { filterText = "", companyName = "Zeus
     s2.push([r.user.name, r.user.jobTitle || "", r.user.manager || "", r.user.department || "", m.title, m.category || "", m.renewalLabel || (m.renewalMonths ? `${m.renewalMonths} months` : "No renewal"),
       c.assigned ? "Yes" : "No", { v: MATRIX_STATUS[c.status].label, s: { fill: MATRIX_STATUS[c.status].fill, color: MATRIX_STATUS[c.status].text } },
       fmtLong(c.completed), typeof c.score === "number" ? c.score : (c.score ? Number(c.score) || c.score : ""), fmtLong(c.expires),
-      c.daysLeft === null || c.daysLeft === undefined ? "" : c.daysLeft, c.certId || "", c.version || ""]);
+      c.daysLeft === null || c.daysLeft === undefined ? "" : c.daysLeft, c.certId || "", c.version || "", c.how || "",
+      c.evidence === "No" ? { v: "No", s: { fill: "FFEB9C", color: "9C5700" } } : (c.evidence || "")]);
   }));
 
   // ── Sheet 3: per-module summary ──
@@ -177,7 +184,7 @@ function exportTrainingMatrixXlsx(matrix, { filterText = "", companyName = "Zeus
     { name: "Training Matrix", rows: s1, merges, freeze: { row: 6, col: 1 }, landscape: true,
       cols: [26, 24, 20, 12, ...cols.map(() => 11.5)], rowHeights: { 0: 24, 2: 42, 4: 30, 5: 190 } },
     { name: "Detail", rows: s2, freeze: { row: 1, col: 1 }, autoFilter: `A1:${colName(dHead.length - 1)}${s2.length}`,
-      cols: [24, 24, 20, 16, 34, 20, 12, 10, 30, 12, 9, 12, 10, 18, 10] },
+      cols: [24, 24, 20, 16, 34, 20, 12, 10, 30, 12, 9, 12, 10, 18, 10, 18, 12] },
     { name: "By Module", rows: s3, freeze: { row: 1, col: 1 }, cols: [36, 22, 12, 14, 16, 10, 10, 14, 12] },
   ]);
   downloadBlob(blob, filename || `Training_Matrix_${today}.xlsx`);

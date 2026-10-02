@@ -3,6 +3,8 @@ import { Pill } from "../../shared/primitives";
 import { E } from "../../lib/emoji";
 import { sanitizeHtml } from "../../lib/sanitizeHtml";
 import { isHtmlContent, ensureRteStyles } from "./slideTextUtils";
+import { SlideVideo } from "../../shared/SlideVideo";
+import { isPassed, scoreText, recordedText, passMarkOf } from "./completion";
 
 /**
  * ModulePreviewModal — admin read-only preview of a training module
@@ -14,8 +16,7 @@ import { isHtmlContent, ensureRteStyles } from "./slideTextUtils";
  * Field-name tolerance: older modules may use `slides` instead of `content`,
  * `body` instead of `text`, `imageData`/`videoUrl` instead of `image`/`video` —
  * the fallbacks below handle both shapes.
- * NOTE: "Pass Mark" shows m.passMark||70, but the module player always uses 70%
- * (see submitQuiz in App.jsx) — a per-module pass mark is not yet enforced.
+ * "Pass Mark" is the module's own pass mark (passMarkOf: default 70%), used by both quiz players.
  */
 function ModulePreviewModal({ m, staff, assigns, comps, compHistory = [], moduleVersions = [], isMobile, setAtab, onClose, T, font }) {
   React.useEffect(() => { ensureRteStyles(); }, []);
@@ -59,7 +60,7 @@ function ModulePreviewModal({ m, staff, assigns, comps, compHistory = [], module
             <div>
               {m.description && <p style={{color:T.muted,fontSize:14,marginBottom:20,lineHeight:1.6}}>{m.description}</p>}
               <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:12,marginBottom:20}}>
-                {[{label:"Category",value:m.category||"—"},{label:"Duration",value:m.duration||"—"},{label:"Level",value:m.level||"—"},{label:"Pass Mark",value:`${m.passMark||70}%`},{label:"Renewal",value:m.renewalMonths?`Every ${m.renewalMonths} months`:"Not required"},{label:"Questions",value:`${quiz.length} multiple choice`}].map((row,i)=>(
+                {[{label:"Category",value:m.category||"—"},{label:"Duration",value:m.duration||"—"},{label:"Level",value:m.level||"—"},{label:"Pass Mark",value:`${passMarkOf(m)}%`},{label:"Renewal",value:m.renewalMonths?`Every ${m.renewalMonths} months`:"Not required"},{label:"Questions",value:`${quiz.length} multiple choice`}].map((row,i)=>(
                   <div key={i} style={{background:T.overlay,borderRadius:10,padding:"10px 14px",border:`1px solid ${T.border}`}}>
                     <div style={{fontSize:10,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:.5,marginBottom:3}}>{row.label}</div>
                     <div style={{fontSize:13,fontWeight:600,color:T.white}}>{row.value}</div>
@@ -93,7 +94,9 @@ function ModulePreviewModal({ m, staff, assigns, comps, compHistory = [], module
                     <div style={{display:"flex",flexWrap:"wrap",gap:10,marginTop:12}}>
                       {/* new images[] array */}
                       {(slides[previewSlide].images||[]).map((img,ii)=>(
-                        <img key={ii} src={img.url||img.data} alt="" style={{maxWidth:"100%",flex:"1 1 200px",borderRadius:10,objectFit:"contain",maxHeight:320}}/>
+                        <img key={ii} src={img.url||img.data} alt="" style={img.deck
+                          ? {width:"100%",borderRadius:10,objectFit:"contain",maxHeight:"60vh",background:"#fff"}
+                          : {maxWidth:"100%",flex:"1 1 200px",borderRadius:10,objectFit:"contain",maxHeight:320}}/>
                       ))}
                       {/* backwards compat: old single image field */}
                       {(slides[previewSlide].images||[]).length===0 && (slides[previewSlide].image?.data||slides[previewSlide].image?.url||slides[previewSlide].imageData) && (
@@ -101,7 +104,9 @@ function ModulePreviewModal({ m, staff, assigns, comps, compHistory = [], module
                       )}
                     </div>
                   )}
-                  {slides[previewSlide].videoUrl && <video controls style={{width:"100%",borderRadius:10,marginTop:12}}><source src={slides[previewSlide].videoUrl}/></video>}
+                  {slides[previewSlide].video
+                    ? <SlideVideo video={slides[previewSlide].video} Z={T} style={{marginTop:12}}/>
+                    : slides[previewSlide].videoUrl && <video controls style={{width:"100%",borderRadius:10,marginTop:12}}><source src={slides[previewSlide].videoUrl}/></video>}
                 </div>
                 <div style={{display:"flex",gap:6,marginTop:12,overflowX:"auto",paddingBottom:4}}>
                   {slides.map((_,i)=>(<button key={i} onClick={()=>setPreviewSlide(i)} style={{flexShrink:0,width:44,height:32,borderRadius:6,border:`2px solid ${previewSlide===i?T.accent:T.border}`,background:previewSlide===i?"rgba(37,99,235,0.15)":T.overlay,cursor:"pointer",fontSize:10,color:previewSlide===i?T.accentLt:T.muted,fontWeight:previewSlide===i?700:400}}>{i+1}</button>))}
@@ -117,8 +122,8 @@ function ModulePreviewModal({ m, staff, assigns, comps, compHistory = [], module
             const hist = compHistory.filter(h=>String(h.module_id)===String(m.id));
             const nameOf = uid => (staff.find(u=>String(u.id)===String(uid))||{}).name || `User ${uid}`;
             const rows = [];
-            staff.forEach(u=>{ const c=(comps[u.id]||{})[m.id]; if(c) rows.push({uid:u.id,name:u.name,ver:c.moduleVersion||1,date:c.date,score:c.score,current:true}); });
-            hist.forEach(h=>{ if(!rows.some(r=>String(r.uid)===String(h.user_id)&&r.date===h.date&&r.ver===(h.module_version||1))) rows.push({uid:h.user_id,name:nameOf(h.user_id),ver:h.module_version||1,date:h.date,score:h.score,current:false}); });
+            staff.forEach(u=>{ const c=(comps[u.id]||{})[m.id]; if(c) rows.push({uid:u.id,name:u.name,ver:c.moduleVersion||1,date:c.date,score:c.score,recorded:c.recorded,current:true}); });
+            hist.forEach(h=>{ if(!rows.some(r=>String(r.uid)===String(h.user_id)&&r.date===h.date&&r.ver===(h.module_version||1))) rows.push({uid:h.user_id,name:nameOf(h.user_id),ver:h.module_version||1,date:h.date,score:h.score,recorded:h.recorded,current:false}); });
             rows.sort((a,b)=>String(b.date).localeCompare(String(a.date)));
             const cell = {padding:"7px 8px",borderBottom:`1px solid ${T.border}`,fontSize:12};
             return (
@@ -140,7 +145,7 @@ function ModulePreviewModal({ m, staff, assigns, comps, compHistory = [], module
                         <td style={{...cell,color:T.white,fontWeight:600}}>{r.name}</td>
                         <td style={{...cell,color:r.ver===curVer?T.green:T.gold,fontWeight:700}}>v{r.ver}</td>
                         <td style={{...cell,color:T.muted}}>{r.date}</td>
-                        <td style={{...cell,color:r.score>=70?T.green:T.amber,fontWeight:700}}>{r.score}%</td>
+                        <td title={r.recorded?recordedText(r):undefined} style={{...cell,color:isPassed(r)?T.green:T.amber,fontWeight:700}}>{scoreText(r)}</td>
                         <td style={{...cell,color:T.muted}}>{r.current?"Current":"Earlier"}</td>
                       </tr>))}</tbody>
                   </table>

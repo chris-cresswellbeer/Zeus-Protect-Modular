@@ -1,7 +1,11 @@
 import { useState } from "react";
+import { isPassed, scoreText } from "../training/completion";
+import { EvidenceLinks } from "../training/TrainingEvidence";
+import { evidenceLabel } from "../training/evidence";
 import { HelpTip } from "../../shared/HelpTip";
 import { getExpiryStatus } from "../../lib/dates";
 import { teamOf, normName } from "./team";
+import { E } from "../../lib/emoji";
 
 /**
  * MyTeamTab — the "My Team" tab for users with role "manager".
@@ -26,7 +30,7 @@ function summarise(u, ctx) {
   const modules = mods.map(m => {
     const rec = c[m.id];
     let status = "not_started", ex = null;
-    if (rec && rec.score >= 70) {
+    if (isPassed(rec)) {
       ex = m.renewalMonths ? getExpiryStatus(rec.date, m.renewalMonths) : null;
       status = !ex || ex.status === "valid" ? "valid" : ex.status;   // valid | expiring | expired
     } else if (rec) status = "failed";
@@ -116,7 +120,8 @@ function MemberDetail({ u, s, allModules, assigned, onAssign, onSignOffDse, onSi
         return (
           <div key={m.id} style={row}>
             <span style={{ fontSize: 13, color: Z.white, fontWeight: 600, flex: 1, minWidth: 180 }}>{m.icon} {m.title}</span>
-            <span style={{ fontSize: 12, color: Z.muted }}>{rec ? `${rec.score}% · ${rec.date}${rec.moduleVersion ? ` · v${rec.moduleVersion}` : ""}` : ""}{ex && ex.expiryDate ? ` · expires ${ex.expiryDate}` : ""}</span>
+            <span style={{ fontSize: 12, color: Z.muted }}>{rec ? `${scoreText(rec)} · ${rec.date}${rec.moduleVersion ? ` · v${rec.moduleVersion}` : ""}` : ""}{ex && ex.expiryDate ? ` · expires ${ex.expiryDate}` : ""}</span>
+            {rec && rec.recorded && (rec.recorded.evidence || []).length > 0 && <EvidenceLinks evidence={rec.recorded.evidence} label={evidenceLabel(rec, 0)} Z={Z} />}
             <Badge text={st.label} color={col} Z={Z} />
           </div>
         );
@@ -160,7 +165,7 @@ function MemberDetail({ u, s, allModules, assigned, onAssign, onSignOffDse, onSi
   );
 }
 
-function MyTeamTab({ manager, users, allModules, assigns, comps, docs, docAssignments, docAcknowledgements, dseReports, adminResponses, investigations, onAssign, onSignOffDse, onSignOffAction, Z, font }) {
+function MyTeamTab({ manager, users, allModules, assigns, comps, docs, docAssignments, docAcknowledgements, dseReports, adminResponses, investigations, onAssign, onSignOffDse, onSignOffAction, onGroupSession, onSessions, Z, font }) {
   const [openId, setOpenId] = useState(null);
   const team = teamOf(manager, users);
   const ctx = { allModules, assigns, comps, docs, docAssignments, docAcknowledgements, dseReports, adminResponses, investigations };
@@ -179,7 +184,19 @@ function MyTeamTab({ manager, users, allModules, assigns, comps, docs, docAssign
   return (
     <div>
       <h2 style={{ fontSize: 22, fontWeight: 900, letterSpacing: -.5, margin: "0 0 4px" }}>My Team <HelpTip dark={true} text="Everyone whose Line Manager is set to your name. You can see their training, required reading, DSE and corrective actions, assign them training, and sign off DSE issues and corrective actions. Every assignment and sign-off is recorded in the audit trail." /></h2>
-      <p style={{ color: Z.muted, fontSize: 13, margin: "0 0 20px" }}>Your team's H&S compliance. Click a person to see details, assign training or sign things off.</p>
+      <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", margin: "0 0 20px" }}>
+        <p style={{ color: Z.muted, fontSize: 13, margin: 0, flex: 1, minWidth: 240 }}>Your team's H&S compliance. Click a person to see details, assign training or sign things off.</p>
+        {onGroupSession && team.length > 0 && (
+          <button onClick={onGroupSession} style={{ background: "rgba(37,99,235,0.12)", color: Z.accentLt, border: `1px solid ${Z.accent}55`, borderRadius: 10, padding: "8px 16px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: font }}>
+            {E("👥 ", "")}Record a group session
+          </button>
+        )}
+        {onSessions && team.length > 0 && (
+          <button onClick={onSessions} style={{ background: Z.overlay, color: Z.white, border: `1px solid ${Z.borderMd}`, borderRadius: 10, padding: "8px 16px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: font }}>
+            {E("📋 ", "")}Group session records
+          </button>
+        )}
+      </div>
       {team.length === 0 ? (
         <div style={{ background: cardBg, border: `1px solid ${Z.border}`, borderRadius: 16, padding: 24, color: Z.muted, fontSize: 13 }}>
           Nobody has <b style={{ color: Z.white }}>{manager.name}</b> as their Line Manager yet. Ask an administrator to set it on your team members' staff records.

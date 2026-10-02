@@ -165,4 +165,4 @@ function downloadBlob(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
-export { buildXlsx, downloadBlob, colName };
+export { buildXlsx, downloadBlob, colName, zipStore };

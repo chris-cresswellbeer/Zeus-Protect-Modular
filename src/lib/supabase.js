@@ -43,8 +43,23 @@
  */
 
 // Project URL and public anon key — from Supabase dashboard → Project Settings → API.
-const SUPABASE_URL  = "https://aoahugfyswgcisfiosyn.supabase.co";
-const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFvYWh1Z2Z5c3dnY2lzZmlvc3luIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk5NjY1NzMsImV4cCI6MjA5NTU0MjU3M30.9mlm3pVxqwTgCdrdVF2ek1mBHro28P-MTaVjdAUvCIs";
+// A Netlify site can point the portal at a different project (e.g. the staging copy)
+// by setting VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in Site configuration →
+// Environment variables, then redeploying. Without them the live project is used.
+import { notify } from "../shared/Feedback";   // dbWrite error messages
+const LIVE_SUPABASE_URL  = "https://aoahugfyswgcisfiosyn.supabase.co";
+const LIVE_SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFvYWh1Z2Z5c3dnY2lzZmlvc3luIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk5NjY1NzMsImV4cCI6MjA5NTU0MjU3M30.9mlm3pVxqwTgCdrdVF2ek1mBHro28P-MTaVjdAUvCIs";
+const ENV = (typeof import.meta !== "undefined" && import.meta.env) || {};
+const SUPABASE_URL  = String(ENV.VITE_SUPABASE_URL || LIVE_SUPABASE_URL).replace(/\/+$/, "");
+const SUPABASE_ANON = ENV.VITE_SUPABASE_ANON_KEY || LIVE_SUPABASE_ANON;
+
+// Signed-in session token (Supabase Auth). When set, every request is made AS that
+// person, so the database's row-level security rules apply to them. Until then
+// (and always in the old "legacy" sign-in mode) the public anon key is used.
+// lib/auth.js calls setAccessToken() after sign-in / token refresh / sign-out.
+let accessToken = null;
+function setAccessToken(t) { accessToken = t || null; }
+const bearer = () => `Bearer ${accessToken || SUPABASE_ANON}`;
 
 // A request that never resolves used to hang the whole app: loadAll() awaits
 // Promise.allSettled over 34 reads and only flips dbReady in its finally block,
@@ -74,7 +89,7 @@ async function fetchWithTimeout(url, options = {}, ms = REQUEST_TIMEOUT_MS) {
  */
 const sb = (() => {
   // Standard headers Supabase requires on every REST call.
-  const h = { "Content-Type": "application/json", "apikey": SUPABASE_ANON, "Authorization": `Bearer ${SUPABASE_ANON}` };
+  const h = { "Content-Type": "application/json", "apikey": SUPABASE_ANON };
   // PostgREST exposes each table at /rest/v1/<table_name>.
   const rest = (table) => `${SUPABASE_URL}/rest/v1/${table}`;
 
@@ -97,7 +112,7 @@ const sb = (() => {
     if (filter) filters.push(filter);
     if (method === "POST" && upsertOn) filters.push(`on_conflict=${encodeURIComponent(upsertOn)}`);
     if (filters.length) url += "?" + filters.join("&");
-    const headers = { ...h };
+    const headers = { ...h, "Authorization": bearer() };
     // "Prefer" tells PostgREST how to behave:
     //   resolution=merge-duplicates → turn the INSERT into an UPSERT (update on key clash)
     //   return=minimal              → don't send the saved rows back (faster; we don't use them)
@@ -130,15 +145,28 @@ const sb = (() => {
    * Values passed to eq/neq/etc. are URL-encoded here, so callers pass raw values.
    * Remember all user_id columns are TEXT — pass String(id) to be safe.
    */
+  const PAGE_ROWS = 1000;   // Supabase's default "Max rows" per request
   const from = (table) => ({
     // select() fires the "all rows" GET immediately and returns that promise.
     // .eq()/.neq() are bolted onto the same promise object and fire a SECOND,
     // filtered GET — so `select().eq(...)` makes two requests (the unfiltered one
     // is simply ignored). Harmless for small tables; worth fixing (lazy request)
     // if a large table is ever queried this way.
+    // Supabase answers at most 1000 rows per request (Settings → API → Max rows), so
+    // the "all rows" read fetches page after page until a short page comes back.
+    // Without this, tables past 1000 rows silently lost their newest records on
+    // every load and refresh (e.g. training assignments for recently added staff).
     select: (cols = "*") => {
-      const base = { filter: `select=${cols}` };
-      const promise = q("GET", table, base);
+      const promise = (async () => {
+        const all = [];
+        for (let offset = 0; ; offset += PAGE_ROWS) {
+          const r = await q("GET", table, { filter: `select=${cols}&limit=${PAGE_ROWS}&offset=${offset}` });
+          if (r.error) return offset === 0 ? r : { data: all, error: r.error };
+          const rows = Array.isArray(r.data) ? r.data : [];
+          all.push(...rows);
+          if (rows.length < PAGE_ROWS || offset > 2000000) return { data: all, error: null };
+        }
+      })();
       promise.eq  = (col, val) => q("GET", table, { filter: `select=${cols}&${col}=eq.${encodeURIComponent(val)}` });
       promise.neq = (col, val) => q("GET", table, { filter: `select=${cols}&${col}=neq.${encodeURIComponent(val)}` });
       return promise;
@@ -155,6 +183,8 @@ const sb = (() => {
     // PostgREST refuses an unfiltered PATCH, so .eq() is required.
     update: (values) => ({
       eq: (col, val) => q("PATCH", table, { filter: `${col}=eq.${encodeURIComponent(val)}`, body: values }),
+      // match({user_id:"12", module_id:"m3"}) → update rows matching ALL the given columns.
+      match: (conditions) => q("PATCH", table, { filter: Object.entries(conditions).map(([k,v])=>`${k}=eq.${encodeURIComponent(v)}`).join("&"), body: values }),
     }),
     // PostgREST refuses DELETE without a filter, so you must pick one of these.
     delete: () => ({
@@ -184,7 +214,7 @@ const sb = (() => {
         method: "POST",
         headers: {
           "apikey": SUPABASE_ANON,
-          "Authorization": `Bearer ${SUPABASE_ANON}`,
+          "Authorization": bearer(),
           "Content-Type": contentType,
           "x-upsert": "true",
           "Cache-Control": "3600",
@@ -199,7 +229,7 @@ const sb = (() => {
     remove: async (bucket, paths) => {
       const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${bucket}`, {
         method: "DELETE",
-        headers: { "apikey": SUPABASE_ANON, "Authorization": `Bearer ${SUPABASE_ANON}`, "Content-Type": "application/json" },
+        headers: { "apikey": SUPABASE_ANON, "Authorization": bearer(), "Content-Type": "application/json" },
         body: JSON.stringify({ prefixes: paths }),
       });
       return { error: res.ok ? null : await res.text() };
@@ -251,10 +281,10 @@ async function dbWrite(promise, label, opts = {}) {
   if (error) {
     console.error(`[dbWrite] Save failed${label ? ` [${label}]` : ""}:`, error);
     if (opts.alertOnError) {
-      alert(`Failed to save${label ? ` ${label}` : ""}. Your changes may not have been saved.\n\n${error}`);
+      notify(`Failed to save${label ? ` ${label}` : ""}. Your changes may not have been saved.\n${error}`, { kind: "error" });
     }
   }
   return !error;
 }
 
-export { SUPABASE_URL, SUPABASE_ANON, sb, hashPassword, DEFAULT_HASH, dbWrite };
+export { SUPABASE_URL, SUPABASE_ANON, sb, hashPassword, DEFAULT_HASH, dbWrite, setAccessToken, bearer };

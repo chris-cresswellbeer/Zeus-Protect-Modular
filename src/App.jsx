@@ -85,8 +85,23 @@ const LazyMyTeamTab = React.lazy(() => import("./domains/manager/MyTeamTab").the
 const LazyAuditTrailTab = React.lazy(() => import("./domains/audit/AuditTrailTab").then(m => ({ default: m.AuditTrailTab })));
 const LazyCoshhTab = React.lazy(() => import("./domains/coshh/CoshhTab").then(m => ({ default: m.CoshhTab })));
 import { DocCard } from "./domains/documents/DocCard";
+import { DocBundles, MyBundles } from "./domains/documents/DocBundles";
+import { SlideVideo } from "./shared/SlideVideo";
+import { parseRoute, routeHash, routeAllowed } from "./lib/router";
+import { notify, ask, notifyAfterReload, setFeedbackTheme } from "./shared/Feedback";
+import { confirmLeave, unsavedLabels, setDraftUser } from "./lib/unsaved";
+import { mapBundleRows, bundleRow, addAssignments, removeAssignments, bundlesFor, bundleNamesOf, withoutDoc, withoutMember } from "./domains/documents/bundles";
 import { ExternalCertsSection } from "./domains/documents/ExternalCertsSection";
 import { PreviewModal } from "./domains/documents/PreviewModal";
+import { openFile } from "./lib/fileAccess";
+import { ScrollNav } from "./shared/ScrollNav";
+import { BackupPanel, BACKUP_DUE_DAYS } from "./domains/audit/BackupPanel";
+import { lastBackupAt } from "./lib/backup";
+import { RecordCompletionModal, ImportPriorTrainingModal, GroupSessionModal } from "./domains/training/RecordCompletion";
+import { EvidenceLinks, AttachEvidenceModal, SessionsModal } from "./domains/training/TrainingEvidence";
+import { uploadEvidence, listSessions, sessionKey, evidenceLabel } from "./domains/training/evidence";
+import { teamOf } from "./domains/manager/team";
+import { isPassed, scoreText, recordedText, passMarkOf } from "./domains/training/completion";
 import { DSEAssessment } from "./domains/dse/DSEAssessment";
 const LazyStaffDSETab = React.lazy(() => import("./domains/dse/StaffDSETab").then(m => ({ default: m.StaffDSETab })));
 const LazyEquipmentTrackerTab = React.lazy(() => import("./domains/equipment/EquipmentTrackerTab").then(m => ({ default: m.EquipmentTrackerTab })));
@@ -118,6 +133,10 @@ import { getExpiryStatus, EXPIRY_WARNING_DAYS } from "./lib/dates";
 import { EmojiCtx, E, syncEmojiMode } from "./lib/emoji";
 import { startPlainSymbols, stopPlainSymbols } from "./lib/plainSymbols";
 import { sb, hashPassword, DEFAULT_HASH, dbWrite } from "./lib/supabase";
+import { AUTH_MODE, signIn, signOut, meta as authMeta, adminCall, makeTempPassword, checkPassword as authCheckPassword, changeOwnPassword } from "./lib/auth";
+import { ForcePasswordChange } from "./shared/ForcePasswordChange";
+import { TempPasswordsModal } from "./shared/TempPasswordsModal";
+import { SignInAccountsPanel } from "./domains/staff/SignInAccountsPanel";
 import { uploadPhotos, PHOTO_BUCKET } from "./lib/photos";
 import { HelpTip } from "./shared/HelpTip";
 import { ZeusLogo, ZeusProtectLogo, ZEUS_LOGO_LIGHT_SRC } from "./shared/Logo";
@@ -130,7 +149,10 @@ import { NewVersionModal } from "./shared/NewVersionModal";
 import { CertificateModal } from "./domains/training/CertificateModal";
 import { applyLightThemeFix, isLightTheme } from "./lib/lightThemeFix";
 import { mergeInvestigation, changedSince } from "./domains/incidents/investigationMerge";
-import { teamOf } from "./domains/manager/team";
+import { QuickSearch } from "./shared/QuickSearch";
+import { NavMenu } from "./shared/NavMenu";
+import { loadWelcomeVideo, showWelcome, hideWelcome, WelcomeReplay, WelcomeVideoSettings } from "./shared/WelcomeVideo";
+import { useRemembered, clearRemembered } from "./lib/remembered";
 import { setAuditUser, primeAudit, primeAuditList, primeAuditMap, auditRecord, auditList, auditDelete, auditEvent } from "./lib/audit";
 
 // Wraps a dashboard stat card to make it draggable. Only the small handle in
@@ -199,12 +221,69 @@ const incidentAuditLabel = (inc) => inc ? [inc.date, INCIDENT_TYPE_LABELS[inc.ty
 
 // Incident fields that have their own column in the `incidents` table.
 // Everything else on an incident record is stored in the jsonb `details` column.
+// ── Row → state mappers for training and reading records (used by loadAll and
+// by the 30-second refresh, so both build exactly the same shapes) ──
+function mapAssignRows(rows) {
+  const map = {};
+  (rows || []).forEach(r => { const uid = String(r.user_id); (map[uid] = map[uid] || []).push(String(r.module_id)); });
+  return map;
+}
+function mapDocAssignRows(rows) {
+  const map = {};
+  (rows || []).forEach(r => { const did = String(r.doc_id); (map[did] = map[did] || []).push(String(r.user_id)); });
+  return map;
+}
+function mapCompRows(rows) {
+  const map = {};
+  (rows || []).forEach(r => {
+    // Older versions also saved FAILED attempts here (no certificate, under 70%). A
+    // failed attempt isn't a completion — those are listed under Quiz Failures.
+    if (!r.recorded && !r.cert_id && r.score !== null && r.score !== undefined && Number(r.score) < 70) return;
+    const uid = String(r.user_id); map[uid] = map[uid] || {};
+    map[uid][String(r.module_id)] = { score: r.score, date: r.date, certId: r.cert_id, answers: r.answers, moduleVersion: r.module_version || 1, ...(r.recorded ? { recorded: r.recorded } : {}) };
+  });
+  return map;
+}
+function mapAckRows(rows) {
+  const map = {};
+  (rows || []).forEach(r => { const uid = String(r.user_id), did = String(r.doc_id); map[uid] = map[uid] || {}; map[uid][did] = { date: r.date, version: r.version || 1 }; });
+  return map;
+}
+// Merge freshly-read {person: {item: record}} into what's on screen. Records this
+// browser changed in the last minute keep the on-screen version (its save may still
+// be on its way); everything else takes the database's version.
+const RECENT_MS = 60000;
+function mergeNested(cur, fresh, recent, prefix) {
+  const next = {}; Object.entries(fresh).forEach(([u, m]) => { next[u] = { ...m }; });
+  const now = Date.now();
+  recent.forEach((t, key) => {
+    if (now - t > RECENT_MS || !key.startsWith(prefix + ":")) return;
+    const [, u, k] = key.split(":");
+    const local = cur[u] && cur[u][k];
+    if (local) { next[u] = next[u] || {}; next[u][k] = local; } else if (next[u]) delete next[u][k];
+  });
+  return stableJSON(next) === stableJSON(cur) ? cur : next;
+}
+// Also used for document assignments ({docId: [userId]}, prefix "d").
+function mergeAssigns(cur, fresh, recent, prefix = "a") {
+  const next = { ...fresh }; const now = Date.now();
+  recent.forEach((t, key) => { if (now - t <= RECENT_MS && key.startsWith(prefix + ":")) { const u = key.slice(prefix.length + 1); if (cur[u]) next[u] = cur[u]; else delete next[u]; } });
+  Object.keys(next).forEach(u => { if (!next[u] || !next[u].length) delete next[u]; });
+  const norm = o => stableJSON(Object.fromEntries(Object.entries(o).filter(([, v]) => v && v.length).map(([k, v]) => [k, [...v].sort()])));
+  return norm(next) === norm(cur) ? cur : next;
+}
+
 const INCIDENT_CORE_KEYS = new Set([
   "id","date","type","accidentCode","numberCode","location","reportedBy",
   "description","injuryType","riddor","closed","photos",
   "riddorReported","riddorReportedDate","hseReference","riddorReportedBy",
   "quickReport","urgency",
 ]);
+
+// Demo / seed data (INIT_*) fills screens on a brand-new install in the old sign-in
+// mode. With Supabase sign-in the database decides what each person may see, so an
+// empty result must stay empty — never replaced by demo records.
+const USE_SEED = AUTH_MODE !== "supabase";
 
 export default function App() {
   const [darkMode, setDarkMode] = useState(true); // kept for backward compat
@@ -213,13 +292,13 @@ export default function App() {
   // Light themes: darken the pale dark-theme text colours so admin text stays readable.
   useEffect(() => { applyLightThemeFix(isLightTheme(theme)); }, [theme]);
   const [user,    setUser]    = useState(null);
-  const [view,    setView]    = useState("login");
+  const [view,    setViewRaw] = useState("login");
   const [allUsers,setAllUsers]= useState([]); // loaded from Supabase users table; USERS constant is seed-only
   // ── Auth & users ──
   const [passwords, setPasswords] = useState({}); // userId -> password (overrides default)
   // ── Training: assigns = { [userId]: [moduleId,...] }, comps = { [userId]: { [moduleId]: {score,date,certId,answers} } } ──
-  const [assigns, setAssigns] = useState(INIT_ASSIGN);
-  const [comps,   setComps]   = useState(INIT_COMPLETE);
+  const [assigns, setAssigns] = useState(USE_SEED ? INIT_ASSIGN : {});
+  const [comps,   setComps]   = useState(USE_SEED ? INIT_COMPLETE : {});
   const [email,   setEmail]   = useState("");
   const [pass,    setPass]    = useState("");
   const [err,     setErr]     = useState("");
@@ -233,13 +312,22 @@ export default function App() {
   const [lightboxSrc, setLightboxSrc] = useState(null); // image URL to show in lightbox
   const [lightboxZoomed, setLightboxZoomed] = useState(false); // true = zoomed in past fit-to-screen
   // ── Navigation: atab = active ADMIN tab key, stab = active STAFF tab key (see the render sections) ──
-  const [atab,    setAtab]    = useState("dashboard");
+  const [atab,    setAtabRaw] = useState("dashboard");
   const [dashboardLayouts, setDashboardLayouts] = useState({}); // { [userId]: [cardId, ...] } — admin's saved stat-card order
   const statDragSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
-  const [adminReportView, setAdminReportView] = useState("staff");
+  const [adminReportView, setAdminReportView] = useRemembered("admin.reportView", "staff");
   const [focusIncidentId, setFocusIncidentId] = useState(null);
+  const [focusContractorId, setFocusContractorId] = useState(null); // quick search → open this contractor
+  const [pagePreset, setPagePreset] = useState(null); // dashboard figure → open a page already filtered, e.g. {tab:"incidents", status:"open"}
   const [showAdminReportForm, setShowAdminReportForm] = useState(false);
-  const [stab,    setStab]    = useState("dashboard");
+  const [stab,    setStabRaw] = useState("dashboard");
+  // Moving to another page asks first if a form has unsaved changes (lib/unsaved.js).
+  const guarded = raw => v => { if (!unsavedLabels().length) { raw(v); return; } confirmLeave().then(ok => { if (ok) raw(v); }); };
+  const setView = guarded(setViewRaw), setAtab = guarded(setAtabRaw), setStab = guarded(setStabRaw);
+  // Page addresses (lib/router.js): the address the portal was opened with (a refresh,
+  // bookmark or link) is applied once the person has signed in.
+  const initialRouteRef = useRef(parseRoute(typeof window !== "undefined" ? window.location.hash : ""));
+  const pendingModuleRef = useRef(null);   // module to reopen from the address, once modules have loaded
   const [quickEditId, setQuickEditId] = useState(null); // quick report to open in the full form (reminder deep link)
   const [cert,    setCert]    = useState(null);
   const [target,  setTarget]  = useState("1");
@@ -247,6 +335,8 @@ export default function App() {
   const [docName, setDocName] = useState("");
   const [previewDoc, setPreviewDoc] = useState(null);
   const [docAssignments, setDocAssignments] = useState({}); // { docId: [userId, ...] }
+  const [docBundles, setDocBundles] = useState([]);         // document bundles (domains/documents/bundles.js)
+  const [docView, setDocView] = useState("docs");           // admin Documents tab: docs | bundles
   const [docAcknowledgements, setDocAcknowledgements] = useState({}); // { userId: { docId: { date, version } } }
   // ── Versioning history (append-only tables, see audit_manager_versioning.sql) ──
   const [docAckHistory, setDocAckHistory] = useState([]);   // every "I've read this": { user_id, doc_id, version, date }
@@ -259,16 +349,16 @@ export default function App() {
   const [dseComments, setDseComments] = useState({});
   const [dseSection, setDseSection] = useState(0);
   const [dseSubmitted, setDseSubmitted] = useState(false);
-  const [dseReports, setDseReports] = useState(INIT_DSE_REPORTS);
+  const [dseReports, setDseReports] = useState(USE_SEED ? INIT_DSE_REPORTS : {});
   const [adminResponses, setAdminResponses] = useState({}); // { userId: { reportIdx_issueIdx: { comment, resolved } } }
   // ── Incidents, investigations and other H&S registers ──
-  const [incidents, setIncidents] = useState(INIT_INCIDENTS);
-  const [investigations, setInvestigations] = useState(INIT_INVESTIGATIONS);   // { incidentId: { ... } }
+  const [incidents, setIncidents] = useState(USE_SEED ? INIT_INCIDENTS : []);
+  const [investigations, setInvestigations] = useState(USE_SEED ? INIT_INVESTIGATIONS : {});   // { incidentId: { ... } }
   const [investigationView, setInvestigationView] = useState(null); // incidentId to open
   const [lastLoginMap, setLastLoginMap] = useState({}); // userId -> ISO date string
-  const [equipment, setEquipment] = useState(INIT_EQUIPMENT);
-  const [machineComps, setMachineComps] = useState(INIT_MACHINE_COMPS);
-  const [siteInspections, setSiteInspections] = useState(INIT_SITE_INSPECTIONS);
+  const [equipment, setEquipment] = useState(USE_SEED ? INIT_EQUIPMENT : []);
+  const [machineComps, setMachineComps] = useState(USE_SEED ? INIT_MACHINE_COMPS : {});
+  const [siteInspections, setSiteInspections] = useState(USE_SEED ? INIT_SITE_INSPECTIONS : []);
   const [customModules, setCustomModules] = useState([]); // admin-created training modules
   const [customMachineTypes, setCustomMachineTypes] = useState([]); // admin-created machinery types
   const [ras, setRas] = useState(INIT_RAS);
@@ -298,7 +388,7 @@ export default function App() {
   }, [emojiMode]);
   useEffect(() => { ensureRteStyles(); }, []);
   // Fire safety is ONE state object holding six lists; each list maps to its own Supabase table (see dbSaveFireSafety).
-  const [fireSafety, setFireSafety] = useState({ wardens:INIT_FIRE_WARDENS, drills:INIT_FIRE_DRILLS, alarmTests:INIT_ALARM_TESTS, extinguishers:INIT_EXTINGUISHERS, emergLighting:INIT_EMERG_LIGHTING, fraReviews:INIT_FRA_REVIEWS });
+  const [fireSafety, setFireSafety] = useState(USE_SEED ? { wardens:INIT_FIRE_WARDENS, drills:INIT_FIRE_DRILLS, alarmTests:INIT_ALARM_TESTS, extinguishers:INIT_EXTINGUISHERS, emergLighting:INIT_EMERG_LIGHTING, fraReviews:INIT_FRA_REVIEWS } : { wardens:[], drills:[], alarmTests:[], extinguishers:[], emergLighting:[], fraReviews:[] });
   const [firstAidData, setFirstAidData] = useState({ aiders:[], kits:[], assessment:{} });
   // ── Module merge model ─────────────────────────────────────────────────────
   // Built-in modules live in data/seedTraining.js (TRAINING_MODULES, read-only code).
@@ -320,11 +410,12 @@ export default function App() {
   const allMachineCategories = [...new Set(allMachineTypes.map(m=>m.category))];
   // ── Admin UI form/filter state (staff management, bulk actions, CSV import, doc bulk-assign) ──
   const [showAddStaff, setShowAddStaff] = useState(false);
-  const [showHiddenModules, setShowHiddenModules] = useState(false);
-  const [staffFilterManager,  setStaffFilterManager]  = useState("all");
+  const [showHiddenModules, setShowHiddenModules] = useRemembered("modules.showHidden", false);
+  const [staffFilterManager,  setStaffFilterManager]  = useRemembered("staff.manager", "all");
   const [staffFilterSearch,   setStaffFilterSearch]   = useState("");
+  const [staffSel, setStaffSel] = useState([]); // Staff list: ticked people (string ids) for bulk actions
   const [showBulkReset, setShowBulkReset] = useState(false);
-  const [docFolder, setDocFolder] = useState("all"); // active folder filter
+  const [docFolder, setDocFolder] = useRemembered("docs.folder", "all"); // active folder filter
   const [showBulkDocAssign, setShowBulkDocAssign] = useState(false);
   const [bulkDocTarget, setBulkDocTarget] = useState("all"); // all | team | individual
   const [bulkDocManager, setBulkDocManager] = useState("");
@@ -337,8 +428,8 @@ export default function App() {
   const [bulkResetScope, setBulkResetScope] = useState("all"); // "all" | "selected"
   const [bulkResetSelected, setBulkResetSelected] = useState([]);
   const [bulkResetDone, setBulkResetDone] = useState(false);
-  const [staffFilterProgress, setStaffFilterProgress] = useState("all");
-  const [staffGroupByTeam,    setStaffGroupByTeam]    = useState(false);
+  const [staffFilterProgress, setStaffFilterProgress] = useRemembered("staff.progress", "all");
+  const [staffGroupByTeam,    setStaffGroupByTeam]    = useRemembered("staff.byTeam", false);
   const [staffExpandedTeams,  setStaffExpandedTeams]  = useState({});
   const [editingStaff, setEditingStaff] = useState(null); // user object being edited
   const [newName, setNewName]           = useState("");
@@ -354,23 +445,44 @@ export default function App() {
   const [csvError, setCsvError] = useState("");
   const [staffSearch, setStaffSearch] = useState("");
   const [staffDeptFilter, setStaffDeptFilter] = useState("all");
-  const [staffStatusFilter, setStaffStatusFilter] = useState("all");
+  const [staffStatusFilter, setStaffStatusFilter] = useRemembered("staff.status", "all");
   const [addErr,  setAddErr]    = useState("");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [bulkTarget, setBulkTarget] = useState("individual");
-  const [bulkManager, setBulkManager] = useState("");
+  const [bulkTarget, setBulkTarget] = useRemembered("assign.who", "individual");
+  const [recordFor, setRecordFor] = useState(null);          // Assign Training: { uid, mid } → "Record as completed" window
+  const [showSessions, setShowSessions] = useState(null);    // "all" | "team" → group session records (training/TrainingEvidence.jsx)
+  const [evidenceFor, setEvidenceFor] = useState(null);      // { uid, mid } → attach evidence to one recorded completion
+  const [showImportPrior, setShowImportPrior] = useState(false); // Assign Training: import prior training (CSV)
+  const [groupSessionFor, setGroupSessionFor] = useState(null); // "all" (admin) | "team" (line manager) → group session window
+  const [lastBackup, setLastBackup] = useState(undefined);   // admin: when the last full backup was downloaded (null = never)
+  const [bulkManager, setBulkManager] = useRemembered("assign.manager", "");
   // ── Session safety ──
   const [dbReady, setDbReady] = useState(false); // true once initial Supabase load is complete
   // NOTE: lockout counters live only in memory — a page refresh resets them. For real brute-force
   // protection this would need to be enforced server-side.
   const [loginAttempts, setLoginAttempts] = useState({}); // { email: { count, lockedUntil } }
   const inactivityTimer = React.useRef(null);
+  // Supabase sign-in mode (lib/auth.js): true while the person must replace a temporary password.
+  const [mustChangePw, setMustChangePw] = useState(false);
+  const [signingIn, setSigningIn] = useState(false);   // Supabase sign-in: loading data after the password check
+  // Temporary passwords to show the admin once: { title, items:[{name,login,password}], failures:[{name,error}] }
+  const [tempPwNotice, setTempPwNotice] = useState(null);
   const INACTIVITY_MINUTES = 30;
   const MAX_LOGIN_ATTEMPTS = 5;
   const LOCKOUT_MINUTES = 15;
 
   // Global font stack + responsive breakpoints (desktop layouts collapse at ≤1024px).
   const font = "'Barlow','Trebuchet MS',system-ui,sans-serif";
+  useEffect(() => { setFeedbackTheme(T, font); }, [theme]); // eslint-disable-line
+  // Welcome video (shared/WelcomeVideo.jsx): set by finishLogin() on someone's very first
+  // sign-in; shown once they're in the portal (after choosing their password, if asked to).
+  const [welcomePending, setWelcomePending] = useState(false);
+  const [showWelcomeSettings, setShowWelcomeSettings] = useState(false);
+  useEffect(() => {
+    if (!welcomePending || !user || mustChangePw) return;
+    setWelcomePending(false);
+    loadWelcomeVideo().then(v => { if (v) showWelcome({ video: v, name: user.name, Z: T, font }); });
+  }, [welcomePending, user, mustChangePw]); // eslint-disable-line
   const winW = useWindowWidth();
   const isMobile = winW <= 1024;
   const isSmall = winW <= 480;
@@ -381,6 +493,40 @@ export default function App() {
   // sets forceDesktop and returns the user here.
   const isPhone = winW <= 700;
   const [forceDesktop, setForceDesktop] = useState(false);
+  const routerOn = !!user && (view === "admin" || view === "staff") && !(isPhone && !forceDesktop);
+  // Keep the address in step with the page; each page change is a new Back/Forward step.
+  // (After Back/Forward the address already matches, so nothing is added.)
+  const routeStartedRef = useRef(false);
+  useEffect(() => {
+    if (!routerOn) return;
+    const h = routeHash({ view, atab, stab, moduleId: view === "staff" && mod ? mod.id : null });
+    if (!h || window.location.hash === h) { routeStartedRef.current = true; return; }
+    if (!routeStartedRef.current) { window.history.replaceState(null, "", h); routeStartedRef.current = true; }
+    else window.history.pushState(null, "", h);
+  }, [routerOn, view, atab, stab, mod && mod.id]); // eslint-disable-line
+  // Back / Forward
+  useEffect(() => {
+    if (!routerOn) return;
+    const onPop = async () => {
+      const r = parseRoute(window.location.hash);
+      if (!r || !routeAllowed(r, user)) return;
+      // unsaved work: ask once; if they stay, the address is put back by the effect above
+      if (unsavedLabels().length && !(await confirmLeave())) { window.history.pushState(null, "", routeHash({ view, atab, stab, moduleId: view === "staff" && mod ? mod.id : null })); return; }
+      if (r.area === "admin") { setMod(null); setViewRaw("admin"); setAtabRaw(r.tab); return; }
+      setViewRaw("staff"); setStabRaw(r.tab);
+      const m = r.moduleId && allModules.find(x => String(x.id) === r.moduleId);
+      if (m) { if (!mod || mod.id !== m.id) startMod(m); } else setMod(null);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [routerOn, user, allModules, mod, view, atab, stab]); // eslint-disable-line
+  // A module in the address (refresh in the player) reopens once modules have loaded.
+  useEffect(() => {
+    const id = pendingModuleRef.current;
+    if (!id || !user) return;
+    const m = allModules.find(x => String(x.id) === id);
+    if (m) { pendingModuleRef.current = null; startMod(m); }
+  }, [allModules, user]); // eslint-disable-line
 
   // (maximum-scale=1 stops iOS auto-zooming into inputs, but also disables pinch-zoom — an accessibility trade-off.)
   // ── Ensure correct viewport meta tag for mobile ─────────────────────────────
@@ -396,8 +542,13 @@ export default function App() {
     const reset = () => {
       clearTimeout(inactivityTimer.current);
       inactivityTimer.current = setTimeout(() => {
-        setUser(null); setView("login"); setMod(null);
-        alert("You have been logged out due to 30 minutes of inactivity.");
+        if (AUTH_MODE === "supabase") {
+          notifyAfterReload("You were signed out after 30 minutes without activity. Sign in again to carry on where you were.", { kind: "info", timeout: 0 });
+          signOut().finally(() => window.location.reload());
+          return;
+        }
+        setUser(null); setViewRaw("login"); setMod(null); setMustChangePw(false);
+        notify("You were signed out after 30 minutes without activity. Sign in again to carry on where you were.", { kind: "info", timeout: 0 });
       }, INACTIVITY_MINUTES * 60 * 1000);
     };
     const events = ["mousemove","keydown","mousedown","touchstart","scroll","click"];
@@ -439,6 +590,9 @@ export default function App() {
   // error-logging list, then add a block that converts rows → state.
   // dbReady is set in `finally`, so the app always leaves the splash screen.
   // ── Load all persisted data from Supabase on mount ───────────────────────────
+  // loadAll is also called after sign-in in Supabase sign-in mode (see login()),
+  // because the database only returns data once it knows who is asking.
+  const loadAllRef = useRef(null);
   useEffect(() => {
     async function loadAll() {
       try {
@@ -455,7 +609,7 @@ export default function App() {
           llRes, pwRes, usersRes, upRes, ecRes, qfRes, conRes, conIndRes,
           conCertRes, conVisitRes, permitRes, raRes, cmRes, mcRes, eqRes,
           siRes, msdsRes, ccRes, fwRes, fdRes, fatRes, fexRes, felRes,
-          ffrRes, faRes, cmtRes, dlRes, caRes, dahRes, chRes, mvRes,
+          ffrRes, faRes, cmtRes, dlRes, caRes, dahRes, chRes, mvRes, bdRes,
         ] = await Promise.allSettled([
           sb.from("training_assigns").select("*"),
           sb.from("training_completions").select("*"),
@@ -467,7 +621,7 @@ export default function App() {
           sb.from("dse_reports").select("*"),
           sb.from("dse_admin_responses").select("*"),
           sb.from("last_logins").select("*"),
-          sb.from("user_passwords").select("*"),
+          AUTH_MODE === "supabase" ? Promise.resolve({ data: [], error: null }) : sb.from("user_passwords").select("*"),   // old sign-in only
           sb.from("users").select("*"),
           sb.from("user_profiles").select("*"),
           sb.from("ext_certs").select("*"),
@@ -497,6 +651,7 @@ export default function App() {
           sb.from("doc_ack_history").select("*"),
           sb.from("training_completion_history").select("*"),
           sb.from("module_versions").select("*"),
+          sb.from("doc_bundles").select("*"),
         ]);
 
         // Small helper: allSettled wraps each result in {status, value} or
@@ -505,36 +660,25 @@ export default function App() {
         // everything else's processing below.
         const rows = (res) => (res.status === "fulfilled" ? (res.value?.data ?? null) : null);
         if (usersRes.status === "rejected") console.error("Supabase load error (users):", usersRes.reason);
-        [aRes,cRes,iRes,invRes,ackRes,daRes,docRes,dseRes,resRes,llRes,pwRes,upRes,ecRes,qfRes,conRes,conIndRes,conCertRes,conVisitRes,permitRes,raRes,cmRes,mcRes,eqRes,siRes,msdsRes,ccRes,fwRes,fdRes,fatRes,fexRes,felRes,ffrRes,faRes,cmtRes,dlRes,caRes,dahRes,chRes,mvRes]
+        [aRes,cRes,iRes,invRes,ackRes,daRes,docRes,dseRes,resRes,llRes,pwRes,upRes,ecRes,qfRes,conRes,conIndRes,conCertRes,conVisitRes,permitRes,raRes,cmRes,mcRes,eqRes,siRes,msdsRes,ccRes,fwRes,fdRes,fatRes,fexRes,felRes,ffrRes,faRes,cmtRes,dlRes,caRes,dahRes,chRes,mvRes,bdRes]
           .forEach(r => { if (r.status === "rejected") console.error("Supabase load error:", r.reason); });
 
         // Pattern used below: rows(x) → null/[] means "nothing stored" → keep seed data.
         // Training assigns
         const aRows = rows(aRes);
         if (aRows && aRows.length) {
-          const map = {};
-          aRows.forEach(r => {
-            const uid = String(r.user_id);
-            map[uid] = map[uid] || [];
-            map[uid].push(String(r.module_id));
-          });
-          setAssigns(map);
+          setAssigns(mapAssignRows(aRows));
         } else {
           // Normalise INIT_ASSIGN keys to strings
           const normalised = {};
-          Object.entries(INIT_ASSIGN).forEach(([k,v]) => { normalised[String(k)] = v; });
+          if (USE_SEED) Object.entries(INIT_ASSIGN).forEach(([k,v]) => { normalised[String(k)] = v; });
           setAssigns(normalised);
         }
 
         // Training completions
         const cRows = rows(cRes);
         if (cRows && cRows.length) {
-          const map = {};
-          cRows.forEach(r => {
-            const tc_uid=String(r.user_id); map[tc_uid] = map[tc_uid] || {};
-            map[tc_uid][String(r.module_id)] = { score: r.score, date: r.date, certId: r.cert_id, answers: r.answers, moduleVersion: r.module_version || 1 };
-          });
-          setComps(map);
+          setComps(mapCompRows(cRows));
         }
 
         // Incidents
@@ -554,18 +698,18 @@ export default function App() {
         // Doc acknowledgements
         const ackRows = rows(ackRes);
         if (ackRows && ackRows.length) {
-          const map = {};
-          ackRows.forEach(r => { const auid=String(r.user_id); const adid=String(r.doc_id); map[auid] = map[auid] || {}; map[auid][adid] = { date: r.date, version: r.version || 1 }; });
-          setDocAcknowledgements(map);
+          setDocAcknowledgements(mapAckRows(ackRows));
         }
 
         // Doc assignments
         const daRows = rows(daRes);
         if (daRows && daRows.length) {
-          const map = {};
-          daRows.forEach(r => { const did=String(r.doc_id); map[did] = map[did] || []; map[did].push(String(r.user_id)); });
-          setDocAssignments(map);
+          setDocAssignments(mapDocAssignRows(daRows));
         }
+
+        // Document bundles (doc_bundles_table.sql — until it has been run this read fails and there are none)
+        const bdRows = rows(bdRes);
+        if (bdRows) setDocBundles(mapBundleRows(bdRows));
 
         // Documents (uploaded by admin)
         const docRows = rows(docRes);
@@ -622,7 +766,7 @@ export default function App() {
         const usersRows = rows(usersRes);
         if (usersRows && usersRows.length) {
           setAllUsers(usersRows.map(r => r.data));
-        } else {
+        } else if (USE_SEED) {
           // First run — seed the users table from the hardcoded USERS constant
           setAllUsers(USERS);
           try {
@@ -767,7 +911,7 @@ export default function App() {
         const ffrRows = rows(ffrRes);
         // Only override each sub-array if the DB returned rows for it.
         // If none of the tables have any rows yet (fresh install), keep seed data.
-        const anyFireData = [fwRows,fdRows,fatRows,fexRows,felRows,ffrRows].some(r=>r&&r.length>0);
+        const anyFireData = !USE_SEED || [fwRows,fdRows,fatRows,fexRows,felRows,ffrRows].some(r=>r&&r.length>0);
         setFireSafety({
           wardens:      fwRows  && fwRows.length  ? fwRows.map(r=>r.data)  : (anyFireData ? [] : INIT_FIRE_WARDENS),
           drills:       fdRows  && fdRows.length  ? fdRows.map(r=>r.data)  : (anyFireData ? [] : INIT_FIRE_DRILLS),
@@ -787,7 +931,8 @@ export default function App() {
         setDbReady(true);
       }
     }
-    loadAll();
+    loadAllRef.current = loadAll;
+    if (AUTH_MODE !== "supabase") loadAll();
   }, []);
 
   // Every risk assessment (seed RAs and admin-created ones, as loaded from
@@ -848,7 +993,11 @@ export default function App() {
   // saved in between, the two sets of changes are combined (investigationMerge.js)
   // instead of the last save silently wiping out the other.
   const investigationBaseRef = useRef(new Map());
+  const equipmentSavedRef = useRef(new Map());   // non-admin sessions: last saved copy of each equipment item
   const refreshBusyRef = useRef(false);
+  // Training/reading records this browser just changed: key → time ("c:uid:mid", "k:uid:docId", "a:uid").
+  const recentWriteRef = useRef(new Map());
+  const markWrite = key => recentWriteRef.current.set(key, Date.now());
   // Once data has loaded, snapshot every audited record WITHOUT logging (lib/audit.js),
   // so only real changes from here on create audit-trail entries. Declared before the
   // auto-sync effects below so the snapshots exist before their first re-save.
@@ -862,11 +1011,12 @@ export default function App() {
     primeAuditList("inspection", siteInspections);
     incidents.forEach(i => incidentSavedRef.current.set(String(i.id), stableJSON(i)));
     Object.entries(investigations).forEach(([id, d]) => { investigationSavedRef.current.set(String(id), stableJSON(d)); investigationBaseRef.current.set(String(id), d); });
+    equipment.forEach(e => equipmentSavedRef.current.set(String(e.id), stableJSON(e)));
     _ready.current = true;
   }, [dbReady]); // eslint-disable-line
 
   // Audit entries are attributed to whoever is signed in.
-  useEffect(() => { setAuditUser(user); }, [user]);
+  useEffect(() => { setAuditUser(user); setDraftUser(user && user.id); }, [user]);
   const auditNameOf = (uid) => (allUsers.find(u => String(u.id) === String(uid)) || {}).name || `User ${uid}`;
 
   // Only incidents / investigations that changed since they were last saved or loaded are written.
@@ -898,7 +1048,31 @@ export default function App() {
     if (!_ready.current || refreshBusyRef.current) return;
     refreshBusyRef.current = true;
     try {
-      const [iRes, invRes] = await Promise.all([sb.from("incidents").select("*"), sb.from("investigations").select("*")]);
+      const [iRes, invRes, cRes, ackRes, aRes, hRes, daRes, bdRes] = await Promise.all([sb.from("incidents").select("*"), sb.from("investigations").select("*"),
+        sb.from("training_completions").select("*"), sb.from("doc_acknowledgements").select("*"), sb.from("training_assigns").select("*"),
+        sb.from("training_completion_history").select("*"), sb.from("doc_assignments").select("*"), sb.from("doc_bundles").select("*")]);
+      // Training completions, assignments and document confirmations made elsewhere
+      // (a member of staff finishing a module, a manager assigning one) appear here
+      // without a reload. With the old sign-in an empty table means "use the demo data".
+      const okRows = r => !r.error && Array.isArray(r.data) && (r.data.length > 0 || !USE_SEED);
+      const recent = recentWriteRef.current;
+      if (okRows(cRes)) setComps(cur => mergeNested(cur, mapCompRows(cRes.data), recent, "c"));
+      if (okRows(ackRes)) setDocAcknowledgements(cur => mergeNested(cur, mapAckRows(ackRes.data), recent, "k"));
+      if (okRows(aRes)) setAssigns(cur => mergeAssigns(cur, mapAssignRows(aRes.data), recent));
+      // Required reading given elsewhere (e.g. an admin assigning a bundle) appears without a reload.
+      if (okRows(daRes)) setDocAssignments(cur => mergeAssigns(cur, mapDocAssignRows(daRes.data), recent, "d"));
+      if (!bdRes.error && Array.isArray(bdRes.data)) setDocBundles(cur => {
+        const fresh = mapBundleRows(bdRes.data), now = Date.now();
+        const isRecent = id => { const t = recent.get(`b:${id}`); return t && now - t < RECENT_MS; };
+        const next = [...fresh.filter(b => !isRecent(b.id)), ...cur.filter(b => isRecent(b.id))].sort((a, b) => a.name.localeCompare(b.name));
+        return stableJSON(next) === stableJSON(cur) ? cur : next;
+      });
+      if (okRows(hRes)) setCompHistory(cur => {
+        const now = Date.now();
+        const pending = cur.filter(h => h.at && now - new Date(h.at).getTime() < RECENT_MS && !hRes.data.some(r => String(r.user_id) === String(h.user_id) && String(r.module_id) === String(h.module_id) && r.date === h.date));
+        const next = [...hRes.data, ...pending];
+        return stableJSON(next) === stableJSON(cur) ? cur : next;
+      });
       if (!iRes.error && Array.isArray(iRes.data)) {
         const fresh = iRes.data.map(mapIncidentRow);
         setIncidents(cur => {
@@ -943,19 +1117,32 @@ export default function App() {
     document.addEventListener("visibilitychange", tick);
     return () => { clearInterval(iv); window.removeEventListener("focus", tick); document.removeEventListener("visibilitychange", tick); };
   }, [dbReady, user]); // eslint-disable-line
+
+  // Admins: when was the last full backup downloaded? (drives the bell reminder)
+  useEffect(() => {
+    if (!dbReady || !user || user.role !== "admin") return;
+    let live = true;
+    lastBackupAt().then(at => { if (live) setLastBackup(at); });
+    return () => { live = false; };
+  }, [dbReady, user && user.id, user && user.role]); // eslint-disable-line
   useEffect(() => {
     if ((view === "admin" && atab === "incidents") || (view === "staff" && (stab === "incidents" || stab === "actions" || stab === "team"))) refreshSharedRecords();
   }, [view, atab, stab]); // eslint-disable-line
 
+  // Supabase sign-in: only admins may change shared registers, so other people's
+  // browsers don't try to save them back (the database would refuse anyway).
+  const writesAll = () => AUTH_MODE !== "supabase" || (user && user.role === "admin");
+
   useEffect(() => { if (!_ready.current) return;
-    Object.entries(dseReports).forEach(([uid, reports]) => {
+    Object.entries(dseReports).filter(([uid]) => writesAll() || String(uid) === String(user && user.id)).forEach(([uid, reports]) => {
       auditRecord("dse_report", uid, reports, auditNameOf(uid));
       dbSaveDseReport(Number(uid), reports);
     });
   }, [dseReports]); // eslint-disable-line
 
   useEffect(() => { if (!_ready.current) return;
-    Object.entries(adminResponses).forEach(([uid, keys]) => {
+    // Admins save any response; line managers only their team's (sign-offs); staff none.
+    Object.entries(adminResponses).filter(([uid]) => writesAll() || (user && user.role === "manager" && String(uid) !== String(user.id))).forEach(([uid, keys]) => {
       auditRecord("dse_response", uid, keys, auditNameOf(uid));
       Object.entries(keys).forEach(([key, rec]) => {
         const [ri, ii] = key.split("_").map(Number);
@@ -965,27 +1152,37 @@ export default function App() {
   }, [adminResponses]); // eslint-disable-line
 
   useEffect(() => { if (!_ready.current) return;
+    if (!writesAll()) {
+      // e.g. an incident report adding a defect: save just that item.
+      equipment.forEach(e => {
+        const k = String(e.id), j = stableJSON(e);
+        if (equipmentSavedRef.current.get(k) === j) return;
+        equipmentSavedRef.current.set(k, j);
+        dbWrite(sb.from("equipment").upsert({ id: e.id, data: e }, { onConflict: "id" }), "equipment");
+      });
+      return;
+    }
     dbSaveEquipment(equipment);
   }, [equipment]); // eslint-disable-line
 
-  useEffect(() => { if (!_ready.current) return;
+  useEffect(() => { if (!_ready.current || !writesAll()) return;
     auditList("inspection", siteInspections, i => [i.date, (INSP_TYPES.find(t => t.id === i.type) || {}).label || i.type, i.location].filter(Boolean).join(" · "));
     dbSaveSiteInspections(siteInspections);
   }, [siteInspections]); // eslint-disable-line
 
-  useEffect(() => { if (!_ready.current) return;
+  useEffect(() => { if (!_ready.current || !writesAll()) return;
     dbSaveFireSafety(fireSafety);
   }, [fireSafety]); // eslint-disable-line
 
-  useEffect(() => { if (!_ready.current) return;
+  useEffect(() => { if (!_ready.current || !writesAll()) return;
     dbSaveFirstAidData(firstAidData);
   }, [firstAidData]); // eslint-disable-line
 
-  useEffect(() => { if (!_ready.current) return;
+  useEffect(() => { if (!_ready.current || !writesAll()) return;
     customModules.forEach(m => dbSaveCustomModule(m));
   }, [customModules]); // eslint-disable-line
 
-  useEffect(() => { if (!_ready.current) return;
+  useEffect(() => { if (!_ready.current || !writesAll()) return;
     customMachineTypes.forEach(m => dbSaveCustomMachineType(m));
   }, [customMachineTypes]); // eslint-disable-line
 
@@ -998,15 +1195,40 @@ export default function App() {
 
   // Replaces the assignment list for each user in `newAssigns` ({userId:[moduleIds]}).
   // Delete-then-insert (not atomic) — pass ONLY the users that changed.
+  // Saves each person's full list of assigned modules. Only the differences are
+  // written: modules newly assigned are added, unassigned ones removed. (It used to
+  // clear the person's list and write it again, so a refused write — e.g. a staff id
+  // too long for an "integer" column, see user_id_text_columns.sql — silently lost
+  // ALL their assignments.) If anything is refused, the admin is told why and the
+  // screen goes back to what is really stored.
   async function dbSaveAssigns(newAssigns) {
+    Object.keys(newAssigns).forEach(uid => markWrite(`a:${uid}`));
+    const failed = [];
     for (const [uid, mids] of Object.entries(newAssigns)) {
-      await dbWrite(sb.from("training_assigns").delete().eq("user_id", String(uid)), "training assignments clear");
-      if (mids && mids.length) {
-        const rows = mids.map(mid => ({ user_id: String(uid), module_id: String(mid) }));
-        const { error } = await sb.from("training_assigns").insert(rows);
-        if (error) console.error("training_assigns insert error:", error);
+      const suid = String(uid);
+      const want = [...new Set((mids || []).map(String))];
+      const { data, error: readErr } = await sb.from("training_assigns").query(`select=user_id,module_id&user_id=eq.${encodeURIComponent(suid)}`);
+      if (readErr) { failed.push({ uid: suid, error: readErr }); continue; }
+      const have = new Set((data || []).filter(r => String(r.user_id) === suid).map(r => String(r.module_id)));
+      const add = want.filter(m => !have.has(m));
+      const drop = [...have].filter(m => !want.includes(m));
+      if (add.length) {
+        const { error } = await sb.from("training_assigns").insert(add.map(m => ({ user_id: suid, module_id: m })));
+        if (error) failed.push({ uid: suid, error });
+      }
+      for (const m of drop) {
+        const { error } = await sb.from("training_assigns").delete().match({ user_id: suid, module_id: m });
+        if (error) failed.push({ uid: suid, error });
       }
     }
+    if (failed.length) {
+      console.error("training_assigns save error:", failed);
+      failed.forEach(f => recentWriteRef.current.delete(`a:${f.uid}`));   // let the next refresh show what is really stored
+      const names = [...new Set(failed.map(f => auditNameOf(f.uid)))].join(", ");
+      notify(`Training assignments for ${names} could not be saved.\n${String(failed[0].error).slice(0, 300)}\nIf this mentions "out of range for type integer", run user_id_text_columns.sql in the Supabase SQL Editor.`, { kind: "error" });
+      refreshSharedRecords();
+    }
+    return failed.length === 0;
   }
 
   // One row per (user, module). Retaking a module overwrites the previous result.
@@ -1014,15 +1236,118 @@ export default function App() {
   // module version they were for) are kept when a retake or a major new version
   // replaces the current row.
   async function dbSaveCompletion(userId, moduleId, rec) {
+    markWrite(`c:${userId}:${moduleId}`);
     const moduleVersion = rec.moduleVersion || (allModules.find(m => String(m.id) === String(moduleId)) || {}).version || 1;
-    const hist = { user_id: String(userId), module_id: String(moduleId), module_version: moduleVersion, score: rec.score, date: rec.date, cert_id: rec.certId || null, at: new Date().toISOString() };
+    // `recorded` (admin-recorded prior training, see completion.js) is only sent when
+    // present, so ordinary quiz results never depend on that column existing.
+    // A quiz result replacing a recorded completion clears the "recorded" mark.
+    const wasRecorded = !!((comps[String(userId)] || {})[String(moduleId)] || {}).recorded;
+    const rc = rec.recorded ? { recorded: rec.recorded } : wasRecorded ? { recorded: null } : {};
+    const hist = { user_id: String(userId), module_id: String(moduleId), module_version: moduleVersion, score: rec.score, date: rec.date, cert_id: rec.certId || null, at: new Date().toISOString(), ...(rec.recorded ? rc : {}) };
     setCompHistory(p => [...p, hist]);
-    await dbWrite(sb.from("training_completions").upsert({
+    const ok = await dbWrite(sb.from("training_completions").upsert({
       user_id: userId, module_id: moduleId,
       score: rec.score, date: rec.date, cert_id: rec.certId, answers: rec.answers,
-      module_version: moduleVersion,
-    }, { onConflict: "user_id,module_id" }), "training completion");
+      module_version: moduleVersion, ...rc,
+    }, { onConflict: "user_id,module_id" }), "training completion", rec.recorded ? { alertOnError: true } : undefined);
+    if (rec.recorded && !ok) return false;
     await dbWrite(sb.from("training_completion_history").insert(hist), "training completion history");
+    return true;
+  }
+
+  // ── Admin: record training completed before the portal (e.g. on the old system) ──
+  // items: [{ userId, moduleId, date: "YYYY-MM-DD", note }]. Each person is also
+  // assigned the module if they weren't already, so it counts towards compliance.
+  // Anyone who already has a result for that module is skipped (never overwritten).
+  // Returns { saved, skipped:[{userId,moduleId,reason}] }.
+  async function recordCompletions(items) {
+    const at = new Date().toISOString();
+    const by = user ? user.name : "", byId = user ? String(user.id) : "";
+    const skipped = [], toSave = [];
+    items.forEach(it => {
+      const uid = String(it.userId), mid = String(it.moduleId);
+      // A group session (it.session) renews an OLDER result; anything else never overwrites one.
+      const existing = (comps[uid] || {})[mid];
+      if (existing && !(it.session && String(existing.date || "") < it.date)) {
+        skipped.push({ ...it, reason: it.session ? "already has a result from that date or later" : "already has a result for this module" }); return;
+      }
+      if (toSave.some(x => x.uid === uid && x.mid === mid)) { skipped.push({ ...it, reason: "listed twice" }); return; }
+      const mod = allModules.find(m => String(m.id) === mid);
+      toSave.push({ uid, mid, rec: { score: null, date: it.date, certId: null, answers: null, moduleVersion: (mod && mod.version) || 1,
+        recorded: { by, byId, at, ...(it.note ? { note: String(it.note).slice(0, 300) } : {}), ...(it.session ? { session: it.session } : {}),
+          ...(it.evidence && it.evidence.length ? { evidence: it.evidence } : {}) } } });
+    });
+    if (!toSave.length) return { saved: 0, skipped };
+    // assignments first (one write per person), then the completions
+    const addAssign = {};
+    toSave.forEach(({ uid, mid }) => { const cur = addAssign[uid] || assigns[uid] || []; if (!cur.includes(mid)) addAssign[uid] = [...cur, mid]; });
+    if (Object.keys(addAssign).length) { setAssigns(p => ({ ...p, ...addAssign })); await dbSaveAssigns(addAssign); }
+    let saved = 0;
+    for (const { uid, mid, rec } of toSave) {
+      const ok = await dbSaveCompletion(uid, mid, rec);
+      if (!ok) { skipped.push({ userId: uid, moduleId: mid, date: rec.date, reason: "couldn't be saved" }); continue; }
+      saved++;
+      setComps(p => ({ ...p, [uid]: { ...(p[uid] || {}), [mid]: rec } }));
+      const who = (allUsers.find(u => String(u.id) === uid) || {}).name || uid;
+      const title = (allModules.find(m => String(m.id) === mid) || {}).title || mid;
+      auditEvent("training_completion", uid, "record", `${rec.recorded.session ? "Group session" : "Recorded as completed"} on ${rec.date}: ${title}${rec.recorded.note ? ` — ${rec.recorded.note}` : ""}${rec.recorded.evidence ? ` (${evidenceLabel(rec, 0).toLowerCase()} attached: ${rec.recorded.evidence.map(e => e.name).join(", ")})` : ""}`,
+        { module: { from: null, to: title }, completed: { from: null, to: rec.date } }, who);
+    }
+    return { saved, skipped };
+  }
+  // Evidence for recorded training (training/evidence.js): the signed sign-in sheet of a
+  // group session, or a certificate for prior training. Added to the current record and
+  // its history row, for every target. Returns an error message, or "" when all saved.
+  async function attachEvidence(targets, files, key) {
+    let evidence;
+    try { evidence = await uploadEvidence(files, key, user ? user.name : ""); }
+    catch (e) { return String(e.message || e); }
+    const failed = [];
+    for (const t of targets) {
+      const uid = String(t.uid), mid = String(t.mid);
+      const c = (comps[uid] || {})[mid];
+      if (!c || !c.recorded) continue;
+      const recorded = { ...c.recorded, evidence: [...(c.recorded.evidence || []), ...evidence] };
+      markWrite(`c:${uid}:${mid}`);
+      const { error } = await sb.from("training_completions").update({ recorded }).match({ user_id: uid, module_id: mid });
+      if (error) { console.error("evidence save failed:", error); failed.push(uid); continue; }
+      dbWrite(sb.from("training_completion_history").update({ recorded }).match({ user_id: uid, module_id: mid, date: c.date }), "evidence history");
+      setComps(p => ({ ...p, [uid]: { ...(p[uid] || {}), [mid]: { ...((p[uid] || {})[mid] || c), recorded } } }));
+      setCompHistory(p => p.map(h => String(h.user_id) === uid && String(h.module_id) === mid && h.date === c.date && h.recorded ? { ...h, recorded } : h));
+      const who = (allUsers.find(u => String(u.id) === uid) || {}).name || uid;
+      const title = (allModules.find(m => String(m.id) === mid) || {}).title || mid;
+      auditEvent("training_completion", uid, "evidence", `${evidenceLabel({ recorded }, 0)} attached to ${c.recorded.session ? "group session" : "recorded completion"} (${c.date}): ${title} — ${evidence.map(e => e.name).join(", ")}`,
+        { evidence: { from: (c.recorded.evidence || []).map(e => e.name), to: recorded.evidence.map(e => e.name) } }, who);
+    }
+    if (failed.length) return `The file was uploaded, but it couldn't be linked to ${failed.length} record${failed.length !== 1 ? "s" : ""} (${failed.map(auditNameOf).join(", ")}). Try again.`;
+    return "";
+  }
+  // Attach to a whole group session (every attendee's record), from the session register.
+  const attachToSession = (session, files) =>
+    attachEvidence(session.attendees.map(uid => ({ uid, mid: session.moduleId })), files, session.key.startsWith("gs_") ? session.key : `gs_legacy_${session.moduleId}_${session.date}`);
+
+  // Undo a recorded completion (only recorded ones — quiz results can't be removed here).
+  async function removeRecordedCompletion(userId, moduleId) {
+    const uid = String(userId), mid = String(moduleId);
+    const c = (comps[uid] || {})[mid];
+    if (!c || !c.recorded) return;
+    markWrite(`c:${uid}:${mid}`);
+    const ok = await dbWrite(sb.from("training_completions").delete().match({ user_id: uid, module_id: mid }), "recorded completion delete", { alertOnError: true });
+    if (!ok) return;
+    dbWrite(sb.from("training_completion_history").delete().match({ user_id: uid, module_id: mid, date: c.date }), "recorded completion history delete");
+    setComps(p => { const n = { ...p, [uid]: { ...(p[uid] || {}) } }; delete n[uid][mid]; return n; });
+    setCompHistory(p => p.filter(h => !(String(h.user_id) === uid && String(h.module_id) === mid && h.recorded && h.date === c.date)));
+    const who = (allUsers.find(u => String(u.id) === uid) || {}).name || uid;
+    const title = (allModules.find(m => String(m.id) === mid) || {}).title || mid;
+    auditEvent("training_completion", uid, "remove", `Removed recorded completion (${c.date}): ${title}`, { module: { from: title, to: null } }, who);
+    // no "are you sure?" first: it can be put straight back
+    notify(`Removed the recorded completion of "${title}" for ${who}.`, { undo: async () => {
+      const ok2 = await dbSaveCompletion(uid, mid, c);
+      if (!ok2) { notify("Couldn't put it back. Record it again with Record as completed.", { kind: "error" }); return; }
+      setComps(p => ({ ...p, [uid]: { ...(p[uid] || {}), [mid]: c } }));
+      auditEvent("training_completion", uid, "record", `Put back recorded completion (${c.date}): ${title}`, { module: { from: null, to: title } }, who);
+      notify(`"${title}" is recorded as completed again.`);
+    } });
   }
 
   // Upserts one incident (and uploads any new photos first). Called for EVERY incident by the auto-sync effect.
@@ -1130,6 +1455,7 @@ export default function App() {
   // Records which VERSION was read, and appends to doc_ack_history so earlier reads
   // are kept when a major new version clears the current acknowledgements.
   async function dbAcknowledgeDoc(userId, docId, date) {
+    markWrite(`k:${userId}:${docId}`);
     const version = (docs.find(d => String(d.id) === String(docId)) || {}).version || 1;
     const hist = { user_id: String(userId), doc_id: String(docId), version, date, at: new Date().toISOString() };
     setDocAckHistory(p => [...p, hist]);
@@ -1139,6 +1465,7 @@ export default function App() {
 
   // Replaces the full list of staff a document is assigned to (delete-then-insert).
   async function dbSaveDocAssignments(docId, userIds) {
+    markWrite(`d:${docId}`);
     await dbWrite(sb.from("doc_assignments").delete().eq("doc_id", String(docId)), "doc assignments clear");
     if (userIds.length) await dbWrite(sb.from("doc_assignments").insert(userIds.map(uid => ({ doc_id: String(docId), user_id: String(uid) }))), "doc assignments");
   }
@@ -1153,7 +1480,7 @@ export default function App() {
       const safeName = doc.fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
       const path = `doc_${doc.id}_${safeName}`;
       const { error } = await sb.storage.upload("documents", path, file);
-      if (error) { console.error("Doc upload failed:", error); alert("Upload failed: " + error); return; }
+      if (error) { console.error("Doc upload failed:", error); notify("Upload failed: " + error, { kind: "error" }); return; }
       doc.fileUrl = sb.storage.getPublicUrl("documents", path);
     }
     await dbWrite(sb.from("documents").upsert({
@@ -1175,6 +1502,105 @@ export default function App() {
     await dbWrite(sb.from("documents").delete().eq("id", id), "document delete");
     await dbWrite(sb.from("doc_assignments").delete().eq("doc_id", id), "doc assignments delete");
     await dbWrite(sb.from("doc_acknowledgements").delete().eq("doc_id", id), "doc acknowledgements delete");
+    // ...and take it out of any document bundle
+    const inBundles = withoutDoc(docBundles, id);
+    if (inBundles.length) {
+      setDocBundles(p => p.map(b => inBundles.find(c => c.id === b.id) || b));
+      await Promise.all(inBundles.map(dbSaveBundle));
+    }
+  }
+
+  // ── Document bundles ─────────────────────────────────────────────────────────
+  // A named set of documents assigned together as required reading. Assigning a
+  // bundle writes the normal doc_assignments rows, so everything else (Required
+  // Reading, confirmations, reminders, reports) works unchanged. See bundles.js.
+  const sortBundles = list => [...list].sort((a, b) => a.name.localeCompare(b.name));
+  async function dbSaveBundle(b) {
+    markWrite(`b:${b.id}`);
+    return dbWrite(sb.from("doc_bundles").upsert(bundleRow(b), { onConflict: "id" }), "document bundle", { alertOnError: true });
+  }
+  // Saves the per-document assignment lists that changed.
+  async function writeDocAssignments(next, changed) {
+    const ids = [...new Set(changed)];
+    if (!ids.length) return;
+    setDocAssignments(next);
+    await Promise.all(ids.map(did => dbSaveDocAssignments(did, next[did] || [])));
+  }
+  const existingDocIds = ids => ids.filter(id => docs.some(d => String(d.id) === id));
+  const bundleNames = ids => ids.map(id => auditNameOf(id));
+  // Create or edit. Documents added to a bundle go straight to everyone who has it;
+  // removed ones come off their reading only if the admin ticked that option.
+  async function saveBundle(b, { unassignRemoved } = {}) {
+    const old = docBundles.find(x => x.id === b.id);
+    const now = new Date().toISOString();
+    const rec = old ? { ...b, memberIds: old.memberIds, updatedAt: now }
+      : { ...b, id: "bd" + Date.now(), memberIds: [], createdBy: user?.name || "", createdAt: now, updatedAt: now };
+    if (!(await dbSaveBundle(rec))) return false;
+    setDocBundles(p => sortBundles([...p.filter(x => x.id !== rec.id), rec]));
+    let da = docAssignments; const changed = [];
+    const added = old ? rec.docIds.filter(d => !old.docIds.includes(d)) : [];
+    const removed = old ? old.docIds.filter(d => !rec.docIds.includes(d)) : [];
+    if (rec.memberIds.length) {
+      const r1 = addAssignments(da, existingDocIds(added), rec.memberIds); da = r1.next; changed.push(...r1.changed);
+      if (unassignRemoved) { const r2 = removeAssignments(da, removed, rec.memberIds, docBundles.filter(x => x.id !== rec.id)); da = r2.next; changed.push(...r2.changed); }
+    }
+    await writeDocAssignments(da, changed);
+    const title = id => (docs.find(d => String(d.id) === id) || {}).title || id;
+    auditEvent("doc_bundle", rec.id, old ? "update" : "create",
+      old ? `Edited document bundle "${rec.name}"${added.length ? ` — added ${added.map(title).join(", ")}` : ""}${removed.length ? ` — removed ${removed.map(title).join(", ")}${unassignRemoved && rec.memberIds.length ? " (taken off members' reading)" : ""}` : ""}`
+          : `Created document bundle "${rec.name}" with ${rec.docIds.length} document${rec.docIds.length !== 1 ? "s" : ""}`,
+      old ? { name: old.name !== rec.name ? { from: old.name, to: rec.name } : undefined, documents: added.length || removed.length ? { from: old.docIds.map(title), to: rec.docIds.map(title) } : undefined, autoNew: old.autoNew !== rec.autoNew ? { from: old.autoNew, to: rec.autoNew } : undefined }
+          : { documents: { from: null, to: rec.docIds.map(title) } }, rec.name);
+    return true;
+  }
+  async function deleteBundle(b, { unassign } = {}) {
+    markWrite(`b:${b.id}`);
+    if (!(await dbWrite(sb.from("doc_bundles").delete().eq("id", b.id), "document bundle delete", { alertOnError: true }))) return;
+    setDocBundles(p => p.filter(x => x.id !== b.id));
+    if (unassign) { const r = removeAssignments(docAssignments, b.docIds, b.memberIds, docBundles.filter(x => x.id !== b.id)); await writeDocAssignments(r.next, r.changed); }
+    auditEvent("doc_bundle", b.id, "delete", `Deleted document bundle "${b.name}"${unassign && b.memberIds.length ? " and took its documents off members' reading" : ""}`, {}, b.name);
+  }
+  // Give a bundle to people → number newly given it.
+  async function assignBundle(b, userIds) {
+    const cur = docBundles.find(x => x.id === b.id) || b;
+    const add = [...new Set(userIds.map(String))].filter(u => !cur.memberIds.includes(u));
+    if (!add.length) return 0;
+    const rec = { ...cur, memberIds: [...cur.memberIds, ...add], updatedAt: new Date().toISOString() };
+    if (!(await dbSaveBundle(rec))) return 0;
+    setDocBundles(p => p.map(x => x.id === rec.id ? rec : x));
+    const r = addAssignments(docAssignments, existingDocIds(rec.docIds), add);
+    await writeDocAssignments(r.next, r.changed);
+    auditEvent("doc_bundle", rec.id, "assign", `Assigned document bundle "${rec.name}" to ${add.length} ${add.length !== 1 ? "people" : "person"}: ${bundleNames(add).join(", ")}`, { people: { from: null, to: bundleNames(add) } }, rec.name);
+    return add.length;
+  }
+  // Take a bundle away: its documents come off their reading unless another bundle of theirs has them.
+  async function unassignBundle(b, userIds) {
+    const cur = docBundles.find(x => x.id === b.id) || b;
+    const drop = userIds.map(String);
+    const rec = { ...cur, memberIds: cur.memberIds.filter(u => !drop.includes(u)), updatedAt: new Date().toISOString() };
+    if (!(await dbSaveBundle(rec))) return;
+    setDocBundles(p => p.map(x => x.id === rec.id ? rec : x));
+    const r = removeAssignments(docAssignments, rec.docIds, drop, docBundles.filter(x => x.id !== rec.id));
+    await writeDocAssignments(r.next, r.changed);
+    auditEvent("doc_bundle", rec.id, "unassign", `Took document bundle "${rec.name}" away from ${bundleNames(drop).join(", ")}`, { people: { from: bundleNames(drop), to: null } }, rec.name);
+  }
+  // New staff get every bundle marked "give to new staff automatically".
+  async function giveNewStarterBundles(userIds) {
+    const ids = userIds.map(String);
+    const autos = docBundles.filter(b => b.autoNew);
+    if (!autos.length || !ids.length) return;
+    let da = docAssignments; const changed = [], recs = [];
+    autos.forEach(b => {
+      const add = ids.filter(u => !b.memberIds.includes(u));
+      if (!add.length) return;
+      recs.push({ ...b, memberIds: [...b.memberIds, ...add] });
+      const r = addAssignments(da, existingDocIds(b.docIds), add); da = r.next; changed.push(...r.changed);
+    });
+    if (!recs.length) return;
+    setDocBundles(p => p.map(b => recs.find(r => r.id === b.id) || b));
+    await Promise.all(recs.map(dbSaveBundle));
+    await writeDocAssignments(da, changed);
+    recs.forEach(b => auditEvent("doc_bundle", b.id, "assign", `New staff given document bundle "${b.name}" automatically: ${bundleNames(ids).join(", ")}`, {}, b.name));
   }
 
   // Rewrites ALL of a user's DSE reports; report_idx = position in the array (so order matters —
@@ -1280,17 +1706,25 @@ export default function App() {
       ...p,
       [userId]: { ...(p[userId] || {}), [r.moduleId]: { score: r.score, date: r.date, certId: r.certId } },
     })),
-    optimisticDocAck: (userId, docId, date) => setDocAcknowledgements(p => ({
+    optimisticDocAck: (userId, docId, date) => (markWrite(`k:${userId}:${docId}`), setDocAcknowledgements(p => ({
       ...p,
       [userId]: { ...(p[userId] || {}), [docId]: { date, version: (docs.find(d => String(d.id) === String(docId)) || {}).version || 1 } },
-    })),
+    }))),
     optimisticIncident: (rec) => setIncidents(p => [rec, ...p]),
     optimisticDseReport: (userId, report) => setDseReports(p => ({
       ...p,
       [userId]: [ ...(p[userId] || []), report ],
     })),
 
-    previewDoc: (d) => setPreviewDoc(d),
+    // Phone "Read": pictures, web pages and text show in the preview window (rendered
+    // with MobileApp below). PDFs and Office files open in their own tab, where the
+    // phone's viewer can show them — most phones can't display a PDF inside a page.
+    previewDoc: (d) => {
+      const ext = String((d.fileName ? d.fileName.split(".").pop() : d.ext) || "").toUpperCase();
+      const inPage = ["PNG","JPG","JPEG","GIF","WEBP","SVG","HTML","TXT","CSV","MD"].includes(ext);
+      if (!d.fileData || inPage) { setPreviewDoc({ ...d, ext }); return; }
+      if (!openFile(d.fileData)) setPreviewDoc({ ...d, ext });   // tab blocked → show the preview window instead
+    },
     resolveIncident: (id) => {
       setIncidents(p => p.map(i => i.id === id ? { ...i, closed: true, triaged: true } : i));
       const inc = incidents.find(i => i.id === id);
@@ -1377,17 +1811,49 @@ export default function App() {
 
   // users table: { id: TEXT, data: JSON user object }. `user` here shadows the logged-in user — it's the record being saved.
   async function dbSaveUser(user) {
-    await dbWrite(sb.from("users").upsert({ id: String(user.id), data: user }, { onConflict: "id" }), "user", { alertOnError: true });
+    const ok = await dbWrite(sb.from("users").upsert({ id: String(user.id), data: user }, { onConflict: "id" }), "user", { alertOnError: true });
+    // Supabase sign-in: copy login, role and leaver status onto their sign-in account.
+    if (ok && AUTH_MODE === "supabase") {
+      const r = await adminCall("sync", { userId: String(user.id) });
+      if (!r.ok) notify(`The staff record was saved, but their sign-in account wasn't updated:\n${r.error}`, { kind: "error" });
+    }
+    return ok;
+  }
+
+  // Supabase sign-in: set a temporary password (they choose their own at next sign-in).
+  // Creates the sign-in account if they don't have one yet.
+  async function setTempPasswordFor(u, password) {
+    const r = await adminCall("setPassword", { userId: String(u.id), password, temporary: true });
+    return r.ok ? { ok: true } : { ok: false, error: r.error };
   }
 
   async function dbDeleteUser(userId) {
     await dbWrite(sb.from("users").delete().eq("id", String(userId)), "user delete", { alertOnError: true });
+    if (AUTH_MODE === "supabase") {
+      const r = await adminCall("remove", { userId: String(userId) });
+      if (!r.ok) notify(`The staff record was removed, but their sign-in account wasn't:\n${r.error}`, { kind: "error" });
+    }
   }
 
   // ⚠ Writes the WHOLE user object into user_profiles.data — this overwrites any saved
   // theme/emojiMode for that user. Only called on create/edit of staff records.
   async function dbSaveUserProfile(user) {
     await dbWrite(sb.from("user_profiles").upsert({ user_id: String(user.id), data: user }, { onConflict: "user_id" }), "user profile");
+  }
+
+  // Remove (not Leaver): delete everything the portal holds about one person, so
+  // nothing is left behind. Incidents they reported, investigations, inspections and
+  // the Audit Trail are company records and are kept. Returns the rows deleted per table.
+  const PERSON_TABLES = ["training_assigns", "training_completions", "training_completion_history", "doc_assignments",
+    "doc_acknowledgements", "doc_ack_history", "dse_reports", "dse_admin_responses", "ext_certs", "machine_completions",
+    "last_logins", "user_profiles", "dashboard_layout"];
+  async function dbDeletePersonRecords(userId) {
+    const uid = String(userId);
+    const results = await Promise.all([
+      ...PERSON_TABLES.map(t => dbWrite(sb.from(t).delete().eq("user_id", uid), `${t} delete`)),
+      dbWrite(sb.from("quiz_failures").delete().eq("data->>userId", uid), "quiz failures delete"),
+    ]);
+    return results.every(Boolean);
   }
 
   async function dbDeleteUserProfile(userId) {
@@ -1536,16 +2002,24 @@ export default function App() {
       setCustomModules(p => p.find(x => x.id === m.id) ? p.map(x => x.id === m.id ? upd : x) : [...p, upd]);
       dbSaveCustomModule(upd);
     }
-    let cleared = 0;
-    if (change === "major") {
-      const affected = Object.keys(comps).filter(uid => comps[uid] && comps[uid][m.id]);
-      cleared = affected.length;
-      setComps(p => { const n = { ...p }; affected.forEach(uid => { n[uid] = { ...n[uid] }; delete n[uid][m.id]; }); return n; });
-      affected.forEach(uid => dbWrite(sb.from("training_completions").delete().match({ user_id: String(uid), module_id: String(m.id) }), "completion clear (new module version)"));
-    }
-    auditEvent("module", m.id, "new_version",
+    const logVersion = cleared => auditEvent("module", m.id, "new_version",
       `Version ${newVer} (${change === "major" ? `major — ${cleared} ${cleared === 1 ? "person" : "people"} must redo it` : "minor — completions kept"})${note ? `: ${note}` : ""}`,
       { version: { from: prevVer, to: newVer }, change: { from: null, to: change } }, m.title || "");
+    if (change === "major") {
+      // Clear EVERY current completion of this module, as the database has them —
+      // not just the ones on this screen, which may be missing someone who finished
+      // it after you signed in. Their earlier results stay in the history.
+      (async () => {
+        const mid = String(m.id);
+        const { data, error } = await sb.from("training_completions").query(`select=user_id&module_id=eq.${encodeURIComponent(mid)}`);
+        const affected = [...new Set([...(error ? [] : (data || []).map(r => String(r.user_id))),
+          ...Object.keys(comps).filter(uid => comps[uid] && comps[uid][m.id])])];
+        affected.forEach(uid => markWrite(`c:${uid}:${mid}`));
+        setComps(p => { const n = { ...p }; affected.forEach(uid => { if (n[uid]) { n[uid] = { ...n[uid] }; delete n[uid][m.id]; } }); return n; });
+        await dbWrite(sb.from("training_completions").delete().eq("module_id", mid), "completion clear (new module version)", { alertOnError: true });
+        logVersion(affected.length);
+      })();
+    } else logVersion(0);
     setPendingModuleSave(null);
     setEditingModule(null);
     setAtab("modules");
@@ -1657,7 +2131,9 @@ export default function App() {
   // ⚠⚠ EARLY RETURN — no React hooks may be declared below this line. ⚠⚠
   // (Uses the default dark tokens `Z` because the user's theme isn't known yet.)
   // ── Show loading screen until Supabase data is ready ────────────────────────
-  if (!dbReady) return (
+  // (Supabase sign-in: the login screen shows before any data is loaded — the data
+  //  is loaded after sign-in, with the person's token.)
+  if (!dbReady && !(AUTH_MODE === "supabase" && view === "login")) return (
     <div style={{minHeight:"100vh",background:Z.bg,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Barlow','Trebuchet MS',system-ui,sans-serif",flexDirection:"column",gap:20}}>
       <ZeusProtectLogo/>
       <div style={{color:Z.muted,fontSize:14,letterSpacing:1}}>CONNECTING TO DATABASE…</div>
@@ -1675,12 +2151,45 @@ export default function App() {
    */
   async function login() {
     const emailKey = email.toLowerCase().trim();
+    // Counts a failed attempt for this email; locks it after MAX_LOGIN_ATTEMPTS.
+    const registerFailure = () => setLoginAttempts(p => {
+      const cur = p[emailKey]||{count:0};
+      const count = cur.count + 1;
+      const lockedUntil = count >= MAX_LOGIN_ATTEMPTS ? Date.now() + LOCKOUT_MINUTES * 60000 : null;
+      setErr(count >= MAX_LOGIN_ATTEMPTS
+        ? `Too many failed attempts. Account locked for ${LOCKOUT_MINUTES} minutes.`
+        : `Invalid email or password. ${MAX_LOGIN_ATTEMPTS - count} attempt${MAX_LOGIN_ATTEMPTS - count!==1?"s":""} remaining.`);
+      return {...p, [emailKey]: {count, lockedUntil}};
+    });
 
     // Check lockout
     const attempt = loginAttempts[emailKey];
     if (attempt?.lockedUntil && Date.now() < attempt.lockedUntil) {
       const minsLeft = Math.ceil((attempt.lockedUntil - Date.now()) / 60000);
       setErr(`Too many failed attempts. Try again in ${minsLeft} minute${minsLeft!==1?"s":""}.`);
+      return;
+    }
+
+    // ── Supabase sign-in (lib/auth.js): Supabase checks the password and returns a
+    //    token; the account's app_metadata.zp_id links it to the staff record.
+    if (AUTH_MODE === "supabase") {
+      const r = await signIn(emailKey, pass);
+      if (!r.ok) {
+        if (r.error === "Invalid email or password.") registerFailure(); else setErr(r.error);
+        return;
+      }
+      const m = authMeta(r.user);
+      // The database now answers as this person: find their staff record, then load
+      // everything they're allowed to see.
+      setSigningIn(true);
+      const ures = await sb.from("users").select("*");
+      const su = (Array.isArray(ures.data) ? ures.data : []).map(x => x.data).find(x => x && String(x.id) === String(m.zp_id));
+      if (!su) { setSigningIn(false); await signOut(); setErr("Your sign-in isn't linked to a staff record. Please contact your administrator."); return; }
+      if ((su.status||"active") === "leaver") { setSigningIn(false); await signOut(); setErr("This account is no longer active. Please contact your administrator."); return; }
+      if (loadAllRef.current) await loadAllRef.current();
+      setSigningIn(false);
+      setMustChangePw(!!m.must_change_password);
+      finishLogin(su);
       return;
     }
 
@@ -1730,11 +2239,24 @@ export default function App() {
       return;
     }
 
+    finishLogin(u);
+  }
+
+  // Shared end of a successful sign-in (both modes).
+  function finishLogin(u) {
+    const emailKey = String(u.email||"").toLowerCase().trim();
     // Success — clear attempts
-    setLoginAttempts(p => { const n={...p}; delete n[emailKey]; return n; });
+    setLoginAttempts(p => { const n={...p}; delete n[emailKey]; delete n[email.toLowerCase().trim()]; return n; });
     const ts = new Date().toISOString().slice(0,16).replace("T"," ");
     setLastLoginMap(p=>({...p, [u.id]: ts}));
-    dbRecordLogin(u.id, ts);
+    // First ever sign-in? (no login recorded for them yet) → welcome video. Checked BEFORE
+    // this login is recorded; if the check fails, no video (never shown to someone by mistake).
+    (async () => {
+      let first = false;
+      try { const r = await sb.from("last_logins").select("user_id").eq("user_id", String(u.id)); first = !r.error && Array.isArray(r.data) && r.data.length === 0; } catch { /* */ }
+      await dbRecordLogin(u.id, ts);
+      if (first) setWelcomePending(true);
+    })();
     // Restore saved theme for this user
     const profiles = Array.isArray(window.__userProfiles) ? window.__userProfiles : [];
     const profile = profiles.find(r => String(r.user_id) === String(u.id));
@@ -1743,31 +2265,168 @@ export default function App() {
       setDarkMode(["dark","slate","forest","graphite"].includes(profile.data.theme));
     }
     if (profile?.data?.emojiMode === false) setEmojiMode(false);
-    setUser(u); setView(u.role==="admin"?"admin":"staff"); setErr("");
+    setUser(u); setErr("");
+    // Back to the page in the address (refresh / bookmark / link) if this person may see it.
+    const r = initialRouteRef.current || parseRoute(window.location.hash); initialRouteRef.current = null;
+    if (r && routeAllowed(r, u)) {
+      if (r.area === "admin") { setViewRaw("admin"); setAtabRaw(r.tab); }
+      else { setViewRaw("staff"); setStabRaw(r.tab); pendingModuleRef.current = r.moduleId || null; }
+    } else setViewRaw(u.role==="admin"?"admin":"staff");
   }
 
-  // Clears the session in memory only (there is no server session to end).
-  function logout() { setUser(null); setView("login"); setMod(null); }
+  // Clears the session (and, in Supabase sign-in mode, ends the server session too).
+  // In Supabase sign-in mode the page is reloaded after signing out, so nothing the
+  // last person could see stays in memory for the next person on this computer.
+  async function logout() {
+    if (!(await confirmLeave())) return;      // unsaved form? ask first
+    // forget the page address, so the next person to sign in on this computer starts at their dashboard
+    try { window.history.replaceState(null, "", window.location.pathname + window.location.search); } catch { /* */ }
+    // ...and forget their remembered filters (lib/remembered.js)
+    clearRemembered();
+    hideWelcome(); setWelcomePending(false);
+    if (AUTH_MODE === "supabase") { signOut().finally(() => window.location.reload()); return; }
+    setMustChangePw(false); setUser(null); setViewRaw("login"); setMod(null);
+    setAdminReportView("staff"); setShowHiddenModules(false); setStaffFilterManager("all"); setDocFolder("all"); setStaffFilterProgress("all");
+    setStaffGroupByTeam(false); setStaffStatusFilter("all"); setBulkTarget("individual"); setBulkManager(""); setStaffFilterSearch(""); setStaffSel([]);
+  }
 
   // Opens a module in the player and resets all per-attempt state.
   function startMod(m) { setMod(m); setStep(0); setQans({}); setQsub(false); setShowCelebration(false); setHotspotComplete({}); }
 
-  // Scores the quiz. PASS MARK = 70% — this number is repeated in several places in
-  // the module player UI (and in mobile/screens/ModulePlayer.jsx). If you change it,
-  // search for "70" in both files and update them together.
-  // A pass creates a certificate id "ZSL-XXXXXXXX"; a fail is logged to quiz_failures.
+  // ── Quick search (🔍 in the header, Ctrl+K / ⌘K) ── shared/QuickSearch.jsx
+  // Builds the list of things a person can jump to. Only runs while the search is open.
+  // jump() asks once about unsaved work, then changes page with the raw setters
+  // (the guarded setters would each ask separately).
+  const jump = fn => { if (!unsavedLabels().length) { fn(); return; } confirmLeave().then(ok => { if (ok) fn(); }); };
+  function quickItems() {
+    if (!user) return [];
+    const items = [];
+    const isAdmin = user.role === "admin";
+    const toStaff = (tab, then) => jump(() => { setMod(null); setViewRaw("staff"); setStabRaw(tab); if (then) then(); });
+    const toAdmin = (tab, then) => jump(() => { setMod(null); setViewRaw("admin"); setAtabRaw(tab); if (then) then(); });
+    const fmt = d => (d ? String(d).slice(0, 10).split("-").reverse().join("/") : "");
+    // pages
+    const STAFF_PAGES = { dashboard: "Dashboard", training: "My Training", history: "Training history & certificates", documents: "Documents", incidents: "Report Incident", dse: "My DSE", machinery: "My Machinery", actions: "My Actions", team: "My Team", account: "My Account" };
+    const staffTabs = ["dashboard", "training", "history", "documents", "incidents", "dse", ...(isWarehouseWorker(user) ? ["machinery"] : []), "actions", ...(user.role === "manager" ? ["team"] : []), "account"];
+    staffTabs.forEach(t => items.push({ id: `p:s:${t}`, group: "Pages", icon: "📄", label: STAFF_PAGES[t], sub: isAdmin ? "Your own training view" : "Page", words: t === "history" ? "certificates certificate history" : t === "incidents" ? "report hazard near miss" : "", run: () => toStaff(t) }));
+    if (isAdmin) {
+      const ADMIN_PAGES = [["dashboard", "Admin dashboard", ""], ["users", "Staff", "staff accounts people users"], ["assign", "Assign Training", "training"], ["modules", "Training Library", "modules training"],
+        ["create", "Create Module", "new module training"], ["reports", "Reports", "training matrix report excel"], ["documents", "H&S Documents", "documents bundles policies"], ["coshh", "COSHH Register", "chemicals"],
+        ["audit", "Audit Trail", "log history"], ["incidents", "Incidents", "accidents near miss riddor"], ["inspections", "Inspections", "site inspection"], ["ra", "Risk Assessments", "risk"],
+        ["firesafety", "Fire Safety", "wardens extinguishers drills"], ["firstaid", "First Aid", "first aiders"], ["contractors", "Contractors", ""], ["permits", "Permits", "permit to work"],
+        ["machinery", "Machinery Competence", "forklift"], ["equipment", "Equipment Register", "equipment"], ["account", "My Account", "password"]];
+      ADMIN_PAGES.forEach(([t, l, w]) => items.push({ id: `p:a:${t}`, group: "Pages", icon: "🧭", label: l, sub: "Admin page", words: w, run: () => toAdmin(t) }));
+      items.push({ id: "p:a:welcome", group: "Pages", icon: "🎬", label: "Welcome video", sub: "Staff → the video new staff see when they first sign in", words: "first sign in login new starter induction tour", run: () => toAdmin("users", () => setShowWelcomeSettings(true)) });
+      // people
+      allUsers.forEach(u => {
+        const leaver = (u.status || "active") === "leaver";
+        const open = () => toAdmin("users", () => { setStaffFilterSearch(u.name); setStaffFilterManager("all"); setStaffFilterProgress("all"); setStaffStatusFilter("all"); setEditingStaff(null); });
+        items.push({ id: `u:${u.id}`, group: "People", icon: "👤", label: u.name, sub: [u.jobTitle, u.manager && `Manager: ${u.manager}`, leaver && "Leaver"].filter(Boolean).join(" · "), words: `${u.email || ""} ${u.department || ""}`, run: open,
+          actions: [{ label: "Assign training", run: () => toAdmin("assign", () => { setBulkTarget("individual"); setTarget(String(u.id)); }) },
+                    { label: "Edit", run: () => toAdmin("users", () => { setStaffFilterSearch(u.name); setStaffFilterManager("all"); setStaffFilterProgress("all"); setStaffStatusFilter("all"); setEditingStaff(u); }) }] });
+      });
+      allModules.forEach(m => items.push({ id: `m:${m.id}`, group: "Modules", icon: m.icon || "📚", label: m.title, sub: [m.category, m.level, m._hidden && "Hidden"].filter(Boolean).join(" · "), words: m.description || "", run: () => setPreviewModule(m) }));
+      const INC = { near_miss: "Near miss", unsafe_condition: "Unsafe condition", unsafe_act: "Unsafe act", accident: "Accident", dangerous_occurrence: "Dangerous occurrence", ill_health: "Ill health" };
+      incidents.forEach(i => items.push({ id: `i:${i.id}`, group: "Incidents", icon: i.riddor ? "🚨" : "⚠️", label: `${INC[i.type] || "Incident"} — ${i.location || "no location"}`, sub: [fmt(i.date), i.closed ? "Closed" : "Open", i.riddor && "RIDDOR", i.description].filter(Boolean).join(" · "), words: `${i.id} ${(allUsers.find(u => String(u.id) === String(i.reportedBy)) || {}).name || ""}`,
+        run: () => toAdmin("incidents", () => setFocusIncidentId(i.id)) }));
+      (contractors || []).forEach(c => items.push({ id: `c:${c.id}`, group: "Contractors", icon: "🦺", label: c.name, sub: [c.trade || c.type, c.status].filter(Boolean).join(" · "), words: `${c.contact || ""} ${(c.workers || []).map(w => w.name).join(" ")}`,
+        run: () => toAdmin("contractors", () => setFocusContractorId(c.id)) }));
+    } else {
+      const myIds = (assigns[String(user.id)] || []).map(String);
+      allModules.filter(m => myIds.includes(String(m.id))).forEach(m => {
+        const done = (comps[user.id] || comps[String(user.id)] || {})[m.id];
+        items.push({ id: `m:${m.id}`, group: "My training", icon: m.icon || "📚", label: m.title, sub: done ? `Completed ${fmt(done.date)}` : "To do", words: m.category || "", run: () => toStaff("training", () => startMod(m)) });
+      });
+    }
+    // documents (everyone can read the H&S documents)
+    docs.forEach(d => items.push({ id: `d:${d.id}`, group: "Documents", icon: "📘", label: d.title, sub: [d.type || d.category, d.date && `Updated ${d.date}`].filter(Boolean).join(" · "), words: d.fileName || "",
+      run: () => (isAdmin && view === "admin" ? toAdmin : toStaff)("documents", () => { setDocFolder("all"); if (d.fileData) setPreviewDoc(d); }) }));
+    return items;
+  }
+
+  // ── Staff list bulk actions (tick people → one action for all of them) ──
+  // Each asks once in an on-page window, then shows a message with Undo.
+  const peopleNamed = ids => { const n = ids.map(id => (allUsers.find(u => String(u.id) === id) || {}).name).filter(Boolean); return n.length <= 3 ? n.join(", ") : `${n.slice(0, 3).join(", ")} and ${n.length - 3} more`; };
+  async function bulkAssignModule(ids) {
+    const mods = allModules.filter(m => !m._hidden);
+    const v = await ask({ title: `Assign a module to ${ids.length} ${ids.length !== 1 ? "people" : "person"}`, message: peopleNamed(ids), ok: "Assign",
+      fields: [{ id: "mid", label: "Module", required: true, placeholder: "Choose a module…", options: mods.map(m => ({ value: String(m.id), label: `${m.title}${m.level === "Mandatory" ? " (mandatory)" : ""}` })) }] });
+    if (!v) return false;
+    const m = mods.find(x => String(x.id) === v.mid); if (!m) return false;
+    const affected = {}, added = [];
+    ids.forEach(id => { const cur = assigns[id] || []; if (!cur.includes(m.id)) { affected[id] = [...cur, m.id]; added.push(id); } });
+    if (!added.length) { notify(`Everyone ticked already has "${m.title}".`, { kind: "info" }); return true; }
+    setAssigns(p => ({ ...p, ...affected }));
+    await dbSaveAssigns(affected);
+    notify(`"${m.title}" assigned to ${added.length} ${added.length !== 1 ? "people" : "person"}${added.length < ids.length ? ` (${ids.length - added.length} already had it)` : ""}.`, { undo: () => {
+      const back = {}; added.forEach(id => { back[id] = (affected[id] || []).filter(x => x !== m.id); });
+      setAssigns(p => { const n = { ...p }; added.forEach(id => { n[id] = (n[id] || []).filter(x => x !== m.id); }); return n; });
+      dbSaveAssigns(back); notify(`"${m.title}" taken off again.`, { kind: "info" });
+    } });
+    return true;
+  }
+  async function bulkGiveBundle(ids) {
+    if (!docBundles.length) { notify("There are no document bundles yet. Create one under H&S Documents → Bundles.", { kind: "info", timeout: 7000 }); return false; }
+    const v = await ask({ title: `Give a document bundle to ${ids.length} ${ids.length !== 1 ? "people" : "person"}`, message: peopleNamed(ids), ok: "Give bundle",
+      fields: [{ id: "bid", label: "Document bundle", required: true, placeholder: "Choose a bundle…", options: docBundles.map(b => ({ value: String(b.id), label: `${b.name} (${(b.docIds || []).length} documents)` })) }] });
+    if (!v) return false;
+    const b = docBundles.find(x => String(x.id) === v.bid); if (!b) return false;
+    const added = ids.filter(id => !(b.memberIds || []).includes(id));
+    if (!added.length) { notify(`Everyone ticked already has "${b.name}".`, { kind: "info" }); return true; }
+    const n = await assignBundle(b, added);
+    if (n) notify(`"${b.name}" given to ${n} ${n !== 1 ? "people" : "person"} as required reading.`, { undo: () => { unassignBundle(b, added); notify(`"${b.name}" taken off again.`, { kind: "info" }); } });
+    return true;
+  }
+  async function saveUsersBulk(updated) {
+    setAllUsers(p => p.map(u => updated.find(x => x.id === u.id) || u));
+    for (const u of updated) { await dbSaveUser(u); await dbSaveUserProfile(u); }
+  }
+  async function bulkSetManager(ids) {
+    const managerNames = allUsers.filter(u => u.role === "manager" && (u.status || "active") !== "leaver").map(u => u.name).sort();
+    const v = await ask({ title: `Set the line manager for ${ids.length} ${ids.length !== 1 ? "people" : "person"}`, message: peopleNamed(ids), ok: "Set line manager",
+      fields: [{ id: "manager", label: "Line manager", required: true, suggestions: managerNames, placeholder: "Type or pick a name",
+        help: "Pick a name from the list so they appear in that manager's My Team (the name must match a Line manager account exactly)." }] });
+    if (!v) return false;
+    const name = v.manager.trim().replace(/\s+/g, " ");
+    const people = allUsers.filter(u => ids.includes(String(u.id)));
+    const before = people.map(u => ({ ...u }));
+    await saveUsersBulk(people.map(u => ({ ...u, manager: name })));
+    const known = managerNames.some(x => x.toLowerCase() === name.toLowerCase());
+    notify(`Line manager set to ${name} for ${people.length} ${people.length !== 1 ? "people" : "person"}.${known ? "" : " (No Line manager account has that name yet, so they won't appear in anyone's My Team.)"}`, { kind: known ? "success" : "warn", undo: () => { saveUsersBulk(before); notify("Line managers put back.", { kind: "info" }); } });
+    return true;
+  }
+  async function bulkMarkLeavers(ids) {
+    const people = allUsers.filter(u => ids.includes(String(u.id)) && String(u.id) !== String(user.id) && (u.status || "active") !== "leaver");
+    if (!people.length) { notify("Everyone ticked is already a leaver.", { kind: "info" }); return false; }
+    const ok = await ask({ title: `Mark ${people.length} ${people.length !== 1 ? "people" : "person"} as leavers?`, danger: true, ok: "Mark as leavers",
+      message: `${peopleNamed(people.map(u => String(u.id)))}\n\nLeavers can no longer sign in and drop out of reminders and compliance figures. Their training records, certificates and history are kept, and you can make them active again from Edit.` });
+    if (!ok) return false;
+    const before = people.map(u => ({ ...u }));
+    await saveUsersBulk(people.map(u => ({ ...u, status: "leaver" })));
+    notify(`${people.length} ${people.length !== 1 ? "people" : "person"} marked as leavers.`, { undo: () => { saveUsersBulk(before); notify("Put back as they were.", { kind: "info" }); } });
+    return true;
+  }
+
+  // Scores the quiz against the module's own pass mark (passMarkOf: default 70%,
+  // set per module in Create/Edit Module). The phone player does the same.
+  // A pass creates a certificate id "ZSL-XXXXXXXX" and becomes their result. A fail
+  // is logged to quiz_failures only — it never replaces an earlier pass, and it
+  // doesn't count as completed.
   function submitQuiz() {
     let score=0;
     mod.quiz.forEach((q,i)=>{ if(qans[i]===q.answer) score++; });
     const pct=Math.round(score/mod.quiz.length*100);
+    const mark = passMarkOf(mod);
     setQsub(true);
-    const certId = pct>=70 ? "ZSL-" + (user.id.toString(36) + mod.id + Date.now().toString(36)).toUpperCase().slice(-8) : null;
-    if (pct>=70) setShowCelebration(true);
-    const rec = {score:pct, date:new Date().toISOString().slice(0,10), answers:{...qans}, certId, moduleVersion: mod.version||1};
-    setComps(p=>({...p,[user.id]:{...p[user.id],[mod.id]:rec}}));
-    dbSaveCompletion(user.id, mod.id, rec);
+    const certId = pct>=mark ? "ZSL-" + (user.id.toString(36) + mod.id + Date.now().toString(36)).toUpperCase().slice(-8) : null;
+    if (pct>=mark) {
+      setShowCelebration(true);
+      const rec = {score:pct, date:new Date().toISOString().slice(0,10), answers:{...qans}, certId, moduleVersion: mod.version||1};
+      setComps(p=>({...p,[user.id]:{...p[user.id],[mod.id]:rec}}));
+      dbSaveCompletion(user.id, mod.id, rec);
+    }
     // Record failure for admin visibility
-    if (pct < 70) {
+    if (pct < mark) {
       const failure = {
         id: "qf_" + Date.now(),
         userId: user.id,
@@ -1777,6 +2436,7 @@ export default function App() {
         score: pct,
         date: new Date().toISOString().slice(0,10),
         acknowledged: false,
+        passMark: mark,
       };
       setQuizFailures(p=>[...p, failure]);
       dbSaveQuizFailure(failure);
@@ -1788,13 +2448,18 @@ export default function App() {
 
   // Style factory for the top-nav tab buttons (active tab gets a coloured underline).
   // ── Shared nav styles ──
+  // Narrower screens get tighter menu items so the whole admin bar (including Sign Out) fits;
+  // if it still doesn't, the right-hand group wraps onto a second row instead of being cut off.
+  const navTight = winW < 2100;
   const navBtn = (active, col=T.accentLt) => ({
-    padding:"16px 16px", background:"none", border:"none",
+    padding:navTight?"16px 9px":"16px 16px", background:"none", border:"none",
     borderBottom:`3px solid ${active?col:"transparent"}`,
     color:active?col:darkMode?"#94a3b8":"#475569",
     fontWeight:active?700:500, cursor:"pointer", fontSize:12,
-    textTransform:"uppercase", letterSpacing:.8,
+    textTransform:"uppercase", letterSpacing:navTight?.4:.8,
     fontFamily:font, transition:"color .2s",
+    // long labels ("Risk Assessments") go onto two lines rather than widening the bar
+    maxWidth:navTight?118:"none", lineHeight:1.25, textAlign:"center",
   });
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -1830,8 +2495,8 @@ export default function App() {
               style={{width:"100%",marginTop:6,padding:"11px 14px",background:"rgba(0,0,0,0.3)",border:"1px solid rgba(255,255,255,0.12)",borderRadius:10,color:"#ffffff",fontSize:14,outline:"none",boxSizing:"border-box",fontFamily:font}}/>
           </div>
           {err && <p style={{color:"#f87171",fontSize:13,margin:0}}>{err}</p>}
-          <button onClick={login} style={{marginTop:4,background:"linear-gradient(135deg,#2563eb,#152370)",color:"#ffffff",border:"none",borderRadius:10,padding:"13px",fontWeight:800,fontSize:15,cursor:"pointer",letterSpacing:.5,fontFamily:font,boxShadow:"0 4px 20px rgba(37,99,235,.4)"}}>
-            Sign In →
+          <button onClick={login} disabled={signingIn} style={{opacity:signingIn?0.7:1,marginTop:4,background:"linear-gradient(135deg,#2563eb,#152370)",color:"#ffffff",border:"none",borderRadius:10,padding:"13px",fontWeight:800,fontSize:15,cursor:"pointer",letterSpacing:.5,fontFamily:font,boxShadow:"0 4px 20px rgba(37,99,235,.4)"}}>
+            {signingIn ? "Signing in…" : "Sign In →"}
           </button>
         </div>
 
@@ -1851,10 +2516,19 @@ export default function App() {
   // Sits above every desktop view so a phone never falls through to the wide
   // layout. MobileApp is a view over the state below — it owns no domain data
   // and never touches Supabase directly, only the handlers passed in as `db`.
+  // Temporary password → must choose their own before using the portal (desktop and phone).
+  if (user && mustChangePw) return (
+    <ForcePasswordChange user={user} onDone={()=>setMustChangePw(false)} onSignOut={logout} Z={T} font={font}/>
+  );
+
   if (isPhone && user && !forceDesktop) {
     return (
+      <>
+      {/* The phone layout's document preview (MobileApp's "Read" → mobileDb.previewDoc). */}
+      <div style={{fontFamily:font,color:T.white}}><PreviewModal doc={previewDoc} onClose={()=>setPreviewDoc(null)} Z={T} font={font}/></div>
       <MobileApp
         user={user}
+        docBundles={docBundles}
         onSignOut={logout}
         onSwitchToDesktop={() => setForceDesktop(true)}
         onCompleteQuickReport={(inc) => { setForceDesktop(true); setStab("incidents"); setQuickEditId(inc.id); }}
@@ -1875,6 +2549,7 @@ export default function App() {
         setDarkMode={setDarkMode}
         db={mobileDb}
       />
+      </>
     );
   }
 
@@ -1909,12 +2584,16 @@ export default function App() {
     const isIntro = step===0;
     const isQuiz  = step===quizStep;
     const slide   = (!isIntro && !isQuiz) ? mod.content[step-1] : null;
+    // A slide imported from PowerPoint (images[0].deck, see slideImport.js) is shown large:
+    // wider column, less padding, a small heading (the title is in the picture) and the
+    // picture sized to fit the screen height. Hotspot slides keep the normal layout.
+    const isDeck  = !!(slide && (slide.images||[])[0] && slide.images[0].deck && !(slide.hotspots&&slide.hotspots.length>0));
 
     let qScore=0, qPct=0, passed=false;
     if (qsub) {
       mod.quiz.forEach((q,i)=>{ if(qans[i]===q.answer) qScore++; });
       qPct = Math.round(qScore/mod.quiz.length*100);
-      passed = qPct>=70;
+      passed = qPct>=passMarkOf(mod);
     }
 
     return (
@@ -2040,7 +2719,7 @@ export default function App() {
           <div style={{height:"100%",background:`linear-gradient(90deg,${T.accent},${T.accentLt})`,width:`${(step/quizStep)*100}%`,transition:"width .4s"}}/>
         </div>
 
-        <div style={{maxWidth:720,margin:"0 auto",padding:"44px 24px"}}>
+        <div style={{maxWidth:isDeck?1280:720,margin:"0 auto",padding:isDeck?"20px 24px":"44px 24px"}}>
 
           {isIntro && (
             <div style={{textAlign:"center"}}>
@@ -2048,7 +2727,7 @@ export default function App() {
               <h1 style={{fontSize:32,fontWeight:900,letterSpacing:-1,marginBottom:6}}>{mod.title}</h1>
               <p style={{color:T.muted,fontSize:15,marginBottom:28}}>{mod.category} · {mod.duration} · <span style={{color:mod.level==="Mandatory"?"#f87171":T.accentLt}}>{mod.level}</span> · {totalSlides} slides · {mod.quiz.length} quiz questions</p>
               <div style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:16,padding:28,textAlign:"left",border:`1px solid ${T.border}`}}>
-                <p style={{margin:0,color:T.slate,lineHeight:1.8,fontSize:15}}>Read through each slide carefully, then complete the knowledge check. A score of <strong style={{color:T.green}}>70% or above</strong> is required to pass and receive your Zeus certificate.</p>
+                <p style={{margin:0,color:T.slate,lineHeight:1.8,fontSize:15}}>Read through each slide carefully, then complete the knowledge check. A score of <strong style={{color:T.green}}>{passMarkOf(mod)}% or above</strong> is required to pass and receive your Zeus certificate.</p>
               </div>
               <button onClick={()=>{setStep(1);window.scrollTo({top:0,behavior:"smooth"});}} style={{marginTop:32,background:`linear-gradient(135deg,${T.accent},${T.blue})`,color:T.white,border:"none",borderRadius:12,padding:"14px 44px",fontWeight:800,fontSize:16,cursor:"pointer",fontFamily:font,boxShadow:`0 6px 24px ${T.accent}55`,letterSpacing:.5}}>
                 Begin Module →
@@ -2058,8 +2737,8 @@ export default function App() {
 
           {slide && (
             <div>
-              <div style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:20,padding:40,border:`1px solid ${T.border}`,boxShadow:"0 8px 40px rgba(0,0,0,.4)"}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+              <div data-testid="slide-card" data-deck={isDeck?"1":undefined} style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:20,padding:isDeck?"16px 20px 20px":40,border:`1px solid ${T.border}`,boxShadow:"0 8px 40px rgba(0,0,0,.4)"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:isDeck?10:20}}>
                   <div style={{color:T.muted,fontSize:11,fontWeight:800,letterSpacing:2}}>SLIDE {step} OF {totalSlides}</div>
                   <div style={{display:"flex",gap:4}}>
                     {Array.from({length:totalSlides}).map((_,i)=>(
@@ -2068,16 +2747,21 @@ export default function App() {
                   </div>
                 </div>
                 {slide.heading && (
-                  <h2 style={{fontSize:22,fontWeight:900,color:T.white,margin:"0 0 18px",letterSpacing:-.5,paddingBottom:14,borderBottom:`1px solid ${T.borderMd}`}}>
+                  <h2 style={isDeck
+                    ? {fontSize:15,fontWeight:800,color:T.muted,margin:"0 0 10px",letterSpacing:-.2}
+                    : {fontSize:22,fontWeight:900,color:T.white,margin:"0 0 18px",letterSpacing:-.5,paddingBottom:14,borderBottom:`1px solid ${T.borderMd}`}}>
                     {slide.heading}
                   </h2>
                 )}
                 {((slide.images||[]).length>0 || slide.image?.data || slide.image?.url) && !(slide.hotspots&&slide.hotspots.length>0) && (
                   <div style={{marginBottom:20,display:"flex",flexWrap:"wrap",gap:10,justifyContent:"center"}}>
                     {/* new images[] array */}
+                    {/* deck: a whole PowerPoint slide imported from a PDF — shown full width */}
                     {(slide.images||[]).map((img,ii)=>(
-                      <img key={ii} src={img.url||img.data} alt={img.name||""} onClick={()=>{setLightboxSrc(img.url||img.data);setLightboxZoomed(false);}}
-                        style={{maxWidth:"100%",flex:"1 1 220px",maxHeight:360,borderRadius:12,border:`1px solid ${T.borderMd}`,objectFit:"contain",cursor:"zoom-in"}}/>
+                      <img key={ii} src={img.url||img.data} alt={img.deck ? (slide.heading||"Slide") : (img.name||"")} onClick={()=>{setLightboxSrc(img.url||img.data);setLightboxZoomed(false);}}
+                        style={img.deck
+                          ? {maxWidth:"100%",maxHeight:"max(260px, calc(100vh - 250px))",width:"auto",height:"auto",borderRadius:10,border:`1px solid ${T.borderMd}`,cursor:"zoom-in",background:"#fff",display:"block"}
+                          : {maxWidth:"100%",flex:"1 1 220px",maxHeight:360,borderRadius:12,border:`1px solid ${T.borderMd}`,objectFit:"contain",cursor:"zoom-in"}}/>
                     ))}
                     {/* backwards compat: old single image field */}
                     {(slide.images||[]).length===0 && (slide.image?.data||slide.image?.url) && (
@@ -2086,14 +2770,8 @@ export default function App() {
                     )}
                   </div>
                 )}
-                {slide.video && (
-                  <div style={{marginBottom:20,borderRadius:12,overflow:"hidden",background:"#000",border:`1px solid ${T.borderMd}`}}>
-                    {slide.video.uploading
-                      ? <div style={{padding:32,textAlign:"center",color:"#aaa",fontSize:13}}>⏳ Uploading video…</div>
-                      : <video src={slide.video.url||slide.video.data} controls style={{width:"100%",maxHeight:360,display:"block"}}/>
-                    }
-                  </div>
-                )}
+                {/* uploaded file, or a YouTube / Vimeo / Stream link (shared/SlideVideo.jsx) */}
+                {slide.video && <SlideVideo video={slide.video} Z={T} style={{marginBottom:20}}/>}
                 {/* Rich (HTML) text is ALWAYS passed through sanitizeHtml before rendering. Plain text is split on ". " and lines like "Step 2: ..." become numbered badges. */}
                 {slide.text && (
                   isHtmlContent(slide.text) ? (
@@ -2141,7 +2819,7 @@ export default function App() {
           {isQuiz && !qsub && (
             <div>
               <h2 style={{fontSize:24,fontWeight:900,marginBottom:4,letterSpacing:-.5}}>Knowledge Check</h2>
-              <p style={{color:T.muted,marginBottom:28,fontSize:14}}>{mod.quiz.length} questions · 70% needed to pass</p>
+              <p style={{color:T.muted,marginBottom:28,fontSize:14}}>{mod.quiz.length} questions · {passMarkOf(mod)}% needed to pass</p>
               {mod.quiz.map((q,qi)=>(
                 <div key={qi} style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:16,padding:24,marginBottom:14,border:`1px solid ${T.border}`}}>
                   <p style={{fontWeight:700,marginBottom:16,fontSize:15}}><span style={{color:T.accentLt}}>Q{qi+1}.</span> {q.q}</p>
@@ -2167,7 +2845,7 @@ export default function App() {
                 <h2 style={{fontSize:36,fontWeight:900,color:passed?T.green:T.amber,letterSpacing:-1}}>{passed?"Passed!":"Not Quite"}</h2>
                 <div style={{fontSize:60,fontWeight:900,color:T.white,margin:"8px 0",fontFamily:"'Barlow Condensed',sans-serif"}}>{qPct}%</div>
                 <p style={{color:T.muted}}>{qScore} of {mod.quiz.length} correct</p>
-                {!passed && <p style={{color:T.amber,marginTop:6}}>You need 70% to pass. Review the slides and try again.</p>}
+                {!passed && <p style={{color:T.amber,marginTop:6}}>You need {passMarkOf(mod)}% to pass. Review the slides and try again.</p>}
                 <div style={{display:"flex",gap:12,justifyContent:"center",marginTop:28,flexWrap:"wrap"}}>
                   {passed && (
                     <button onClick={()=>setCert({module:mod,score:qPct,date:(comps[user.id]||{})[mod.id]?.date||new Date().toISOString().slice(0,10),certId:(comps[user.id]||{})[mod.id]?.certId||null})}
@@ -2326,6 +3004,8 @@ export default function App() {
       <div style={{minHeight:"100vh",background:T.bg,fontFamily:font,color:T.white}}>
         <CertModal/>
         <PreviewModal doc={previewDoc} onClose={()=>setPreviewDoc(null)} Z={T} font={font}/>
+        {/* ▲/▼ top-of-page / bottom-of-page buttons on long screens (shared/ScrollNav.jsx) */}
+        <ScrollNav bottom={isMobile && stab!=="dashboard" ? 92 : 24} Z={T} font={font}/>
         {/* Nav */}
         <div style={{background:`linear-gradient(90deg,${T.navyDk},${T.navyMd})`,borderBottom:`1px solid ${T.border}`,padding:"0 24px",display:"flex",alignItems:"center",position:"relative"}}>
           <div style={{marginRight:20,padding:"10px 0",flexShrink:0}}><ZeusLogo darkMode={darkMode}/></div>
@@ -2390,6 +3070,7 @@ export default function App() {
               else if(myActions.length) notifications.push({type:"report",urgent:false,title:`${myActions.length} open corrective action${myActions.length!==1?"s":""}`,detail:`You have been assigned action${myActions.length!==1?"s":""} from an investigation`,nav:{tab:"actions"}});
               return <NotificationBell notifications={notifications} onNavigate={n=>{ setStab(n.tab); if(n.editId) setQuickEditId(n.editId); }} Z={T} font={font}/>;
             })()}
+            <QuickSearch getItems={quickItems} Z={T} font={font} compact={isMobile}/>
             <div style={{width:1,height:20,background:T.headerBgMd,margin:"0 4px"}}/>
             <button title={`Theme: ${theme} — click to cycle`} onClick={()=>{
               const order=["dark","light","slate","forest","graphite","arctic","sand","rose"];
@@ -2478,14 +3159,17 @@ export default function App() {
               {/* Stat tiles */}
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12,marginBottom:24}}>
                 {[
-                  { label:"Assigned",   value:myMods.length,          color:T.accentLt,    sub:"modules total" },
-                  { label:"Up to Date", value:upToDate.length,         color:"#10b981",     sub:"completed & valid" },
-                  { label:"Not Started",value:notStarted.length,       color:notStarted.length>0?"#f59e0b":"#10b981", sub:"awaiting completion" },
-                  { label:"Expired",    value:expired.length,          color:expired.length>0?"#ef4444":"#10b981",    sub:"need renewal" },
-                  { label:"Expiring",   value:expiring.length,         color:expiring.length>0?"#f59e0b":"#10b981",   sub:`within ${EXPIRY_WARNING_DAYS} days` },
-                  { label:"Documents",  value:unreadDocs.length,       color:unreadDocs.length>0?"#f59e0b":"#10b981", sub:"need acknowledgement" },
+                  { label:"Assigned",   value:myMods.length,          color:T.accentLt,    sub:"modules total", go:"training" },
+                  { label:"Up to Date", value:upToDate.length,         color:"#10b981",     sub:"completed & valid", go:"history" },
+                  { label:"Not Started",value:notStarted.length,       color:notStarted.length>0?"#f59e0b":"#10b981", sub:"awaiting completion", go:"training" },
+                  { label:"Expired",    value:expired.length,          color:expired.length>0?"#ef4444":"#10b981",    sub:"need renewal", go:"training" },
+                  { label:"Expiring",   value:expiring.length,         color:expiring.length>0?"#f59e0b":"#10b981",   sub:`within ${EXPIRY_WARNING_DAYS} days`, go:"training" },
+                  { label:"Documents",  value:unreadDocs.length,       color:unreadDocs.length>0?"#f59e0b":"#10b981", sub:"need acknowledgement", go:"documents" },
                 ].map((s,i)=>(
-                  <div key={i} style={{background:T.overlay,borderRadius:12,padding:"14px 16px",border:`1px solid ${s.value>0&&s.color!=="#10b981"?s.color+"44":T.borderMd}`}}>
+                  // each figure opens the page behind it (click, or Tab + Enter)
+                  <div key={i} role="button" tabIndex={0} data-testid="dash-figure" onClick={()=>setStab(s.go)} onKeyDown={e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); setStab(s.go); } }}
+                    aria-label={`${s.label}: ${s.value} ${s.sub}. Open ${s.go==="history"?"History":s.go==="documents"?"Documents":"My Training"}.`} title={`Open ${s.go==="history"?"History":s.go==="documents"?"Documents":"My Training"}`}
+                    style={{background:T.overlay,borderRadius:12,padding:"14px 16px",cursor:"pointer",border:`1px solid ${s.value>0&&s.color!=="#10b981"?s.color+"44":T.borderMd}`}}>
                     <div style={{fontSize:22,fontWeight:900,color:s.color,lineHeight:1,marginBottom:3}}>{s.value}</div>
                     <div style={{fontSize:12,fontWeight:700,color:T.white}}>{s.label}</div>
                     <div style={{fontSize:10,color:T.muted,marginTop:1}}>{s.sub}</div>
@@ -2646,7 +3330,7 @@ export default function App() {
                         <div style={{fontWeight:700,fontSize:13,color:T.white,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{m.title}</div>
                         <div style={{fontSize:11,color:T.muted}}>{m.category} · {m.duration}</div>
                       </div>
-                      {isDone && <span style={{fontSize:11,color:T.muted}}>{myC[m.id].score}%</span>}
+                      {isDone && <span style={{fontSize:11,color:T.muted}}>{scoreText(myC[m.id])}</span>}
                       <span style={{fontSize:11,fontWeight:700,color:statusColor,background:`${statusColor}18`,border:`1px solid ${statusColor}33`,borderRadius:6,padding:"2px 8px",whiteSpace:"nowrap",flexShrink:0}}>{statusLabel}</span>
                     </div>
                   );
@@ -2673,10 +3357,10 @@ export default function App() {
                       {isDone && (
                         <div style={{marginBottom:14}}>
                           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
-                            <Bar pct={myC[m.id].score} color={myC[m.id].score>=70?T.green:T.amber}/>
-                            <span style={{color:myC[m.id].score>=70?T.green:T.amber,fontWeight:700,fontSize:13}}>{myC[m.id].score}%</span>
+                            <Bar pct={myC[m.id].recorded?100:myC[m.id].score} color={isPassed(myC[m.id])?T.green:T.amber}/>
+                            <span style={{color:isPassed(myC[m.id])?T.green:T.amber,fontWeight:700,fontSize:13}}>{scoreText(myC[m.id])}</span>
                           </div>
-                          <p style={{color:T.muted,fontSize:11,margin:"0 0 6px"}}>Completed {myC[m.id].date}</p>
+                          <p style={{color:T.muted,fontSize:11,margin:"0 0 6px"}}>Completed {myC[m.id].date}{myC[m.id].recorded?(myC[m.id].recorded.session?" · in a group session":" · from your earlier training records"):""}</p>
                           {m.renewalMonths && (() => {
                             const ex = getExpiryStatus(myC[m.id].date, m.renewalMonths);
                             if (!ex) return null;
@@ -2707,7 +3391,7 @@ export default function App() {
                             borderRadius:10,padding:"10px",fontWeight:700,cursor:"pointer",fontSize:13,fontFamily:font}}>
                           {isDone?(()=>{const ex=m.renewalMonths?getExpiryStatus(myC[m.id].date,m.renewalMonths):null; return ex&&ex.status==="expired"?"Renew Now →":ex&&ex.status==="expiring"?"Renew Soon →":"Review Module"})():"Start →"}
                         </button>
-                        {isDone && (
+                        {isDone && !myC[m.id].recorded && (
                           <button onClick={()=>setCert({module:m,score:myC[m.id].score,date:myC[m.id].date,certId:myC[m.id].certId||null})}
                             style={{background:"rgba(245,158,11,0.12)",color:T.gold,border:`1px solid rgba(245,158,11,0.3)`,borderRadius:10,padding:"10px 14px",fontWeight:700,cursor:"pointer",fontSize:12,fontFamily:font}}>
                             🏅
@@ -2772,10 +3456,10 @@ export default function App() {
                             <span style={{fontWeight:700,fontSize:14,color:T.white}}>{m.title}</span>
                           </div>
                           <MobileCardRow label="Date" value={myC[m.id].date}/>
-                          <MobileCardRow label="Score" value={<span style={{color:myC[m.id].score>=70?T.green:T.amber,fontWeight:800}}>{myC[m.id].score}%</span>}/>
+                          <MobileCardRow label="Score" value={<span style={{color:isPassed(myC[m.id])?T.green:T.amber,fontWeight:800}}>{scoreText(myC[m.id])}</span>}/>
                           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:4}}>
-                            <Pill label={myC[m.id].score>=70?"Passed":"Failed"} col={myC[m.id].score>=70?"green":"red"}/>
-                            {myC[m.id].score>=70 && <button onClick={()=>setCert({module:m,score:myC[m.id].score,date:myC[m.id].date,certId:myC[m.id].certId||null})} style={{background:"rgba(245,158,11,0.1)",border:`1px solid rgba(245,158,11,0.3)`,color:T.gold,borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font}}>🏅 Certificate</button>}
+                            <Pill label={myC[m.id].recorded?"Completed":isPassed(myC[m.id])?"Passed":"Failed"} col={isPassed(myC[m.id])?"green":"red"}/>
+                            {isPassed(myC[m.id]) && !myC[m.id].recorded && <button onClick={()=>setCert({module:m,score:myC[m.id].score,date:myC[m.id].date,certId:myC[m.id].certId||null})} style={{background:"rgba(245,158,11,0.1)",border:`1px solid rgba(245,158,11,0.3)`,color:T.gold,borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font}}>🏅 Certificate</button>}
                           </div>
                         </MobileCard>
                       ))}
@@ -2789,10 +3473,10 @@ export default function App() {
                       <div key={m.id} style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",padding:"16px 20px",borderTop:i>0?`1px solid ${T.border}`:"none",alignItems:"center"}}>
                         <div style={{display:"flex",alignItems:"center",gap:10}}><span>{m.icon}</span><span style={{fontSize:14,fontWeight:700}}>{m.title}</span></div>
                         <span style={{color:T.muted,fontSize:13}}>{myC[m.id].date}</span>
-                        <span style={{color:myC[m.id].score>=70?T.green:T.amber,fontWeight:800,fontSize:15}}>{myC[m.id].score}%</span>
+                        <span title={myC[m.id].recorded?"Recorded from your earlier training records":undefined} style={{color:isPassed(myC[m.id])?T.green:T.amber,fontWeight:800,fontSize:15}}>{scoreText(myC[m.id])}</span>
                         <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                          <Pill label={myC[m.id].score>=70?"Passed":"Failed"} col={myC[m.id].score>=70?"green":"red"}/>
-                          {myC[m.id].score>=70&&<button onClick={()=>setCert({module:m,score:myC[m.id].score,date:myC[m.id].date,certId:myC[m.id].certId||null})} style={{background:"rgba(245,158,11,0.1)",border:`1px solid rgba(245,158,11,0.3)`,color:T.gold,borderRadius:8,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font}}>🏅 Cert</button>}
+                          <Pill label={myC[m.id].recorded?"Completed":isPassed(myC[m.id])?"Passed":"Failed"} col={isPassed(myC[m.id])?"green":"red"}/>
+                          {isPassed(myC[m.id])&&!myC[m.id].recorded&&<button onClick={()=>setCert({module:m,score:myC[m.id].score,date:myC[m.id].date,certId:myC[m.id].certId||null})} style={{background:"rgba(245,158,11,0.1)",border:`1px solid rgba(245,158,11,0.3)`,color:T.gold,borderRadius:8,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font}}>🏅 Cert</button>}
                         </div>
                       </div>
                     ))}
@@ -2836,9 +3520,11 @@ export default function App() {
                 const required = docs.filter(d=>(docAssignments[String(d.id)]||[]).includes(String(user.id)));
                 const allOther = docs.filter(d=>!(docAssignments[String(d.id)]||[]).includes(String(user.id)));
                 const unread = required.filter(d=>!(docAcknowledgements[user.id]||{})[d.id]);
+                const myBundles = bundlesFor(docBundles, user.id);
 
                 return (
                   <>
+                    <MyBundles bundles={myBundles} userId={String(user.id)} docs={docs} acks={docAcknowledgements} Z={T} font={font}/>
                     {required.length>0 && (
                       <div style={{marginBottom:28}}>
                         <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
@@ -2861,6 +3547,7 @@ export default function App() {
                                     <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2,flexWrap:"wrap"}}>
                                       <span style={{fontWeight:700,fontSize:14,color:"#fff"}}>{d.title}</span>
                                       {!ack && <Pill label="Required Reading" col="amber"/>}
+                                      {bundleNamesOf(myBundles, d.id).map(n=><span key={n} style={{fontSize:11,fontWeight:600,color:"#60a5fa",background:"rgba(96,165,250,0.1)",border:"1px solid rgba(96,165,250,0.3)",borderRadius:20,padding:"1px 8px"}}>{E("📚 ","")}{n}</span>)}
                                     </div>
                                     <div style={{color:T.muted,fontSize:12}}>Updated: {d.date} · {d.size}{d.fileName?` · ${d.fileName.split(".").pop().toUpperCase()}`:""}</div>
                                     {ack && <div style={{color:T.green,fontSize:12,marginTop:3,fontWeight:600}}>✓ You confirmed reading this on {ack.date}</div>}
@@ -2940,7 +3627,8 @@ export default function App() {
             </div>
           )}
 
-          {stab==="account" && <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}><LazyAccountTab user={user} passwords={passwords} onSetPassword={savePasswordFor} darkMode={darkMode} setDarkMode={setDarkMode} theme={theme} setTheme={setTheme} onSaveTheme={k=>dbSaveTheme(user.id,k)} emojiMode={emojiMode} onSaveEmojiMode={v=>{setEmojiMode(v);dbSaveEmojiMode(user.id,v);}} Z={T} font={font}/></React.Suspense>}
+          {stab==="account" && <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}><LazyAccountTab user={user} passwords={passwords} onSetPassword={savePasswordFor} authMode={AUTH_MODE} onChangeOwnPassword={async (oldPw,newPw)=>{ if (!(await authCheckPassword(user.email, oldPw))) return { ok:false, error:"Current password is incorrect." }; return changeOwnPassword(newPw); }} darkMode={darkMode} setDarkMode={setDarkMode} theme={theme} setTheme={setTheme} onSaveTheme={k=>dbSaveTheme(user.id,k)} emojiMode={emojiMode} onSaveEmojiMode={v=>{setEmojiMode(v);dbSaveEmojiMode(user.id,v);}} Z={T} font={font}/></React.Suspense>}
+          {stab==="account" && <WelcomeReplay name={user.name} Z={T} font={font}/>}
 
           {/* Floating hazard report button — mobile only */}
           {isMobile && stab!=="dashboard" && (
@@ -2983,7 +3671,13 @@ export default function App() {
               docs={docs} docAssignments={docAssignments} docAcknowledgements={docAcknowledgements}
               dseReports={dseReports} adminResponses={adminResponses} investigations={investigations}
               onAssign={managerAssign} onSignOffDse={managerSignOffDse} onSignOffAction={managerSignOffAction}
+              onGroupSession={()=>setGroupSessionFor("team")}
+              onSessions={()=>setShowSessions("team")}
               Z={T} font={font}/>
+            {showSessions==="team" && <SessionsModal sessions={listSessions(comps, teamOf(user, allUsers).map(u=>u.id))} people={allUsers} modules={allModules}
+              onAttach={attachToSession} onClose={()=>setShowSessions(null)} Z={T} font={font}/>}
+            {groupSessionFor==="team" && <GroupSessionModal people={teamOf(user, allUsers)} modules={allModules.filter(m=>!m._hidden)} comps={comps}
+              leaderName={user.name} onSave={recordCompletions} onClose={()=>setGroupSessionFor(null)} Z={T} font={font}/>}
             </React.Suspense>
           )}
 
@@ -3231,29 +3925,60 @@ export default function App() {
     };
 
     // Manual "Add staff" form. id = Date.now() (a large number; the users table stores it as TEXT).
-    // New users log in with the default password (pass123) until changed.
+    // New users log in with the default password (pass123) until changed — or, in
+    // Supabase sign-in mode, with a temporary password shown once to the admin.
     const addStaff = () => {
       if (!newName.trim()) { setAddErr("Name is required."); return; }
       if (!newEmail.trim() || !newEmail.includes("@")) { setAddErr("Valid email is required."); return; }
       if (allUsers.find(u=>u.email===newEmail.trim())) { setAddErr("Email already exists."); return; }
       const id = Date.now();
-      const newUser = { id, name:newName.trim(), email:newEmail.trim(), role:newRole, jobTitle:newJobTitle.trim(), manager:newManager.trim(), isWarehouseWorker:newIsWarehouse };
+      const newUser = { id, name:newName.trim(), email:newEmail.trim(), role:newRole, jobTitle:newJobTitle.trim(), manager:newManager.trim(), isWarehouseWorker:newIsWarehouse, department:newDepartment.trim(), status:newStatus };
       setAllUsers(p=>[...p, newUser]);
-      dbSaveUser(newUser);
+      if (AUTH_MODE === "supabase") {
+        // Save the record, then create their sign-in account with a temporary password.
+        (async () => {
+          await dbSaveUser(newUser);
+          if ((newUser.status||"active") === "leaver") return;
+          giveNewStarterBundles([id]);
+          const pw = makeTempPassword();
+          const r = await setTempPasswordFor(newUser, pw);
+          setTempPwNotice(r.ok
+            ? { title: `Sign-in account created for ${newUser.name}`, items: [{ name: newUser.name, login: newUser.email.toLowerCase(), password: pw }], failures: [] }
+            : { title: "Sign-in account not created", items: [], failures: [{ name: newUser.name, error: r.error }] });
+        })();
+      } else dbSaveUser(newUser).then(()=>{ if ((newUser.status||"active") !== "leaver") giveNewStarterBundles([id]); });
       dbSaveUserProfile(newUser);
       setNewName(""); setNewEmail(""); setNewJobTitle(""); setNewManager(""); setNewRole("staff"); setNewIsWarehouse(false); setNewDepartment(""); setNewStatus("active"); setAddErr(""); setShowAddStaff(false);
     };
 
-    // Deletes the user + profile rows. NOTE: training/doc/DSE rows for that user are
-    // removed from local state only and remain in their Supabase tables.
-    const removeStaff = (uid) => {
+    // Remove = delete the staff record, their sign-in account and ALL their personal
+    // records (training, reading, DSE, certificates, machinery, preferences). Incidents,
+    // investigations, inspections and the Audit Trail are kept. For people who leave,
+    // use the Leaver status instead (keeps everything for audit).
+    const removeStaff = async (uid) => {
       const u = allUsers.find(x=>x.id===uid);
-      if (!window.confirm(`Are you sure you want to remove ${u?.name||"this staff member"}?\n\nThis will permanently delete their account, training assignments, and all associated records. This cannot be undone.`)) return;
+      const sid = String(uid);
+      const n = {
+        results: Object.keys(comps[sid]||{}).length, assigned: (assigns[sid]||[]).length,
+        docs: Object.keys(docAcknowledgements[sid]||{}).length, dse: (dseReports[sid]||dseReports[uid]||[]).length,
+        certs: Object.keys(extCerts[sid]||extCerts[uid]||{}).length,
+      };
+      const detail = [`${n.results} training result${n.results!==1?"s":""}`, `${n.assigned} assigned module${n.assigned!==1?"s":""}`,
+        `${n.docs} document confirmation${n.docs!==1?"s":""}`, `${n.dse} DSE assessment${n.dse!==1?"s":""}`, `${n.certs} external certificate${n.certs!==1?"s":""}`].join(", ");
+      if (!(await ask({ title: `Remove ${u?.name||"this staff member"} completely?`, danger: true, ok: "Remove permanently", message: `This permanently deletes their staff record, sign-in account and personal records: ${detail}, plus their training and reading history, machinery competences and preferences. It can't be undone.\n\nIncidents they reported, investigations and the Audit Trail are kept.\n\nIf they have left the company, cancel and set their status to Leaver instead — that keeps their training record for audits.` }))) return;
       setAllUsers(p=>p.filter(u=>u.id!==uid));
-      dbDeleteUser(uid);
-      dbDeleteUserProfile(uid);
-      setAssigns(p=>{ const n={...p}; delete n[uid]; return n; });
-      setComps(p=>{ const n={...p}; delete n[uid]; return n; });
+      const strip = o => { const c={...o}; delete c[sid]; delete c[uid]; return c; };
+      setAssigns(strip); setComps(strip); setDocAcknowledgements(strip); setDseReports(strip); setAdminResponses(strip); setExtCerts(strip); setMachineComps(strip);
+      setDocAssignments(p=>Object.fromEntries(Object.entries(p).map(([d,ids])=>[d,(ids||[]).filter(x=>String(x)!==sid)])));
+      setCompHistory(p=>p.filter(h=>String(h.user_id)!==sid)); setDocAckHistory(p=>p.filter(h=>String(h.user_id)!==sid));
+      setQuizFailures(p=>p.filter(f=>String(f.userId)!==sid));
+      const inBundles = withoutMember(docBundles, sid);
+      if (inBundles.length) { setDocBundles(p=>p.map(b=>inBundles.find(c=>c.id===b.id)||b)); await Promise.all(inBundles.map(dbSaveBundle)); }
+      await dbDeleteUser(uid);
+      const ok = await dbDeletePersonRecords(uid);
+      auditEvent("staff", sid, "remove", `Removed staff member and their records (${detail})${ok ? "" : " — some records could not be deleted"}`, {}, u?.name || sid);
+      if (!ok) notify("The staff member was removed, but some of their records couldn't be deleted. Try again later or check the Audit Trail.", { kind: "error" });
+      else notify(`${u?.name||"Staff member"} and their records were removed.`);
     };
 
     return (
@@ -3266,6 +3991,8 @@ export default function App() {
           </div>
         )}
         <PreviewModal doc={previewDoc} onClose={()=>setPreviewDoc(null)} Z={T} font={font}/>
+        {/* ▲/▼ top-of-page / bottom-of-page buttons on long screens (shared/ScrollNav.jsx) */}
+        <ScrollNav bottom={24} Z={T} font={font}/>
         {pendingModuleSave && (
           <NewVersionModal kind="module" title={pendingModuleSave.m.title || "Training module"}
             fromVersion={pendingModuleSave.prev.version || 1}
@@ -3277,13 +4004,19 @@ export default function App() {
             staffUser={editingStaff}
             allUsers={allUsers} setAllUsers={setAllUsers} onSaveProfile={u=>{dbSaveUser(u);dbSaveUserProfile(u);}}
             passwords={passwords} onSetPassword={savePasswordFor}
+            onSetTempPassword={AUTH_MODE==="supabase" ? async (su, pw) => {
+              const r = await setTempPasswordFor(su, pw);
+              if (!r.ok) setTempPwNotice({ title: "Password not changed", items: [], failures: [{ name: su.name, error: r.error }] });
+            } : null}
             onClose={()=>setEditingStaff(null)}
             Z={T} font={font}
           />
         )}
+        {tempPwNotice && <TempPasswordsModal {...tempPwNotice} onClose={()=>setTempPwNotice(null)} Z={T} font={font}/>}
+        {showWelcomeSettings && <WelcomeVideoSettings user={user} onClose={()=>setShowWelcomeSettings(false)} Z={T} font={font}/>}
         {/* Nav */}
-        <div style={{background:`linear-gradient(90deg,${T.navyDk},${T.navyMd})`,borderBottom:`1px solid ${T.border}`,padding:isMobile?"0 12px":"0 28px",display:"flex",alignItems:"center",position:"relative"}}>
-          <div style={{marginRight:isMobile?8:28,padding:"12px 0",flexShrink:0}}><ZeusLogo darkMode={darkMode}/></div>
+        <div style={{background:`linear-gradient(90deg,${T.navyDk},${T.navyMd})`,borderBottom:`1px solid ${T.border}`,padding:isMobile?"0 12px":navTight?"0 16px":"0 28px",display:"flex",alignItems:"center",position:"relative",flexWrap:isMobile?"nowrap":"wrap",rowGap:0}}>
+          <div style={{marginRight:isMobile?8:navTight?14:28,padding:"12px 0",flexShrink:0}}><ZeusLogo darkMode={darkMode}/></div>
           {!isMobile && <><div style={{width:1,height:28,background:T.headerBgMd,marginRight:8}}/><Pill label="ADMIN" col="navy"/><div style={{width:1,height:20,background:T.headerBgMd,margin:"0 12px"}}/></>}
           {!isMobile && (()=>{
             const TRAINING_TABS=["assign","modules","create","reports"]; const trainingActive=TRAINING_TABS.includes(atab);
@@ -3291,39 +4024,19 @@ export default function App() {
             return (<>
               <button onClick={()=>setAtab("dashboard")} style={navBtn(atab==="dashboard",T.gold)}>Dashboard</button>
               <button onClick={()=>setAtab("users")} style={navBtn(atab==="users",T.gold)}>Staff</button>
-              <div style={{position:"relative",display:"inline-block"}} onMouseEnter={e=>e.currentTarget.querySelector(".training-dd").style.display="block"} onMouseLeave={e=>e.currentTarget.querySelector(".training-dd").style.display="none"}>
-                <button style={{...navBtn(trainingActive,T.gold),display:"flex",alignItems:"center",gap:5}}>Training<span style={{fontSize:9,opacity:.7,marginTop:1}}>▼</span></button>
-                <div className="training-dd" style={{display:"none",position:"absolute",top:"100%",left:0,zIndex:200,minWidth:160,background:`linear-gradient(135deg,${T.navyDk},${T.navyMd})`,border:`1px solid ${T.borderMd}`,borderRadius:10,boxShadow:"0 8px 32px rgba(0,0,0,0.35)",overflow:"hidden",paddingTop:4,paddingBottom:4}}>
-                  {[["assign","Assign Training"],["modules","Training Library"],["create","Create Module"],["reports","Reports"]].map(([id,label])=>(<button key={id} onClick={()=>setAtab(id)} style={{display:"block",width:"100%",textAlign:"left",padding:"10px 18px",background:atab===id?`rgba(245,158,11,0.12)`:"transparent",border:"none",color:atab===id?T.gold:T.white,fontWeight:atab===id?700:500,fontSize:13,cursor:"pointer",fontFamily:font,transition:"background .15s",letterSpacing:.3}}>{label}</button>))}
-                </div>
-              </div>
+              <NavMenu label="Training" active={trainingActive} items={[["assign","Assign Training"],["modules","Training Library"],["create","Create Module"],["reports","Reports"]]} current={atab} onPick={setAtab} btnStyle={navBtn(trainingActive,T.gold)} Z={T} font={font}/>
               <button onClick={()=>setAtab("firesafety")} style={navBtn(atab==="firesafety",T.gold)}>Fire Safety</button>
               <button onClick={()=>setAtab("firstaid")} style={navBtn(atab==="firstaid",T.gold)}>First Aid</button>
               <button onClick={()=>setAtab("incidents")} style={navBtn(atab==="incidents",T.gold)}>Incidents</button>
               <button onClick={()=>setAtab("ra")} style={navBtn(atab==="ra",T.gold)}>Risk Assessments</button>
               <button onClick={()=>setAtab("inspections")} style={navBtn(atab==="inspections",T.gold)}>Inspections</button>
               {(()=>{ const CON_TABS=["contractors","permits"]; const conActive=CON_TABS.includes(atab); return (
-                <div style={{position:"relative",display:"inline-block"}} onMouseEnter={e=>e.currentTarget.querySelector(".con-dd").style.display="block"} onMouseLeave={e=>e.currentTarget.querySelector(".con-dd").style.display="none"}>
-                  <button style={{...navBtn(conActive,T.gold),display:"flex",alignItems:"center",gap:5}}>Contractors<span style={{fontSize:9,opacity:.7,marginTop:1}}>▼</span></button>
-                  <div className="con-dd" style={{display:"none",position:"absolute",top:"100%",left:0,zIndex:200,minWidth:180,background:`linear-gradient(135deg,${T.navyDk},${T.navyMd})`,border:`1px solid ${T.borderMd}`,borderRadius:10,boxShadow:"0 8px 32px rgba(0,0,0,0.35)",overflow:"hidden",paddingTop:4,paddingBottom:4}}>
-                    {[["contractors","Contractors"],["permits","Permits"]].map(([id,label])=>(<button key={id} onClick={()=>setAtab(id)} style={{display:"block",width:"100%",textAlign:"left",padding:"10px 18px",background:atab===id?`rgba(245,158,11,0.12)`:"transparent",border:"none",color:atab===id?T.gold:T.white,fontWeight:atab===id?700:500,fontSize:13,cursor:"pointer",fontFamily:font,transition:"background .15s",letterSpacing:.3}}>{label}</button>))}
-                  </div>
-                </div>
+                <NavMenu label="Contractors" active={conActive} items={[["contractors","Contractors"],["permits","Permits"]]} current={atab} onPick={setAtab} btnStyle={navBtn(conActive,T.gold)} Z={T} font={font}/>
               ); })()}
               {(()=>{ const DOC_TABS=["documents","coshh","audit"]; const docActive=DOC_TABS.includes(atab); return (
-                <div style={{position:"relative",display:"inline-block"}} onMouseEnter={e=>e.currentTarget.querySelector(".doc-dd").style.display="block"} onMouseLeave={e=>e.currentTarget.querySelector(".doc-dd").style.display="none"}>
-                  <button style={{...navBtn(docActive,T.gold),display:"flex",alignItems:"center",gap:5}}>Documents<span style={{fontSize:9,opacity:.7,marginTop:1}}>▼</span></button>
-                  <div className="doc-dd" style={{display:"none",position:"absolute",top:"100%",left:0,zIndex:200,minWidth:180,background:`linear-gradient(135deg,${T.navyDk},${T.navyMd})`,border:`1px solid ${T.borderMd}`,borderRadius:10,boxShadow:"0 8px 32px rgba(0,0,0,0.35)",overflow:"hidden",paddingTop:4,paddingBottom:4}}>
-                    {[["documents","H&S Documents"],["coshh","COSHH Register"],["audit","Audit Trail"]].map(([id,label])=>(<button key={id} onClick={()=>setAtab(id)} style={{display:"block",width:"100%",textAlign:"left",padding:"10px 18px",background:atab===id?`rgba(245,158,11,0.12)`:"transparent",border:"none",color:atab===id?T.gold:T.white,fontWeight:atab===id?700:500,fontSize:13,cursor:"pointer",fontFamily:font,transition:"background .15s",letterSpacing:.3}}>{label}</button>))}
-                  </div>
-                </div>
+                <NavMenu label="Documents" active={docActive} items={[["documents","H&S Documents"],["coshh","COSHH Register"],["audit","Audit Trail"]]} current={atab} onPick={setAtab} btnStyle={navBtn(docActive,T.gold)} Z={T} font={font}/>
               ); })()}
-              <div style={{position:"relative",display:"inline-block"}} onMouseEnter={e=>e.currentTarget.querySelector(".me-dd").style.display="block"} onMouseLeave={e=>e.currentTarget.querySelector(".me-dd").style.display="none"}>
-                <button style={{...navBtn(meActive,T.gold),display:"flex",alignItems:"center",gap:5}}>Machinery &amp; Equipment<span style={{fontSize:9,opacity:.7,marginTop:1}}>▼</span></button>
-                <div className="me-dd" style={{display:"none",position:"absolute",top:"100%",left:0,zIndex:200,minWidth:180,background:`linear-gradient(135deg,${T.navyDk},${T.navyMd})`,border:`1px solid ${T.borderMd}`,borderRadius:10,boxShadow:"0 8px 32px rgba(0,0,0,0.35)",overflow:"hidden",paddingTop:4,paddingBottom:4}}>
-                  {[["machinery","Machinery Competence"],["equipment","Equipment Register"]].map(([id,label])=>(<button key={id} onClick={()=>setAtab(id)} style={{display:"block",width:"100%",textAlign:"left",padding:"10px 18px",background:atab===id?`rgba(245,158,11,0.12)`:"transparent",border:"none",color:atab===id?T.gold:T.white,fontWeight:atab===id?700:500,fontSize:13,cursor:"pointer",fontFamily:font,transition:"background .15s",letterSpacing:.3}}>{label}</button>))}
-                </div>
-              </div>
+              <NavMenu label="Machinery & Equipment" active={meActive} items={[["machinery","Machinery Competence"],["equipment","Equipment Register"]]} current={atab} onPick={setAtab} btnStyle={navBtn(meActive,T.gold)} Z={T} font={font}/>
             </>);
           })()}
           <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:isMobile?6:10}}>
@@ -3333,6 +4046,9 @@ export default function App() {
               // Thresholds used: training/certificates expiring ≤EXPIRY_WARNING_DAYS (lib/dates.js), RA/doc review ≤30d, drill >365d,
               // fire warden cert default 36 months.
               const notifications = [];
+              // Full backup reminder (Audit Trail → Download full backup)
+              if (lastBackup !== undefined && (lastBackup === null || (Date.now() - new Date(lastBackup).getTime()) / 86400000 >= BACKUP_DUE_DAYS))
+                notifications.push({type:"report",urgent:false,title:lastBackup?"A full backup is due":"Download a first full backup",detail:lastBackup?`Last one ${Math.floor((Date.now()-new Date(lastBackup).getTime())/86400000)} days ago — Documents ▼ → Audit Trail`:"Keeps a copy of every record — Documents ▼ → Audit Trail",nav:{tab:"audit"}});
               // Staff with overdue mandatory modules
               const overdueStaff = staff.filter(u=>{
                 const mandatory = allModules.filter(m=>m.level==="Mandatory"&&(assigns[u.id]||[]).includes(m.id));
@@ -3416,6 +4132,7 @@ export default function App() {
               else if(soonReviews.length) notifications.push({type:"document",urgent:false,title:`${soonReviews.length} document${soonReviews.length!==1?"s":""} due for review soon`,detail:soonReviews.map(d=>d.title).join(", "),nav:{tab:"documents"}});
               return <NotificationBell notifications={notifications} onNavigate={n=>{setAtab(n.tab);if(n.view)setAdminReportView(n.view);}} Z={T} font={font}/>;
             })()}
+            <QuickSearch getItems={quickItems} Z={T} font={font} compact={winW<2200}/>
             <div style={{width:1,height:20,background:T.headerBgMd,margin:"0 4px"}}/>
             {/* My Training — lets an admin see/complete their own assigned training via the staff view */}
             <button onClick={()=>{ setStab("training"); setView("staff"); }}
@@ -3539,8 +4256,14 @@ export default function App() {
               });
             });
 
+            // Each figure opens the list behind it, already filtered (click, or Tab + Enter)
+            const showStaff = progress => { setStaffFilterSearch(""); setStaffFilterManager("all"); setStaffStatusFilter("all"); setStaffGroupByTeam(false); setStaffFilterProgress(progress); setAtab("users"); };
+            const showOpenIncidents = () => { setPagePreset({tab:"incidents",status:"open"}); setAtab("incidents"); };
             const card = (icon,label,value,sub,col,urgent,onClick) => (
-              <div onClick={onClick} style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:14,padding:"18px 20px",border:`1px solid ${urgent?"rgba(239,68,68,0.4)":col?"rgba(245,158,11,0.25)":T.border}`,cursor:onClick?"pointer":"default",transition:"transform .15s,box-shadow .15s"}}
+              <div onClick={onClick} role={onClick?"button":undefined} tabIndex={onClick?0:undefined} title={onClick?`Show ${label.toLowerCase()}`:undefined}
+                aria-label={onClick?`${label}: ${value}${sub?`, ${sub}`:""}. Show these.`:undefined} data-testid={onClick?"dash-figure":undefined}
+                onKeyDown={e=>{ if(onClick&&(e.key==="Enter"||e.key===" ")){ e.preventDefault(); onClick(); } }}
+                style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:14,padding:"18px 20px",border:`1px solid ${urgent?"rgba(239,68,68,0.4)":col?"rgba(245,158,11,0.25)":T.border}`,cursor:onClick?"pointer":"default",transition:"transform .15s,box-shadow .15s"}}
                 onMouseEnter={e=>{if(onClick){e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 8px 24px rgba(0,0,0,0.3)";}}}
                 onMouseLeave={e=>{e.currentTarget.style.transform="";e.currentTarget.style.boxShadow="";}}>
                 <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:8}}>
@@ -3596,14 +4319,14 @@ export default function App() {
                 {/* Stat grid — order is draggable per-admin via the ⠿⠿ handle, saved to Supabase */}
                 {(() => {
                   const statCardDefs = [
-                    { id:"trainingIncomplete", node: card(E("📚",""),"Training Incomplete",overdueTraining.length,`of ${staffList.length} staff`,null,overdueTraining.length>0,()=>setAtab("assign")) },
+                    { id:"trainingIncomplete", node: card(E("📚",""),"Training Incomplete",overdueTraining.length,`of ${staffList.length} staff`,null,overdueTraining.length>0,()=>showStaff("incomplete")) },
                     { id:"expiringExpired", node: card(E("🔄",""),"Expiring/Expired",expiringTraining.length,"training renewals",expiringTraining.length>0,false,()=>{setAtab("reports");setAdminReportView("expiry");}) },
-                    { id:"openIncidents", node: card(E("⚠️",""),"Open Incidents",openIncidents2.length,`${riddorOpen2.length} RIDDOR unreported`,null,riddorOpen2.length>0,()=>setAtab("incidents")) },
-                    { id:"unreadDocuments", node: card(E("📄",""),"Unread Documents",unreadDocs.length,"assigned but unacknowledged",unreadDocs.length>0,false,()=>setAtab("documents")) },
+                    { id:"openIncidents", node: card(E("⚠️",""),"Open Incidents",openIncidents2.length,`${riddorOpen2.length} RIDDOR unreported`,null,riddorOpen2.length>0,showOpenIncidents) },
+                    { id:"unreadDocuments", node: card(E("📄",""),"Unread Documents",unreadDocs.length,"assigned but unacknowledged",unreadDocs.length>0,false,()=>{setAtab("reports");setAdminReportView("documents");}) },
                     { id:"equipmentOverdue", node: card(E("🔧",""),"Equipment Overdue",overdueEquipment.length,"inspection overdue",null,overdueEquipment.length>0,()=>setAtab("equipment")) },
-                    { id:"outOfService", node: card(E("📋",""),"Out of Service",outOfService.length,"equipment items",null,false,()=>setAtab("equipment")) },
+                    { id:"outOfService", node: card(E("📋",""),"Out of Service",outOfService.length,"equipment items",null,false,()=>{setPagePreset({tab:"equipment",status:"inactive"});setAtab("equipment");}) },
                     { id:"quizFailures", node: card(E("❌",""),"Quiz Failures",unreviewedFailures.length,"unreviewed",unreviewedFailures.length>0,false,()=>{setAtab("reports");setAdminReportView("failures");}) },
-                    { id:"reviewsOverdue", node: card(E("📅",""),"Reviews Overdue",overdueDocReviews.length+overdueRAReviews.length,"docs & RAs",overdueDocReviews.length+overdueRAReviews.length>0,false,()=>setAtab("documents")) },
+                    { id:"reviewsOverdue", node: card(E("📅",""),"Reviews Overdue",overdueDocReviews.length+overdueRAReviews.length,"docs & RAs",overdueDocReviews.length+overdueRAReviews.length>0,false,()=>setAtab(overdueDocReviews.length||!overdueRAReviews.length?"documents":"ra")) },
                     { id:"onSiteNow", node: (()=>{
                       const onSiteWorkers = [];
                       (contractors||[]).forEach(c=>{
@@ -3712,9 +4435,9 @@ export default function App() {
                           <div style={{fontSize:13,fontWeight:700,color:T.white,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{u.name}</div>
                           <div style={{fontSize:11,color:T.muted}}>{d}/{a} modules · {pct}%</div>
                         </div>
-                        <button onClick={()=>setAtab("assign")} style={{background:"rgba(37,99,235,0.1)",color:T.accentLt,border:`1px solid ${T.accent}33`,borderRadius:7,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font,flexShrink:0}}>Assign →</button>
+                        <button onClick={()=>{setBulkTarget("individual");setTarget(String(u.id));setAtab("assign");}} style={{background:"rgba(37,99,235,0.1)",color:T.accentLt,border:`1px solid ${T.accent}33`,borderRadius:7,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font,flexShrink:0}}>Assign →</button>
                       </>);
-                    },()=>setAtab("assign"))
+                    },()=>showStaff("incomplete"))
                   )}
 
                   {/* Open incidents */}
@@ -3729,7 +4452,7 @@ export default function App() {
                         {inc.riddor&&!inc.riddorReported&&<span style={{fontSize:10,fontWeight:700,color:"#f87171",background:"rgba(239,68,68,0.1)",padding:"2px 7px",borderRadius:6,border:"1px solid rgba(239,68,68,0.25)",flexShrink:0}}>RIDDOR ⚠</span>}
                         <button onClick={()=>{setFocusIncidentId(inc.id);setAtab("incidents");}} style={{background:"rgba(239,68,68,0.1)",color:"#f87171",border:"1px solid rgba(239,68,68,0.2)",borderRadius:7,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font,flexShrink:0}}>View →</button>
                       </>
-                    ),()=>setAtab("incidents"))
+                    ),showOpenIncidents)
                   )}
 
                   {/* Equipment overdue */}
@@ -3792,6 +4515,10 @@ export default function App() {
                     style={{background:staffGroupByTeam?`linear-gradient(135deg,${T.navyMd},${T.navy})`:T.overlay,color:staffGroupByTeam?T.gold:T.muted,border:`1px solid ${staffGroupByTeam?T.gold:T.borderMd}`,borderRadius:10,padding:"10px 16px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:13,display:"flex",alignItems:"center",gap:6}}>
                     👥 {staffGroupByTeam?"By Team ✓":"Group by Team"}
                   </button>
+                  <button onClick={()=>setShowWelcomeSettings(true)} title="The video new staff see the first time they sign in"
+                    style={{background:T.overlay,color:T.white,border:`1px solid ${T.borderMd}`,borderRadius:10,padding:"10px 16px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:13,display:"flex",alignItems:"center",gap:6}}>
+                    {E("🎬 ","")}Welcome video
+                  </button>
                   <button onClick={()=>setShowCsvImport(v=>!v)}
                     style={{background:showCsvImport?"rgba(239,68,68,0.1)":"rgba(16,185,129,0.1)",color:showCsvImport?"#f87171":T.green,border:showCsvImport?"1px solid rgba(239,68,68,0.25)":"1px solid rgba(16,185,129,0.25)",borderRadius:10,padding:"10px 16px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:13,display:"flex",alignItems:"center",gap:6}}>
                     📥 {showCsvImport?"✕ Cancel":"Import CSV"}
@@ -3825,6 +4552,9 @@ export default function App() {
                   </div>
                 );
               })()}
+
+              {/* Sign-in accounts (Supabase sign-in mode only) */}
+              {AUTH_MODE==="supabase" && <SignInAccountsPanel users={allUsers} onShowPasswords={setTempPwNotice} Z={T} font={font}/>}
 
               {/* Bulk Password Reset Panel */}
               {showBulkReset && (
@@ -3871,17 +4601,28 @@ export default function App() {
                         <label style={{color:T.muted,fontSize:11,fontWeight:700,letterSpacing:.5,display:"block",marginBottom:6}}>NEW PASSWORD</label>
                         <input value={bulkResetPw} onChange={e=>setBulkResetPw(e.target.value)} placeholder="Enter new password for selected staff"
                           style={{width:"100%",background:T.overlay,border:`1px solid ${T.borderMd}`,borderRadius:10,padding:"10px 14px",color:T.white,fontSize:13,outline:"none",fontFamily:font,boxSizing:"border-box",marginBottom:8}}/>
-                        {bulkResetPw && bulkResetPw.length < 6 && <div style={{fontSize:11,color:"#f87171",marginBottom:8}}>Password must be at least 6 characters</div>}
+                        {bulkResetPw && bulkResetPw.length < (AUTH_MODE==="supabase"?8:6) && <div style={{fontSize:11,color:"#f87171",marginBottom:8}}>Password must be at least {AUTH_MODE==="supabase"?8:6} characters</div>}
                         <div style={{fontSize:11,color:T.muted,marginBottom:14}}>
                           This will reset passwords for <strong style={{color:T.white}}>{bulkResetScope==="all"?staff.length:bulkResetSelected.length} staff member{(bulkResetScope==="all"?staff.length:bulkResetSelected.length)!==1?"s":""}</strong>.
                         </div>
                         <button
-                          disabled={!bulkResetPw||bulkResetPw.length<6||(bulkResetScope==="selected"&&bulkResetSelected.length===0)}
+                          disabled={!bulkResetPw||bulkResetPw.length<(AUTH_MODE==="supabase"?8:6)||(bulkResetScope==="selected"&&bulkResetSelected.length===0)}
                           onClick={async()=>{
                             const targets = bulkResetScope==="all" ? staff.map(u=>u.id) : bulkResetSelected;
+                            if (AUTH_MODE === "supabase") {
+                              // Temporary password on each sign-in account; leavers are skipped.
+                              const failures = [];
+                              for (const id of targets) {
+                                const su = allUsers.find(x=>x.id===id); if (!su || (su.status||"active")==="leaver") continue;
+                                const r = await setTempPasswordFor(su, bulkResetPw);
+                                if (!r.ok) failures.push({ name: su.name, error: r.error });
+                              }
+                              if (failures.length) setTempPwNotice({ title: "Some passwords weren't reset", items: [], failures });
+                            } else {
                             const hashed = await hashPassword(bulkResetPw);
                             // One write per selected user (savePasswordFor updates state + that row only).
                             await Promise.all(targets.map(id=>savePasswordFor(id, hashed)));
+                            }
                             setBulkResetDone(true);
                             setBulkResetPw("");
                           }}
@@ -3948,19 +4689,37 @@ export default function App() {
                         const toAdd=csvPreview.filter(r=>!existingEmails.has(r.email.toLowerCase()));
                         const skipped=csvPreview.length-toAdd.length;
                         if(toAdd.length===0){setCsvError("All emails already exist in the system.");return;}
-                        const hashed=await hashPassword("pass123");
+                        const hashed = AUTH_MODE==="supabase" ? null : await hashPassword("pass123");
                         // Imported users get sequential numeric ids after the current max id.
                         const maxId=Math.max(0,...allUsers.map(u=>u.id));
-                        const newUsers=toAdd.map((r,i)=>({id:maxId+i+1,name:r.name.trim(),email:r.email.trim().toLowerCase(),jobTitle:r.jobTitle,manager:r.manager,department:r.department,role:["admin","manager"].includes(r.role)?r.role:"staff",isWarehouseWorker:false,status:"active",password:hashed}));
+                        const newUsers=toAdd.map((r,i)=>({id:maxId+i+1,name:r.name.trim(),email:r.email.trim().toLowerCase(),jobTitle:r.jobTitle,manager:r.manager,department:r.department,role:["admin","manager"].includes(r.role)?r.role:"staff",isWarehouseWorker:false,status:"active",...(hashed?{password:hashed}:{})}));
+                        if (AUTH_MODE === "supabase") {
+                          // Save the records, then give each person a sign-in account with a temporary password.
+                          setAllUsers(p=>[...p,...newUsers]);
+                          newUsers.forEach(u=>dbSaveUserProfile(u));
+                          await Promise.all(newUsers.map(u=>dbSaveUser(u)));
+                          giveNewStarterBundles(newUsers.map(u=>u.id));
+                          const passwords = Object.fromEntries(newUsers.map(u=>[String(u.id), makeTempPassword()]));
+                          const r = await adminCall("createMissing", { passwords });
+                          const byId = Object.fromEntries(newUsers.map(u=>[String(u.id), u]));
+                          const results = r.ok ? (r.results||[]) : newUsers.map(u=>({ userId:String(u.id), ok:false, error:r.error }));
+                          setTempPwNotice({ title: `Imported ${toAdd.length} staff${skipped>0?` (${skipped} skipped: email already exists)`:""}`,
+                            items: results.filter(x=>x.ok).map(x=>({ name: byId[x.userId].name, login: byId[x.userId].email, password: passwords[x.userId] })),
+                            failures: results.filter(x=>!x.ok).map(x=>({ name: (byId[x.userId]||{}).name, error: x.error })) });
+                          setCsvPreview([]);
+                          setShowCsvImport(false);
+                          return;
+                        }
                         newUsers.forEach(u=>{
                           setAllUsers(p=>[...p,u]);
                           dbSaveUser(u);
                           dbSaveUserProfile(u);
                           savePasswordFor(u.id,hashed);
                         });
+                        giveNewStarterBundles(newUsers.map(u=>u.id));
                         setCsvPreview([]);
                         setShowCsvImport(false);
-                        alert(`✓ Imported ${toAdd.length} staff.${skipped>0?` ${skipped} skipped (email already exists).`:""} Default password: pass123`);
+                        notify(`✓ Imported ${toAdd.length} staff.${skipped>0?` ${skipped} skipped (email already exists).`:""} Default password: pass123`, { timeout: 10000 });
                       }} style={{background:`linear-gradient(135deg,${T.green},#059669)`,color:"#fff",border:"none",borderRadius:10,padding:"10px 24px",cursor:"pointer",fontFamily:font,fontWeight:700,fontSize:13,boxShadow:"0 4px 14px rgba(16,185,129,0.3)"}}>
                         ✓ Import {csvPreview.length} Staff
                       </button>
@@ -4041,7 +4800,9 @@ export default function App() {
                       style={{background:`linear-gradient(135deg,${T.green},#059669)`,color:T.white,border:"none",borderRadius:10,padding:"10px 24px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:14,boxShadow:"0 4px 14px rgba(16,185,129,0.4)"}}>
                       ✓ Create Account
                     </button>
-                    <p style={{color:T.muted,fontSize:12,margin:0}}>Default password: <code style={{color:T.gold,background:"rgba(245,158,11,0.1)",padding:"2px 8px",borderRadius:4}}>pass123</code></p>
+                    {AUTH_MODE==="supabase"
+                      ? <p style={{color:T.muted,fontSize:12,margin:0}}>A temporary password is created and shown once. They choose their own at first sign-in.</p>
+                      : <p style={{color:T.muted,fontSize:12,margin:0}}>Default password: <code style={{color:T.gold,background:"rgba(245,158,11,0.1)",padding:"2px 8px",borderRadius:4}}>pass123</code></p>}
                   </div>
                   {addErr && <p style={{color:"#f87171",fontSize:13,margin:"10px 0 0"}}>{addErr}</p>}
                 </div>
@@ -4065,12 +4826,39 @@ export default function App() {
                     const pct=a?Math.min(100, Math.round(d/a*100)):0;
                     if (staffFilterProgress==="compliant" && pct!==100) return false;
                     if (staffFilterProgress==="inprogress" && (pct===100||pct===0)) return false;
-                    if (staffFilterProgress==="overdue" && pct!==0) return false;
+                    if (staffFilterProgress==="overdue" && (a===0 || pct!==0)) return false;   // nothing started (people with no modules are under "No Modules")
+                    if (staffFilterProgress==="incomplete" && !(a>0 && d<a)) return false;    // dashboard "Training Incomplete"
                     if (staffFilterProgress==="none" && a!==0) return false;
                   }
                   return true;
                 });
                 const activeFilters = (staffFilterManager!=="all"?1:0)+(staffFilterSearch?1:0)+(staffFilterProgress!=="all"?1:0)+(staffStatusFilter!=="all"?1:0);
+                // Tick boxes for bulk actions. Ticks survive filtering, so you can tick people from different searches.
+                const shownIds = filteredStaff.map(u=>String(u.id));
+                const selIds = staffSel.filter(id=>staff.some(u=>String(u.id)===id));
+                const allShownSel = shownIds.length>0 && shownIds.every(id=>selIds.includes(id));
+                const someShownSel = shownIds.some(id=>selIds.includes(id));
+                const toggleSel = id => setStaffSel(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
+                const toggleMany = (ids, on) => setStaffSel(p=>on?[...new Set([...p,...ids])]:p.filter(id=>!ids.includes(id)));
+                const runBulk = async fn => { if (await fn(selIds)) setStaffSel([]); };
+                // Group by Team: sorted by line manager, with a heading (and tick box) per team
+                const teamOf2 = u => (u.manager||"").trim() || "No line manager";
+                const ordered = staffGroupByTeam ? [...filteredStaff].sort((a,b)=>(teamOf2(a)==="No line manager")-(teamOf2(b)==="No line manager") || teamOf2(a).localeCompare(teamOf2(b)) || a.name.localeCompare(b.name)) : filteredStaff;
+                const teamHead = (u,i,mobile) => {
+                  if (!staffGroupByTeam || (i>0 && teamOf2(ordered[i-1])===teamOf2(u))) return null;
+                  const ids = ordered.filter(x=>teamOf2(x)===teamOf2(u)).map(x=>String(x.id));
+                  const on = ids.every(id=>selIds.includes(id)), some = ids.some(id=>selIds.includes(id));
+                  return (
+                    <div key={`team-${teamOf2(u)}`} data-testid="team-head" style={{display:"flex",alignItems:"center",gap:10,padding:mobile?"10px 4px 6px":"10px 20px",background:mobile?"transparent":T.overlay,borderTop:i>0&&!mobile?`1px solid ${T.border}`:"none",fontSize:12,fontWeight:800,color:T.gold,letterSpacing:.3}}>
+                      <input type="checkbox" checked={on} ref={el=>{ if(el) el.indeterminate=!on&&some; }} onChange={()=>toggleMany(ids,!on)} aria-label={`Tick everyone in ${teamOf2(u)}'s team`} style={{width:16,height:16,cursor:"pointer"}}/>
+                      <span>{teamOf2(u)==="No line manager"?"No line manager":`${teamOf2(u)}'s team`}</span>
+                      <span style={{color:T.muted,fontWeight:600}}>· {ids.length}</span>
+                    </div>
+                  );
+                };
+                const bulkBtn = (label, fn, danger) => (
+                  <button onClick={()=>runBulk(fn)} style={{background:danger?"rgba(239,68,68,0.12)":T.overlay,color:danger?"#f87171":T.white,border:`1px solid ${danger?"rgba(239,68,68,0.35)":T.borderMd}`,borderRadius:9,padding:"8px 13px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font,whiteSpace:"nowrap"}}>{label}</button>
+                );
                 return (
                   <>
                     <div style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:14,padding:"14px 18px",marginBottom:14,border:`1px solid ${T.border}`,display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
@@ -4097,6 +4885,7 @@ export default function App() {
                       <select value={staffFilterProgress} onChange={e=>setStaffFilterProgress(e.target.value)} style={selStyle}>
                         <option value="all">All Progress</option>
                         <option value="compliant">✓ Compliant</option>
+                        <option value="incomplete">Not complete (any)</option>
                         <option value="inprogress">In Progress</option>
                         <option value="overdue">Overdue</option>
                         <option value="none">No Modules</option>
@@ -4113,18 +4902,39 @@ export default function App() {
                       </span>
                     </div>
 
+                    {/* Bulk actions for the ticked people */}
+                    {selIds.length>0 && (
+                      <div role="region" aria-label="Bulk actions" data-testid="bulk-bar" style={{position:"sticky",top:8,zIndex:20,background:`linear-gradient(135deg,${T.accent},${T.blue})`,borderRadius:14,padding:"10px 14px",marginBottom:14,display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",boxShadow:"0 10px 30px rgba(0,0,0,.35)"}}>
+                        <span style={{fontWeight:800,fontSize:13,color:"#fff",marginRight:6}}>{selIds.length} ticked{selIds.some(id=>!shownIds.includes(id))?` (${selIds.filter(id=>!shownIds.includes(id)).length} not shown)`:""}</span>
+                        {bulkBtn(E("📚 ","")+"Assign a module", bulkAssignModule)}
+                        {bulkBtn(E("📦 ","")+"Give a document bundle", bulkGiveBundle)}
+                        {bulkBtn(E("👤 ","")+"Set line manager", bulkSetManager)}
+                        {bulkBtn(E("👋 ","")+"Mark as leavers", bulkMarkLeavers, true)}
+                        <button onClick={()=>setStaffSel([])} style={{marginLeft:"auto",background:"transparent",border:"1px solid rgba(255,255,255,.45)",color:"#fff",borderRadius:9,padding:"7px 12px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font}}>Clear ticks</button>
+                      </div>
+                    )}
+
                     {/* Staff Table */}
                     {isMobile ? (
                       <div>
                         {filteredStaff.length===0 && <div style={{padding:"32px 20px",textAlign:"center",color:T.muted,fontSize:14}}>{staff.length===0?"No staff members yet.":"No staff match filters."}</div>}
-                        {filteredStaff.map((u)=>{
+                        {filteredStaff.length>0 && (
+                          <label style={{display:"flex",alignItems:"center",gap:10,fontSize:13,color:T.muted,padding:"4px 4px 10px",cursor:"pointer"}}>
+                            <input type="checkbox" checked={allShownSel} ref={el=>{ if(el) el.indeterminate=!allShownSel&&someShownSel; }} onChange={()=>toggleMany(shownIds,!allShownSel)} style={{width:20,height:20}}/>
+                            Tick everyone shown ({shownIds.length})
+                          </label>
+                        )}
+                        {ordered.map((u,i)=>{
                           const a=(assigns[u.id]||[]).length, d=(assigns[u.id]||[]).filter(mid=>(comps[u.id]||{})[mid]).length;
                           const pct=a?Math.min(100, Math.round(d/a*100)):0;
                           const barColor=pct===100?T.green:pct>=50?T.accent:"#ef4444";
                           const lastActive=lastLoginMap[u.id];
                           return (
-                            <MobileCard key={u.id}>
+                            <React.Fragment key={u.id}>
+                            {teamHead(u,i,true)}
+                            <MobileCard>
                               <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:4}}>
+                                <input type="checkbox" checked={selIds.includes(String(u.id))} onChange={()=>toggleSel(String(u.id))} aria-label={`Tick ${u.name}`} style={{width:20,height:20,flexShrink:0}}/>
                                 <Avatar name={u.name} size={36}/>
                                 <div>
                                   <div style={{fontWeight:700,fontSize:15,color:T.white}}>{u.name}</div>
@@ -4140,22 +4950,28 @@ export default function App() {
                                 <button onClick={()=>removeStaff(u.id)} style={{flex:1,background:"rgba(239,68,68,0.1)",color:"#f87171",border:"1px solid rgba(239,68,68,0.2)",borderRadius:8,padding:"10px",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:font}}>Remove</button>
                               </div>
                             </MobileCard>
+                            </React.Fragment>
                           );
                         })}
                       </div>
                     ) : (
                     <div style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:16,overflow:"hidden",border:`1px solid ${T.border}`}}>
-                      <div style={{display:"grid",gridTemplateColumns:"2fr 2fr 2fr 2fr 2fr 120px 160px",padding:"12px 20px",background:T.headerBg,fontSize:11,fontWeight:700,letterSpacing:1,color:T.muted,textTransform:"uppercase",columnGap:0}}>
+                      <div style={{display:"grid",gridTemplateColumns:"34px 2fr 2fr 2fr 2fr 2fr 120px 160px",padding:"12px 20px",background:T.headerBg,fontSize:11,fontWeight:700,letterSpacing:1,color:T.muted,textTransform:"uppercase",columnGap:0,alignItems:"center"}}>
+                        <span><input type="checkbox" checked={allShownSel} ref={el=>{ if(el) el.indeterminate=!allShownSel&&someShownSel; }} onChange={()=>toggleMany(shownIds,!allShownSel)} aria-label={`Tick everyone shown (${shownIds.length})`} title="Tick everyone shown" disabled={!shownIds.length} style={{width:16,height:16,cursor:"pointer"}}/></span>
                         <span style={{paddingRight:12}}>Name</span><span style={{paddingRight:12}}>Email</span><span style={{paddingRight:12}}>Job Title</span><span style={{paddingRight:12}}>Manager</span><span style={{paddingRight:12}}>Progress</span><span style={{paddingRight:12}}>Last Active</span><span></span>
                       </div>
                       {filteredStaff.length===0 && <div style={{padding:"32px 20px",textAlign:"center",color:T.muted,fontSize:14}}>{staff.length===0?"No staff members yet. Add one above.":"No staff match the current filters."}</div>}
-                      {filteredStaff.map((u,i)=>{
+                      {ordered.map((u,i)=>{
                         const a=(assigns[u.id]||[]).length, d=(assigns[u.id]||[]).filter(mid=>(comps[u.id]||{})[mid]).length;
                         const pct=a?Math.min(100, Math.round(d/a*100)):0;
                         const barColor=pct===100?T.green:pct>=50?T.accent:"#ef4444";
                         const lastActive=lastLoginMap[u.id];
+                        const ticked=selIds.includes(String(u.id));
                         return (
-                          <div key={u.id} style={{display:"grid",gridTemplateColumns:"2fr 2fr 2fr 2fr 2fr 120px 160px",padding:"14px 20px",borderTop:i>0?`1px solid ${T.border}`:"none",alignItems:"center",columnGap:0,opacity:u.status==="leaver"?0.6:1}}>
+                          <React.Fragment key={u.id}>
+                          {teamHead(u,i,false)}
+                          <div data-testid="staff-row" style={{display:"grid",gridTemplateColumns:"34px 2fr 2fr 2fr 2fr 2fr 120px 160px",padding:"14px 20px",borderTop:i>0||staffGroupByTeam?`1px solid ${T.border}`:"none",alignItems:"center",columnGap:0,opacity:u.status==="leaver"?0.6:1,background:ticked?"rgba(37,99,235,0.10)":"transparent"}}>
+                            <span><input type="checkbox" checked={ticked} onChange={()=>toggleSel(String(u.id))} aria-label={`Tick ${u.name}`} style={{width:16,height:16,cursor:"pointer"}}/></span>
                             <div style={{display:"flex",alignItems:"center",gap:10,paddingRight:12,minWidth:0}}>
                               <Avatar name={u.name} size={32}/>
                               <div style={{minWidth:0}}>
@@ -4174,6 +4990,7 @@ export default function App() {
                               <button onClick={()=>removeStaff(u.id)} style={{flex:1,background:"rgba(239,68,68,0.1)",color:"#f87171",border:"1px solid rgba(239,68,68,0.2)",borderRadius:8,padding:"6px 8px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font,whiteSpace:"nowrap"}}>Remove</button>
                             </div>
                           </div>
+                          </React.Fragment>
                         );
                       })}
                     </div>)}
@@ -4187,7 +5004,40 @@ export default function App() {
           {atab==="assign" && (
             <div>
               <h2 style={{fontSize:22,fontWeight:900,letterSpacing:-.5,marginBottom:6}}>Assign Training <HelpTip dark={false} text="Tick modules to assign them to staff. Assigned modules appear on the staff member's dashboard as required training. Use bulk assignment to push modules to an entire team at once."/></h2>
-              <p style={{color:T.muted,fontSize:13,marginBottom:20}}>Assign modules to individuals, teams, or all staff at once.</p>
+              <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",marginBottom:20}}>
+                <p style={{color:T.muted,fontSize:13,margin:0,flex:1,minWidth:240}}>Assign modules to individuals, teams, or all staff at once.</p>
+                <button onClick={()=>setGroupSessionFor("all")}
+                  style={{background:"rgba(37,99,235,0.12)",color:T.accentLt,border:`1px solid ${T.accent}55`,borderRadius:10,padding:"8px 16px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font}}>
+                  {E("👥 ","")}Record a group session
+                </button>
+                <button onClick={()=>setShowImportPrior(true)}
+                  style={{background:"rgba(16,185,129,0.1)",color:T.green,border:"1px solid rgba(16,185,129,0.3)",borderRadius:10,padding:"8px 16px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font}}>
+                  {E("📥 ","")}Import training done before the portal
+                </button>
+                {(()=>{ const ss=listSessions(comps); const miss=ss.filter(x=>!x.evidence.length).length; return (
+                  <button onClick={()=>setShowSessions("all")}
+                    style={{background:T.overlay,color:T.white,border:`1px solid ${T.borderMd}`,borderRadius:10,padding:"8px 16px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font}}>
+                    {E("📋 ","")}Group session records{ss.length?` (${ss.length})`:""}{miss?<span style={{color:"#fbbf24"}}> · {miss} without sign-in sheet</span>:null}
+                  </button>); })()}
+              </div>
+              {showSessions==="all" && <SessionsModal sessions={listSessions(comps)} people={allUsers} modules={allModules}
+                onAttach={attachToSession} onClose={()=>setShowSessions(null)} Z={T} font={font}/>}
+              {evidenceFor && (()=>{ const c=(comps[evidenceFor.uid]||{})[evidenceFor.mid]; if(!c||!c.recorded) return null;
+                const pm=allModules.find(m=>String(m.id)===String(evidenceFor.mid)); const pu=allUsers.find(u=>String(u.id)===evidenceFor.uid);
+                const key=sessionKey(evidenceFor.mid,c); const sess=key && listSessions(comps).find(x=>x.key===key);
+                return <AttachEvidenceModal
+                  title={sess?`Sign-in sheet: ${pm?pm.title:""}`:`Evidence: ${pu?pu.name:""} — ${pm?pm.title:""}`}
+                  intro={sess?`The signed sign-in sheet for the session on ${String(c.date).split("-").reverse().join("/")}. It will be linked to all ${sess.attendees.length} attendees' records.`:"A certificate or old-system record showing this training was done."}
+                  onSave={files=>sess?attachToSession(sess,files):attachEvidence([{uid:evidenceFor.uid,mid:evidenceFor.mid}],files,`rec_${evidenceFor.uid}_${evidenceFor.mid}`)}
+                  onClose={()=>setEvidenceFor(null)} Z={T} font={font}/>; })()}
+              {groupSessionFor==="all" && <GroupSessionModal people={allUsers.filter(u=>(u.status||"active")!=="leaver")} modules={allModules.filter(m=>!m._hidden)} comps={comps}
+                leaderName={user.name} onSave={recordCompletions} onClose={()=>setGroupSessionFor(null)} Z={T} font={font}/>}
+              {showImportPrior && <ImportPriorTrainingModal users={allUsers.filter(u=>(u.status||"active")!=="leaver")} modules={allModules} comps={comps}
+                onImport={recordCompletions} onClose={()=>setShowImportPrior(false)} Z={T} font={font}/>}
+              {recordFor && (()=>{ const pu=allUsers.find(u=>String(u.id)===String(recordFor.uid)); const pm=allModules.find(m=>m.id===recordFor.mid);
+                return pu && pm ? <RecordCompletionModal person={pu} module={pm}
+                  byName={user.name} onSave={(date,note,evidence)=>recordCompletions([{userId:pu.id,moduleId:pm.id,date,note,evidence}])}
+                  onClose={()=>setRecordFor(null)} Z={T} font={font}/> : null; })()}
 
               {(()=>{
                 const uniqueManagers = [...new Set(staff.map(u=>u.manager).filter(Boolean))].sort();
@@ -4203,10 +5053,10 @@ export default function App() {
                 // Hidden modules are excluded from new assignments — staff who already have them keep their records.
                 const assignableModules = allModules.filter(m=>!m._hidden);
 
-                const bulkAssignMod = (mid) => {
+                const bulkAssignMod = async (mid) => {
                   if (!targetStaff) return;
                   const m = allModules.find(x=>x.id===mid);
-                  if (!window.confirm(`Assign "${m?.title||mid}" to ${targetLabel}?`)) return;
+                  if (!(await ask({ title: "Assign module", message: `Assign "${m?.title||mid}" to ${targetLabel}?`, ok: "Assign" }))) return;
                   setAssigns(p => {
                     const next = {...p};
                     const affected = {};
@@ -4220,10 +5070,10 @@ export default function App() {
                     return next;
                   });
                 };
-                const bulkUnassignMod = (mid) => {
+                const bulkUnassignMod = async (mid) => {
                   if (!targetStaff) return;
                   const m = allModules.find(x=>x.id===mid);
-                  if (!window.confirm(`Remove "${m?.title||mid}" from ${targetLabel}? Staff who have already completed it will keep their completion record.`)) return;
+                  if (!(await ask({ title: "Remove module", message: `Remove "${m?.title||mid}" from ${targetLabel}?\n\nStaff who have already completed it keep their completion record.`, ok: "Remove", danger: true }))) return;
                   setAssigns(p => {
                     const next = {...p};
                     const affected = {};
@@ -4235,9 +5085,9 @@ export default function App() {
                     return next;
                   });
                 };
-                const bulkAssignAll = () => {
+                const bulkAssignAll = async () => {
                   if (!targetStaff) return;
-                  if (!window.confirm(`Assign ALL ${assignableModules.length} modules to ${targetLabel}? This will add every module to their training plan.`)) return;
+                  if (!(await ask({ title: "Assign every module", message: `Assign ALL ${assignableModules.length} modules to ${targetLabel}?\n\nThis adds every module to their training plan.`, ok: "Assign all" }))) return;
                   setAssigns(p => {
                     const next = {...p};
                     const affected = {};
@@ -4280,7 +5130,7 @@ export default function App() {
 
                       {/* Individual card */}
                       {bulkTarget==="individual" && (() => {
-                        const tUser = allUsers.find(u=>u.id===target);
+                        const tUser = allUsers.find(u=>String(u.id)===String(target));
                         return (
                           <div style={{display:"flex",alignItems:"center",gap:12,marginTop:16,paddingTop:16,borderTop:`1px solid ${T.border}`}}>
                             <Avatar name={tUser?.name||""}/>
@@ -4330,6 +5180,27 @@ export default function App() {
                                   </div>
                                 </div>
                               </div>
+                              {bulkTarget==="individual" && (()=>{
+                                // Completion status + "Record as completed" (training done before the portal)
+                                const c=(comps[String(target)]||{})[m.id];
+                                const dd=c&&c.date?String(c.date).split("-").reverse().join("/"):"";
+                                if (!c) return (
+                                  <button onClick={()=>setRecordFor({uid:target,mid:m.id})} title="Record training they've already done, e.g. on the old system"
+                                    style={{background:"transparent",color:T.green,border:"1px solid rgba(16,185,129,0.35)",borderRadius:10,padding:"8px 14px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:12,marginRight:8,flexShrink:0}}>
+                                    {E("✓ ","")}Record as completed
+                                  </button>);
+                                if (c.recorded) return (
+                                  <span style={{display:"inline-flex",alignItems:"center",gap:6,marginRight:8,flexShrink:0}}>
+                                    <span title={recordedText(c)} style={{fontSize:11,fontWeight:700,color:T.green,background:"rgba(16,185,129,0.1)",border:"1px solid rgba(16,185,129,0.3)",borderRadius:8,padding:"4px 10px"}}>{c.recorded.session?"Group session":"Recorded"} · completed {dd}</span>
+                                    {(c.recorded.evidence||[]).length>0
+                                      ? <EvidenceLinks evidence={c.recorded.evidence} label={evidenceLabel(c,0)} Z={T}/>
+                                      : <button onClick={()=>setEvidenceFor({uid:String(target),mid:m.id})} title={c.recorded.session?"Attach the signed sign-in sheet (linked to everyone at that session)":"Attach a certificate or old-system record"}
+                                          style={{background:"transparent",color:T.accentLt,border:`1px solid ${T.accent}55`,borderRadius:8,padding:"3px 9px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font}}>{E("📎 ","")}{c.recorded.session?"Attach sign-in sheet":"Attach evidence"}</button>}
+                                    <button onClick={()=>removeRecordedCompletion(target,m.id)} title="Remove this recorded completion (you can undo it straight after)"
+                                      style={{background:"transparent",color:T.muted,border:"none",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font,textDecoration:"underline"}}>Undo</button>
+                                  </span>);
+                                return <span style={{fontSize:11,fontWeight:700,color:isPassed(c)?T.green:T.amber,marginRight:10,flexShrink:0}}>{isPassed(c)?"Completed":"Attempted"} {dd} · {scoreText(c)}</span>;
+                              })()}
                               {bulkTarget==="individual"
                                 ? <button onClick={()=>toggleAssign(target,m.id)}
                                     style={{background:on?`rgba(37,99,235,0.25)`:T.border,color:on?T.accentLt:T.muted,border:`1px solid ${on?T.accent+"55":T.borderMd}`,borderRadius:10,padding:"8px 20px",fontWeight:700,cursor:"pointer",fontSize:13,fontFamily:font,transition:"all .2s",flexShrink:0}}>
@@ -4449,16 +5320,16 @@ export default function App() {
                           👁 Unhide
                         </button>
                       ) : (
-                        <button onClick={()=>{
-                          if(!window.confirm(`Hide "${m.title||"this module"}" from the Training Library?\n\nIt won't appear here or in the assignment picker for new assignments, but staff who already have it assigned or completed keep their records. You can unhide it again at any time.`)) return;
+                        <button onClick={async()=>{
+                          if(!(await ask({ title: `Hide "${m.title||"this module"}"?`, ok: "Hide module", message: `Hide it from the Training Library?\n\nIt won't appear here or in the assignment picker for new assignments, but staff who already have it assigned or completed keep their records. You can unhide it again at any time.` }))) return;
                           setModuleHidden(m,true);
                         }} style={{background:T.overlay,color:T.muted,border:`1px solid ${T.borderMd}`,borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font}}>
                           🙈 Hide
                         </button>
                       )}
                       {m._custom && !m._override && (
-                        <button onClick={()=>{
-                          if(!window.confirm(`Delete "${m.title||"this module"}"?\n\nThis will permanently remove the module, its slides and quiz. Staff who have already completed it will keep their completion record. This cannot be undone.`)) return;
+                        <button onClick={async()=>{
+                          if(!(await ask({ title: `Delete "${m.title||"this module"}"?`, danger: true, ok: "Delete module", message: "This permanently removes the module, its slides and quiz. Staff who have already completed it keep their completion record.\n\nThis can't be undone." }))) return;
                           setCustomModules(prev=>prev.filter(x=>x.id!==m.id));
                           dbDeleteCustomModule(m.id);
                           setAtab("modules");
@@ -4467,8 +5338,8 @@ export default function App() {
                         </button>
                       )}
                       {m._override && (
-                        <button onClick={()=>{
-                          if(!window.confirm(`Reset "${m.title||"this module"}" to its original built-in version?\n\nAny customisations you've made will be lost. This cannot be undone.`)) return;
+                        <button onClick={async()=>{
+                          if(!(await ask({ title: `Reset "${m.title||"this module"}"?`, danger: true, ok: "Reset to original", message: "Reset it to its original built-in version? Any customisations you've made will be lost.\n\nThis can't be undone." }))) return;
                           setCustomModules(prev=>prev.filter(x=>x.id!==m.id));
                           dbDeleteCustomModule(m.id);
                           setAtab("modules");
@@ -4490,12 +5361,27 @@ export default function App() {
             <div>
               <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",flexWrap:"wrap",gap:12,marginBottom:6}}>
                 <h2 style={{fontSize:22,fontWeight:900,letterSpacing:-.5,margin:0}}>H&S Documentation <HelpTip dark={false} text="Upload policies, procedures, risk assessments and guidance documents. Use the Assign button on each document to nominate staff for required reading — they'll be prompted to confirm they've read it in their portal."/></h2>
-                <button onClick={()=>setShowBulkDocAssign(v=>!v)}
+                {docView!=="bundles" && <button onClick={()=>setShowBulkDocAssign(v=>!v)}
                   style={{background:showBulkDocAssign?`rgba(239,68,68,0.1)`:`rgba(37,99,235,0.1)`,color:showBulkDocAssign?"#f87171":T.accentLt,border:showBulkDocAssign?"1px solid rgba(239,68,68,0.25)":`1px solid rgba(37,99,235,0.25)`,borderRadius:10,padding:"9px 18px",cursor:"pointer",fontFamily:font,fontWeight:700,fontSize:13,whiteSpace:"nowrap"}}>
                   {showBulkDocAssign?"✕ Cancel":E("👥 ","")+"Bulk Assign"}
-                </button>
+                </button>}
               </div>
-              <p style={{color:T.muted,marginBottom:16,fontSize:13}}>Upload documents and assign them for required reading.</p>
+              <p style={{color:T.muted,marginBottom:12,fontSize:13}}>Upload documents and assign them for required reading.</p>
+
+              {/* Documents | Document bundles */}
+              <div role="tablist" style={{display:"inline-flex",gap:4,padding:4,borderRadius:12,background:T.overlay,border:`1px solid ${T.border}`,marginBottom:18}}>
+                {[["docs",`${E("📁 ","")}Documents (${docs.length})`],["bundles",`${E("📚 ","")}Document bundles (${docBundles.length})`]].map(([v,l])=>(
+                  <button key={v} role="tab" aria-selected={docView===v} onClick={()=>{setDocView(v);setShowBulkDocAssign(false);}}
+                    style={{padding:"8px 16px",borderRadius:9,border:"none",background:docView===v?`linear-gradient(135deg,${T.accent},${T.blue})`:"transparent",color:docView===v?"#fff":T.muted,fontWeight:docView===v?800:600,cursor:"pointer",fontFamily:font,fontSize:13}}>{l}</button>
+                ))}
+              </div>
+
+              {docView==="bundles" && (
+                <DocBundles bundles={docBundles} docs={docs} staff={staff.filter(u=>(u.status||"active")!=="leaver")} allPeople={allUsers}
+                  docAcknowledgements={docAcknowledgements} onSave={saveBundle} onDelete={deleteBundle} onAssign={assignBundle} onUnassign={unassignBundle}
+                  Z={T} font={font} isMobile={isMobile}/>
+              )}
+              {docView!=="bundles" && <>
 
               {/* Bulk assign panel */}
               {showBulkDocAssign && (() => {
@@ -4553,8 +5439,8 @@ export default function App() {
                         </div>
                         <button
                           disabled={bulkDocSelectedDocs.length===0||targetStaff2.length===0}
-                          onClick={()=>{
-                            if(!window.confirm(`Assign ${bulkDocSelectedDocs.length} document${bulkDocSelectedDocs.length!==1?"s":""} to ${targetStaff2.length} staff member${targetStaff2.length!==1?"s":""}?`)) return;
+                          onClick={async()=>{
+                            if(!(await ask({ title: "Assign documents", ok: "Assign", message: `Assign ${bulkDocSelectedDocs.length} document${bulkDocSelectedDocs.length!==1?"s":""} to ${targetStaff2.length} staff member${targetStaff2.length!==1?"s":""} as required reading?` }))) return;
                             setDocAssignments(p=>{
                               const n={...p};
                               bulkDocSelectedDocs.forEach(did=>{
@@ -4654,12 +5540,13 @@ export default function App() {
                       const unreadCount = assignedStaff.length - readCount;
 
                       return (
-                        <DocCard key={d.id} d={d} staff={staff} assignedIds={assignedIds} assignedStaff={assignedStaff} readCount={readCount} unreadCount={unreadCount} icon={icon} docAcknowledgements={docAcknowledgements} setDocAcknowledgements={setDocAcknowledgements} setDocAssignments={setDocAssignments} dbSaveDocAssignments={dbSaveDocAssignments} setDocs={setDocs} dbDeleteDoc={dbDeleteDoc} dbSaveDoc={dbSaveDoc} setPreviewDoc={setPreviewDoc} docAckHistory={docAckHistory} T={T} font={font}/>
+                        <DocCard key={d.id} d={d} staff={staff} assignedIds={assignedIds} assignedStaff={assignedStaff} readCount={readCount} unreadCount={unreadCount} icon={icon} docAcknowledgements={docAcknowledgements} setDocAcknowledgements={setDocAcknowledgements} setDocAssignments={setDocAssignments} dbSaveDocAssignments={dbSaveDocAssignments} setDocs={setDocs} dbDeleteDoc={dbDeleteDoc} dbSaveDoc={dbSaveDoc} setPreviewDoc={setPreviewDoc} docAckHistory={docAckHistory} bundleNames={bundleNamesOf(docBundles, d.id)} T={T} font={font}/>
                       );
                     })}
                   </div>
                 )
               }
+              </>}
             </div>
           )}
 
@@ -4672,6 +5559,7 @@ export default function App() {
 
           {atab==="audit" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
+            <BackupPanel user={user} onBackedUp={setLastBackup} Z={T} font={font}/>
             <LazyAuditTrailTab Z={T} font={font}/>
             </React.Suspense>
           )}
@@ -4684,7 +5572,7 @@ export default function App() {
 
           {atab==="incidents" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
-            <LazyAdminIncidentTab incidents={incidents} setIncidents={setIncidents} dbDeleteIncident={dbDeleteIncident} staff={staff} focusIncidentId={focusIncidentId} setFocusIncidentId={setFocusIncidentId} showAdminReportForm={showAdminReportForm} setShowAdminReportForm={setShowAdminReportForm}
+            <LazyAdminIncidentTab incidents={incidents} setIncidents={setIncidents} dbDeleteIncident={dbDeleteIncident} staff={staff} focusIncidentId={focusIncidentId} setFocusIncidentId={setFocusIncidentId} preset={pagePreset&&pagePreset.tab==="incidents"?pagePreset:null} clearPreset={()=>setPagePreset(null)} showAdminReportForm={showAdminReportForm} setShowAdminReportForm={setShowAdminReportForm}
               investigations={investigations} setInvestigations={setInvestigations}
               onOpenInvestigation={id=>{ setInvestigationView(id); setAtab("investigation"); }}
               equipment={equipment} setEquipment={setEquipment}
@@ -4717,7 +5605,7 @@ export default function App() {
 
           {atab==="equipment" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
-            <LazyEquipmentTrackerTab equipment={equipment} setEquipment={setEquipment} staff={staff} Z={T} font={font}/>
+            <LazyEquipmentTrackerTab equipment={equipment} setEquipment={setEquipment} preset={pagePreset&&pagePreset.tab==="equipment"?pagePreset:null} clearPreset={()=>setPagePreset(null)} staff={staff} Z={T} font={font}/>
             </React.Suspense>
           )}
 
@@ -4732,6 +5620,7 @@ export default function App() {
               dbSaveContractorInductions={dbSaveContractorInductions}
               dbSaveContractorCerts={dbSaveContractorCerts}
               dbSaveContractorVisits={dbSaveContractorVisits}
+              focusContractorId={focusContractorId} setFocusContractorId={setFocusContractorId}
               staff={staff} T={T} font={font}/>
             </React.Suspense>
           )}
@@ -4755,9 +5644,10 @@ export default function App() {
           )}
           {atab==="account" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
-            <LazyAccountTab user={user} passwords={passwords} onSetPassword={savePasswordFor} darkMode={darkMode} setDarkMode={setDarkMode} theme={theme} setTheme={setTheme} onSaveTheme={k=>dbSaveTheme(user.id,k)} emojiMode={emojiMode} onSaveEmojiMode={v=>{setEmojiMode(v);dbSaveEmojiMode(user.id,v);}} Z={T} font={font}/>
+            <LazyAccountTab user={user} passwords={passwords} onSetPassword={savePasswordFor} authMode={AUTH_MODE} onChangeOwnPassword={async (oldPw,newPw)=>{ if (!(await authCheckPassword(user.email, oldPw))) return { ok:false, error:"Current password is incorrect." }; return changeOwnPassword(newPw); }} darkMode={darkMode} setDarkMode={setDarkMode} theme={theme} setTheme={setTheme} onSaveTheme={k=>dbSaveTheme(user.id,k)} emojiMode={emojiMode} onSaveEmojiMode={v=>{setEmojiMode(v);dbSaveEmojiMode(user.id,v);}} Z={T} font={font}/>
             </React.Suspense>
           )}
+          {atab==="account" && <WelcomeReplay name={user.name} Z={T} font={font}/>}
         </div>
         {/* Global hover/focus CSS for this portal (same block in the staff and admin views — keep in sync).
             ⚠ Attribute selectors like [style*="cursor:pointer"] / [style*="borderBottom"] rely on

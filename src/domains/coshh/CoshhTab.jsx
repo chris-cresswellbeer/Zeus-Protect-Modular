@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { notify } from "../../shared/Feedback";
 import { useWindowWidth } from "../../shared/hooks";
 import { HelpTip } from "../../shared/HelpTip";
 import { sb, dbWrite } from "../../lib/supabase";
@@ -6,6 +7,7 @@ import { coshhHazardLevel } from "./coshhHazardLevel";
 import { COSHH_DATA } from "../../data/seedCoshh";
 import { CoshhAssessmentForm } from "./CoshhAssessmentForm";
 import { auditRecord } from "../../lib/audit";
+import { useRemembered } from "../../lib/remembered";
 
 /**
  * CoshhTab — admin COSHH register (Control of Substances Hazardous to Health).
@@ -29,8 +31,8 @@ import { auditRecord } from "../../lib/audit";
 function CoshhTab({ Z, font, msdsFiles, setMsdsFiles, customChemicals, setCustomChemicals, assessments, setAssessments }) {
   const isMobile = useWindowWidth() <= 1024;
   const [search, setSearch] = useState("");
-  const [supplierFilter, setSupplierFilter] = useState("all");
-  const [hazardFilter, setHazardFilter] = useState("all");
+  const [supplierFilter, setSupplierFilter] = useRemembered("coshh.supplier", "all");
+  const [hazardFilter, setHazardFilter] = useRemembered("coshh.hazard", "all");
   const [expandedCode, setExpandedCode] = useState(null);
   const [previewMsds, setPreviewMsds] = useState(null);
   const [editingAssessment, setEditingAssessment] = useState(null); // chemCode being edited
@@ -107,7 +109,7 @@ function CoshhTab({ Z, font, msdsFiles, setMsdsFiles, customChemicals, setCustom
     const { error } = await sb.storage.upload("documents", path, file);
     if (error) {
       console.error("MSDS upload failed:", error);
-      alert("Upload failed: " + error);
+      notify("Upload failed: " + error, { kind: "error" });
       return;
     }
     const fileUrl = sb.storage.getPublicUrl("documents", path);

@@ -1,4 +1,5 @@
 import React from "react";
+import { notify, ask } from "../../shared/Feedback";
 import { Pill } from "../../shared/primitives";
 import { sb, dbWrite } from "../../lib/supabase";
 import { ACCEPT_IMG_DOCS } from "../../lib/constants";
@@ -21,7 +22,7 @@ import { auditEvent } from "../../lib/audit";
  * (setDocs, dbSaveDoc, dbDeleteDoc, setDocAssignments, dbSaveDocAssignments,
  *  setDocAcknowledgements, setPreviewDoc…), plus pre-computed counts from the parent.
  */
-function DocCard({ d, staff, assignedIds, assignedStaff, readCount, unreadCount, icon, docAcknowledgements, setDocAcknowledgements, setDocAssignments, dbSaveDocAssignments, setDocs, dbDeleteDoc, dbSaveDoc, setPreviewDoc, docAckHistory = [], T, font }) {
+function DocCard({ d, staff, assignedIds, assignedStaff, readCount, unreadCount, icon, docAcknowledgements, setDocAcknowledgements, setDocAssignments, dbSaveDocAssignments, setDocs, dbDeleteDoc, dbSaveDoc, setPreviewDoc, docAckHistory = [], bundleNames = [], T, font }) {
   const [expanded, setExpanded] = React.useState(false);
   const [pendingFile, setPendingFile] = React.useState(null); // new-version file awaiting the minor/major choice
   const [showVersions, setShowVersions] = React.useState(false);
@@ -81,7 +82,7 @@ function DocCard({ d, staff, assignedIds, assignedStaff, readCount, unreadCount,
       });
     }
     sb.storage.upload("documents",path2,file).then(({error})=>{
-      if (error) { console.error("New version upload failed:", error); alert("Upload failed: " + error); return; }
+      if (error) { console.error("New version upload failed:", error); notify("Upload failed: " + error, { kind: "error" }); return; }
       newDoc.fileUrl=sb.storage.getPublicUrl("documents",path2);
       newDoc.fileData=newDoc.fileUrl;
       setDocs(p=>p.map(x=>x.id===d.id?newDoc:x));
@@ -92,15 +93,15 @@ function DocCard({ d, staff, assignedIds, assignedStaff, readCount, unreadCount,
     });
   }
 
-  function confirmDelete() {
+  async function confirmDelete() {
     if (d.raId) {
-      window.alert(`"${d.title}" is created from a risk assessment, so it can't be removed here.\n\nTo remove it, delete or change the risk assessment under Risk Assessments.`);
+      notify(`"${d.title}" is created from a risk assessment, so it can't be removed here. To remove it, delete or change the risk assessment under Risk Assessments.`, { kind: "info", timeout: 9000 });
       return;
     }
     const lines = [`Delete "${d.title}"?`, ""];
     if (assignedStaff.length) lines.push(`It is assigned to ${assignedStaff.length} staff member${assignedStaff.length!==1?"s":""} (${readCount} ha${readCount!==1?"ve":"s"} confirmed reading it). Their assignments and read confirmations will be removed too.`, "");
     lines.push("The file will be deleted. This cannot be undone.");
-    if (!window.confirm(lines.join("\n"))) return;
+    if (!(await ask({ title: `Delete "${d.title}"?`, danger: true, ok: "Delete document", message: lines.slice(1).join("\n").trim() }))) return;
     setDocs(p=>p.filter(x=>x.id!==d.id));
     dbDeleteDoc(d.id,d.fileName);
     auditEvent("document", d.id, "delete", `Deleted document "${d.title}" (v${d.version||1})`,
@@ -154,6 +155,11 @@ function DocCard({ d, staff, assignedIds, assignedStaff, readCount, unreadCount,
                 <button onClick={()=>saveReviewDate(reviewInput)} style={{background:"rgba(16,185,129,0.15)",color:T.green,border:"1px solid rgba(16,185,129,0.3)",borderRadius:6,padding:"2px 8px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font}}>✓</button>
                 {reviewInput && <button onClick={()=>saveReviewDate("")} style={{background:"rgba(239,68,68,0.1)",color:"#f87171",border:"1px solid rgba(239,68,68,0.2)",borderRadius:6,padding:"2px 8px",cursor:"pointer",fontSize:11,fontFamily:font}}>Clear</button>}
                 <button onClick={()=>setEditingReview(false)} style={{background:"none",border:"none",color:T.muted,cursor:"pointer",fontSize:11,fontFamily:font}}>✕</button>
+              </span>
+            )}
+            {bundleNames.length>0 && (
+              <span title="Document bundles this document is part of" style={{display:"inline-flex",alignItems:"center",gap:4,padding:"1px 7px",borderRadius:20,background:"rgba(96,165,250,0.1)",border:"1px solid rgba(96,165,250,0.3)",color:"#60a5fa",fontSize:11,fontWeight:600}}>
+                📚 {bundleNames.join(", ")}
               </span>
             )}
           </div>

@@ -10,9 +10,11 @@ import { getExpiryStatus, EXPIRY_WARNING_DAYS } from "../../lib/dates";
 import { isWarehouseWorker, machineExpiryStatus } from "../../data/seedMachinery";
 import { EXT_CERT_TYPES } from "../../data/seedExtCerts";
 import { ManagerRow } from "./ManagerRow";
+import { isPassed, scoreText, recordedText } from "./completion";
 import { AdminDSETab } from "../dse/AdminDSETab";
 import { TrainingMatrixView } from "./TrainingMatrixView";
 import { MonthlyReportView } from "../reports/MonthlyReportView";
+import { useRemembered } from "../../lib/remembered";
 
 /**
  * ReportsTab — admin "Training → Reports" area. One component, many report views,
@@ -56,8 +58,8 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
   const [rptFilterSearch, setRptFilterSearch] = React.useState("");
   const [showTeamExport, setShowTeamExport] = React.useState(false);
   const [exportManager, setExportManager] = React.useState("");
-  const [rptFilterManager, setRptFilterManager] = React.useState("all");
-  const [rptFilterProgress, setRptFilterProgress] = React.useState("all");
+  const [rptFilterManager, setRptFilterManager] = useRemembered("reports.manager", "all");
+  const [rptFilterProgress, setRptFilterProgress] = useRemembered("reports.progress", "all");
   const allModules = modules || TRAINING_MODULES;
   const [expandedStaff, setExpandedStaff] = useState(null);
   const [expandedModule, setExpandedModule] = useState(null);
@@ -264,11 +266,11 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
                       const trainingRows = assignedIds.map(mid=>{
                         const m = allModules.find(x=>x.id===mid); if(!m) return "";
                         const c = userComps[mid];
-                        const passed = c&&c.score>=70;
+                        const passed = isPassed(c);
                         return `<tr style="background:${!c?"#fff2f2":passed?"#f0fff4":"#fff8f0"}">
                           <td>${m.icon||""} ${m.title}</td>
-                          <td style="color:${!c?"#999":passed?"#15803d":"#b45309"};font-weight:600">${!c?"Not started":passed?"Passed":"Failed"}</td>
-                          <td style="text-align:center">${c?c.score+"%":"—"}</td>
+                          <td style="color:${!c?"#999":passed?"#15803d":"#b45309"};font-weight:600">${!c?"Not started":c.recorded?"Completed (recorded)":passed?"Passed":"Failed"}</td>
+                          <td style="text-align:center">${c?scoreText(c):"—"}</td>
                           <td>${c?c.date:"—"}</td>
                           <td style="font-family:monospace;font-size:11px">${c?.certId||"—"}</td>
                         </tr>`;
@@ -498,14 +500,14 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
                                   const hasAnswers = Object.keys(savedAnswers).length > 0;
                                   const certId = result.certId || null;
                                   return (
-                                    <div key={m.id} style={{borderRadius:12,overflow:"hidden",border:`1px solid ${result.score>=70?"rgba(16,185,129,0.25)":"rgba(245,158,11,0.25)"}`}}>
+                                    <div key={m.id} style={{borderRadius:12,overflow:"hidden",border:`1px solid ${isPassed(result)?"rgba(16,185,129,0.25)":"rgba(245,158,11,0.25)"}`}}>
                                       <div onClick={()=>setExpandedModule(isModOpen?null:modKey)}
-                                        style={{background:isModOpen?"rgba(37,99,235,0.12)":result.score>=70?"rgba(16,185,129,0.07)":"rgba(245,158,11,0.07)",padding:"12px 16px",display:"flex",alignItems:"center",gap:12,cursor:hasAnswers?"pointer":"default"}}>
+                                        style={{background:isModOpen?"rgba(37,99,235,0.12)":isPassed(result)?"rgba(16,185,129,0.07)":"rgba(245,158,11,0.07)",padding:"12px 16px",display:"flex",alignItems:"center",gap:12,cursor:hasAnswers?"pointer":"default"}}>
                                         <span style={{fontSize:22,flexShrink:0}}>{m.icon}</span>
                                         <div style={{flex:1}}>
                                           <div style={{fontWeight:700,fontSize:13,color:Z.white}}>{m.title}</div>
                                           <div style={{fontSize:11,marginTop:2,display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
-                                            <span style={{color:result.score>=70?Z.green:Z.amber,fontWeight:700}}>{result.score}%</span>
+                                            <span title={recordedText(result)||undefined} style={{color:isPassed(result)?Z.green:Z.amber,fontWeight:700}}>{scoreText(result)}</span>
                                             <span style={{color:Z.muted}}>{result.date}</span>
                                             {hasAnswers && <span style={{color:incorrectQs.length>0?"#f87171":Z.green}}>{incorrectQs.length>0?`${incorrectQs.length} wrong`:"All correct ✓"}</span>}
                                             {m.renewalMonths && (() => {
@@ -518,13 +520,16 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
                                                 🏅 {certId}
                                               </span>
                                             )}
-                                            {!certId && result.score < 70 && (
+                                            {result.recorded && (
+                                              <span style={{color:Z.muted,fontSize:10,fontStyle:"italic"}}>{recordedText(result)}</span>
+                                            )}
+                                            {!certId && !isPassed(result) && (
                                               <span style={{color:Z.muted,fontSize:10,fontStyle:"italic"}}>No certificate (failed)</span>
                                             )}
                                           </div>
                                         </div>
                                         {hasAnswers && <span style={{color:Z.muted,fontSize:16,lineHeight:1,transition:"transform .2s",transform:isModOpen?"rotate(90deg)":"rotate(0deg)",display:"inline-block",flexShrink:0}}>›</span>}
-                                        {!hasAnswers && <span style={{color:Z.muted,fontSize:11,fontStyle:"italic"}}>No answer data</span>}
+                                        {!hasAnswers && !result.recorded && <span style={{color:Z.muted,fontSize:11,fontStyle:"italic"}}>No answer data</span>}
                                       </div>
                                       {isModOpen && hasAnswers && (
                                         <div style={{background:Z.overlay,borderTop:`1px solid ${Z.border}`,padding:"14px 16px"}}>

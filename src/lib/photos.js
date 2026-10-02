@@ -86,8 +86,14 @@ async function dataUrlToBlob(dataUrl) {
   return res.blob();
 }
 
-// photos: array of data URLs and/or already-uploaded https URLs.
-// Returns the same array with every data URL swapped for a storage URL.
+// photos: array of entries in either format:
+//   • a string — a data URL (phone camera) or an already-uploaded https URL
+//   • an object {name, type, data} from the desktop incident form ("Add Photos /
+//     Files"), which may be a photo or a document such as a PDF; after upload it
+//     becomes {name, type, url}.
+// Returns the same array with every data URL uploaded to storage. Photos come back
+// as plain URL strings (the format the phone app and IncidentPhotos expect);
+// other files come back as {name, type, url}.
 // A failed upload keeps its data URL, so the photo is never lost — the next
 // save of that record retries it.
 //
@@ -101,6 +107,26 @@ async function uploadPhotos(bucket, prefix, photos) {
   for (let i = 0; i < photos.length; i++) {
     const p = photos[i];
     if (isUploaded(p)) { out.push(p); continue; }
+    // Desktop attachment object
+    if (p && typeof p === "object") {
+      if (typeof p.url === "string" && IS_URL.test(p.url)) { out.push(p); continue; }       // already uploaded
+      if (typeof p.data !== "string" || !/^data:/i.test(p.data)) continue;                    // nothing to upload
+      const isImage = /^data:image\//i.test(p.data) || String(p.type || "").startsWith("image/");
+      try {
+        const blob = await dataUrlToBlob(p.data);
+        const nameExt = String(p.name || "").split(".").pop();
+        const ext = (/^[a-z0-9]{1,5}$/i.test(nameExt) ? nameExt : (blob.type.split("/")[1] || "bin")).toLowerCase().replace("jpeg", "jpg");
+        const path = `${prefix}_${i}_${Date.now()}.${ext}`;
+        const { error } = await sb.storage.upload(bucket, path, blob);
+        if (error) { out.push(p); continue; }                                                // keep it; retried on next save
+        const url = sb.storage.getPublicUrl(bucket, path);
+        out.push(isImage ? url : { name: p.name || `file-${i + 1}.${ext}`, type: p.type || blob.type, url });
+      } catch (err) {
+        console.warn("[photos] upload failed, keeping local copy", err);
+        out.push(p);
+      }
+      continue;
+    }
     if (typeof p !== "string" || !IS_DATA_IMAGE.test(p)) continue; // drop junk
     try {
       const blob = await dataUrlToBlob(p);

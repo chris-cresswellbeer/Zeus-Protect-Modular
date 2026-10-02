@@ -1,9 +1,13 @@
 import { useState } from "react";
+import { ask } from "../../shared/Feedback";
+import { useFormGuard, DraftBanner, confirmLeave } from "../../lib/unsaved";
 import { useWindowWidth } from "../../shared/hooks";
 import { HelpTip } from "../../shared/HelpTip";
 import { E } from "../../lib/emoji";
 import { ACCEPT_IMAGES } from "../../lib/constants";
 import { INSP_TYPES, INSP_SECTIONS } from "../../data/seedInspections";
+import { embedFiles } from "../../lib/fileAccess";
+import { useRemembered } from "../../lib/remembered";
 
 /**
  * SiteInspectionsTab — admin workplace inspections (checklists + non-conformances).
@@ -32,8 +36,8 @@ function SiteInspectionsTab({ inspections, setInspections, staff, Z, font }) {
   const isMobile = useWindowWidth() <= 1024;
   const [view, setView] = useState("list"); // "list"|"new"|"detail"|"report"
   const [activeId, setActiveId] = useState(null);
-  const [filterType, setFilterType] = useState("all");
-  const [filterStatus, setFilterStatus] = useState("all");
+  const [filterType, setFilterType] = useRemembered("inspections.type", "all");
+  const [filterStatus, setFilterStatus] = useRemembered("inspections.status", "all");
   const [photoError, setPhotoError] = useState("");
 
   // New inspection form state
@@ -45,6 +49,8 @@ function SiteInspectionsTab({ inspections, setInspections, staff, Z, font }) {
   const [ncReturnSection, setNcReturnSection] = useState(null); // section index to jump back to after saving/cancelling an NC flagged from a checklist question
   const [editingInspId, setEditingInspId] = useState(null);
   const [editInspForm, setEditInspForm] = useState(null);
+  // unsaved-changes warning + draft on this device for a new inspection (lib/unsaved.jsx)
+  const inspGuard = useFormGuard({ key: "inspection.new", label: "your new inspection", active: view === "new", value: form, onRestore: v => setForm(v) });
 
   const today = new Date().toISOString().slice(0,10);
   const selInsp = inspections.find(i=>i.id===activeId);
@@ -130,11 +136,14 @@ function SiteInspectionsTab({ inspections, setInspections, staff, Z, font }) {
       maxScore: possible,
     };
     setInspections(p=>[newInsp,...p]);
+    inspGuard.done();
     setView("detail"); setActiveId(newInsp.id);
   }
 
+  // Photos may be {name,data} objects (added here) or URL strings (added on a phone and
+  // uploaded to storage) — the <img> tags below accept both.
   // Printable inspection report (score, answers per section, NC table with photos).
-  function generateReport(ins) {
+  async function generateReport(ins) {
     const ti = typeInfo(ins.type);
     const pct = ins.maxScore>0 ? Math.round(ins.overallScore/ins.maxScore*100) : 0;
     const openNCs = ins.nonConformances.filter(n=>n.actionStatus!=="complete");
@@ -201,7 +210,7 @@ function SiteInspectionsTab({ inspections, setInspections, staff, Z, font }) {
         </div>
         ${nc.actionOwner?`<div class="nc-row">Owner: ${nc.actionOwner} · Due: ${nc.actionDue||"TBD"}</div>`:""}
         ${nc.actionNote?`<div class="nc-row">Resolution: ${nc.actionNote}</div>`:""}
-        ${nc.photos&&nc.photos.length>0?`<div class="photo-grid">${nc.photos.map(p=>`<img src="${p.data}" alt="${p.name}"/>`).join("")}</div>`:""}
+        ${nc.photos&&nc.photos.length>0?`<div class="photo-grid">${nc.photos.map((p,j)=>typeof p==="string"?`<img src="${p}" alt="Photo ${j+1}"/>`:`<img src="${p.data||p.url}" alt="${p.name||""}"/>`).join("")}</div>`:""}
       </div>`).join("")}
     `:"<p style='color:#94a3b8'>No non-conformances recorded for this inspection.</p>"}
     <div class="footer">
@@ -209,7 +218,9 @@ function SiteInspectionsTab({ inspections, setInspections, staff, Z, font }) {
       <span>Generated: ${today}</span>
     </div>
     </body></html>`;
-    const blob = new Blob([html], {type:"text/html"});
+    // Photos are saved as storage links (strings). With the new sign-in those files are
+    // private, so they're copied into the report file itself (lib/fileAccess.js).
+    const blob = new Blob([await embedFiles(html)], {type:"text/html"});
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href=url; a.download=`inspection-report-${ins.date}.html`; a.click();
@@ -352,7 +363,7 @@ function SiteInspectionsTab({ inspections, setInspections, staff, Z, font }) {
                         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(110px,1fr))",gap:8}}>
                           {nc.photos.map((ph,pi)=>(
                             <div key={pi} style={{position:"relative",borderRadius:8,overflow:"hidden",border:`1px solid ${Z.border}`}}>
-                              <img src={ph.data} alt={ph.name} style={{width:"100%",height:80,objectFit:"cover",display:"block"}}/>
+                              <img src={typeof ph==="string"?ph:(ph.data||ph.url)} alt={typeof ph==="string"?`Photo ${pi+1}`:ph.name} style={{width:"100%",height:80,objectFit:"cover",display:"block"}}/>
                               <button onClick={()=>{
                                 setInspections(p=>p.map(ins=>{
                                   if(ins.id!==activeId) return ins;
@@ -403,8 +414,9 @@ function SiteInspectionsTab({ inspections, setInspections, staff, Z, font }) {
 
     return (
       <div>
+        <DraftBanner guard={inspGuard} Z={Z} font={font} what="a new inspection"/>
         <div style={{display:"flex",gap:12,alignItems:"center",marginBottom:20,flexWrap:"wrap"}}>
-          <button onClick={()=>{setView("list");setForm(BLANK_FORM);setFormSection(0);setNcForm(null);setEditNcIdx(null);setNcReturnSection(null);}} style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:8,padding:"7px 14px",color:Z.muted,cursor:"pointer",fontFamily:font,fontSize:12,fontWeight:700}}>← Cancel</button>
+          <button onClick={async()=>{if(inspGuard.dirty && !(await confirmLeave())) return; inspGuard.done(); setView("list");setForm(BLANK_FORM);setFormSection(0);setNcForm(null);setEditNcIdx(null);setNcReturnSection(null);}} style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:8,padding:"7px 14px",color:Z.muted,cursor:"pointer",fontFamily:font,fontSize:12,fontWeight:700}}>← Cancel</button>
           <div style={{flex:1}}>
             <h2 style={{margin:0,fontSize:20,fontWeight:900,color:Z.white}}>New {ti.label}</h2>
             <p style={{margin:0,color:Z.muted,fontSize:13}}>Complete all checklist sections then log any non-conformances</p>
@@ -561,7 +573,7 @@ function SiteInspectionsTab({ inspections, setInspections, staff, Z, font }) {
                       <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>
                         {ncForm.photos.map((p,pi)=>(
                           <div key={pi} style={{position:"relative",width:70,height:70,borderRadius:8,overflow:"hidden",border:`1px solid ${Z.border}`}}>
-                            <img src={p.data} alt={p.name} style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+                            <img src={typeof p==="string"?p:(p.data||p.url)} alt={typeof p==="string"?`Photo ${pi+1}`:p.name} style={{width:"100%",height:"100%",objectFit:"cover"}}/>
                             <button onClick={()=>setNcForm(prev=>({...prev,photos:prev.photos.filter((_,x)=>x!==pi)}))} style={{position:"absolute",top:2,right:2,background:"rgba(239,68,68,0.85)",color:"#fff",border:"none",borderRadius:3,width:16,height:16,cursor:"pointer",fontSize:9,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
                           </div>
                         ))}
@@ -740,7 +752,7 @@ function SiteInspectionsTab({ inspections, setInspections, staff, Z, font }) {
                 <div style={{display:"flex",gap:6,flexShrink:0}} onClick={e=>e.stopPropagation()}>
                   <button onClick={()=>{setEditingInspId(ins.id);setEditInspForm({date:ins.date,location:ins.location,inspector:ins.inspector,summary:ins.summary||"",nextDue:ins.nextDue||"",status:ins.status});}}
                     style={{background:"rgba(37,99,235,0.1)",color:Z.accentLt,border:"1px solid rgba(37,99,235,0.25)",borderRadius:9,padding:"8px 14px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:12,whiteSpace:"nowrap"}}>✏ Edit</button>
-                  <button onClick={()=>{if(window.confirm("Delete this inspection? This cannot be undone.")){setInspections(p=>p.filter(x=>x.id!==ins.id));}}}
+                  <button onClick={async()=>{if(await ask({ title: "Delete this inspection?", message: "This can't be undone.", ok: "Delete", danger: true })){setInspections(p=>p.filter(x=>x.id!==ins.id));}}}
                     style={{background:"rgba(239,68,68,0.1)",color:"#f87171",border:"1px solid rgba(239,68,68,0.2)",borderRadius:9,padding:"8px 12px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:12}}>🗑</button>
                   <button onClick={()=>{setActiveId(ins.id);setView("detail");window.scrollTo({top:0,behavior:"smooth"});}}
                     style={{background:`linear-gradient(135deg,${Z.accent},${Z.blue})`,color:"#fff",border:"none",borderRadius:9,padding:"8px 16px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:12,whiteSpace:"nowrap",boxShadow:`0 4px 12px ${Z.accent}33`}}>View →</button>

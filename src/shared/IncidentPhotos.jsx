@@ -19,17 +19,23 @@ import React from "react";
 //   title  – heading text above the thumbnails
 // NOTE: useState is called BEFORE the early `return null` on purpose — hooks
 // must run on every render in the same order (Rules of Hooks).
+// Entries may be URL strings (photos) or objects {name, type, url|data} — files
+// attached on the desktop form. Photos show as thumbnails; other files as links.
 function IncidentPhotos({ photos, Z = {}, title = "Photos" }) {
-  const list = Array.isArray(photos) ? photos.filter(Boolean) : [];
+  const all = Array.isArray(photos) ? photos.filter(Boolean) : [];
+  const srcOf = p => (typeof p === "string" ? p : (p.url || p.data || ""));
+  const isImg = p => typeof p === "string" || String(p.type || "").startsWith("image/") || /^data:image\//.test(String(p.data || ""));
+  const list = all.filter(isImg).map(srcOf).filter(Boolean);
+  const files = all.filter(p => !isImg(p) && srcOf(p));
   const [lightbox, setLightbox] = React.useState(null);
-  if (list.length === 0) return null;
+  if (list.length === 0 && files.length === 0) return null;
 
   const muted = Z.muted || "#94a3b8";
   const border = Z.border || "rgba(148,163,184,0.2)";
 
   return (
     <>
-      <div style={{ marginBottom: 16 }}>
+      {list.length > 0 && <div style={{ marginBottom: 16 }}>
         <div style={{
           fontSize: 10, fontWeight: 700, letterSpacing: 0.5, color: muted,
           marginBottom: 6, textTransform: "uppercase",
@@ -55,7 +61,19 @@ function IncidentPhotos({ photos, Z = {}, title = "Photos" }) {
             </button>
           ))}
         </div>
-      </div>
+      </div>}
+
+      {files.length > 0 && (
+        <div style={{ marginBottom: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {files.map((f, i) => (
+            <a key={i} href={srcOf(f)} target="_blank" rel="noreferrer" download={f.name || true}
+              onClick={e => e.stopPropagation()}
+              style={{ fontSize: 12, fontWeight: 700, color: Z.accentLt || "#60a5fa", border: `1px solid ${Z.border || "rgba(148,163,184,0.2)"}`, borderRadius: 8, padding: "6px 10px", textDecoration: "none" }}>
+              📄 {f.name || `File ${i + 1}`}
+            </a>
+          ))}
+        </div>
+      )}
 
       {/* Full-screen lightbox. Click anywhere to close. zIndex 9999 keeps it above modals. */}
       {lightbox && (

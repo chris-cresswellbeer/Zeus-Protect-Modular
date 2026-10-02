@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { ask } from "../../shared/Feedback";
 import { useWindowWidth } from "../../shared/hooks";
 import { HelpTip } from "../../shared/HelpTip";
 import { E } from "../../lib/emoji";
@@ -22,12 +23,18 @@ import { EQ_CATEGORIES } from "../../data/seedEquipment";
  * SAVING: every change goes through setEquipment → App.jsx [equipment] auto-sync
  * effect → dbSaveEquipment (upsert-and-prune). This component never calls Supabase.
  */
-function EquipmentTrackerTab({ equipment, setEquipment, staff, Z, font }) {
+function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPreset, Z, font }) {
   const isMobile = useWindowWidth() <= 1024;
   const [view, setView] = useState("dashboard");     // dashboard | list | detail | form
   const [catFilter, setCatFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [activeId, setActiveId] = useState(null);
+  // Dashboard figure (e.g. "Out of Service") → open the list already filtered
+  useEffect(()=>{
+    if(!preset) return;
+    setCatFilter("all"); setStatusFilter(preset.status||"all"); setView("list");
+    clearPreset&&clearPreset();
+  },[preset]); // eslint-disable-line react-hooks/exhaustive-deps
   const [detailTab, setDetailTab] = useState("overview"); // overview | inspections | defects | service
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -408,7 +415,7 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, Z, font }) {
                     style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:8,padding:"6px 12px",cursor:"pointer",fontFamily:font,fontSize:12,fontWeight:700,color:Z.muted}}>
                     ✏
                   </button>
-                  <button onClick={()=>{ if(window.confirm(`Delete ${e.name}? This cannot be undone.`)) deleteEquipment(e.id); }}
+                  <button onClick={async()=>{ if(await ask({ title: `Delete ${e.name}?`, message: "Its inspections and defects are removed too. This can't be undone.", ok: "Delete", danger: true })) deleteEquipment(e.id); }}
                     style={{background:"rgba(239,68,68,0.1)",color:"#f87171",border:"1px solid rgba(239,68,68,0.2)",borderRadius:8,padding:"6px 10px",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:font}}>
                     🗑
                   </button>
@@ -495,7 +502,7 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, Z, font }) {
           {saved&&<span style={{fontSize:12,color:"#10b981",fontWeight:700}}>{saved}</span>}
           <div style={{marginLeft:"auto",display:"flex",gap:8}}>
             <button onClick={()=>openEdit(activeEq)} style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:8,padding:"7px 14px",color:Z.muted,cursor:"pointer",fontFamily:font,fontSize:12,fontWeight:700}}>✏ Edit</button>
-            <button onClick={()=>{ if(window.confirm(`Delete ${activeEq.name}? This cannot be undone.`)) deleteEquipment(activeEq.id); }}
+            <button onClick={async()=>{ if(await ask({ title: `Delete ${activeEq.name}?`, message: "Its inspections and defects are removed too. This can't be undone.", ok: "Delete", danger: true })) deleteEquipment(activeEq.id); }}
               style={{background:"rgba(239,68,68,0.1)",border:"1px solid rgba(239,68,68,0.25)",borderRadius:8,padding:"7px 14px",color:"#f87171",cursor:"pointer",fontFamily:font,fontSize:12,fontWeight:700}}>
               🗑 Delete
             </button>

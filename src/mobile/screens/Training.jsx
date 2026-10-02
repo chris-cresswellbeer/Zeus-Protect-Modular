@@ -52,7 +52,7 @@ function Training({ myMods, myComps, onOpenModule, Z, font }) {
             {valid.map(({ m, s }) => (
               <Row
                 key={m.id} Z={Z} font={font} icon={m.icon} title={m.title}
-                sub={`${s.expiry ? s.expiry.label : "No renewal required"} · scored ${myComps[m.id].score}%`}
+                sub={`${s.expiry ? s.expiry.label : "No renewal required"} · ${myComps[m.id].recorded ? (myComps[m.id].recorded.session ? "completed in a group session" : "completed before the portal") : `scored ${myComps[m.id].score}%`}`}
                 onClick={() => onOpenModule(m)}
                 right={<span style={{ fontSize: 17 }}>🎓</span>}
               />

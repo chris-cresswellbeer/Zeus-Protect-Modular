@@ -3,6 +3,7 @@ import { useWindowWidth } from "../../shared/hooks";
 import { SectionHeader } from "../../shared/SectionHeader";
 import { E } from "../../lib/emoji";
 import { ACCEPT_IMG_DOCS } from "../../lib/constants";
+import { compressToDataUrl } from "../../lib/photos";
 import { INCIDENT_TYPES, ACCIDENT_CODES, NUMBER_CODES, INJURY_TYPES } from "../../data/seedIncidents";
 
 /**
@@ -255,38 +256,41 @@ function IncidentForm({ form, setF, err, saved, onSubmit, onCancel, isEdit, Z, f
         <div style={{fontSize:12,fontWeight:700,letterSpacing:.5,color:Z.muted,marginBottom:10,textTransform:"uppercase"}}>📎 Evidence Photos & Files</div>
         {(form.photos||[]).length > 0 && (
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:10,marginBottom:12}}>
-            {(form.photos||[]).map((p,i)=>(
+            {(form.photos||[]).map((p,i)=>{
+              // Entries are either a URL / data-URL string (a saved or phone photo) or
+              // an object {name, type, data|url} for a file added here.
+              const src = typeof p === "string" ? p : (p.data || p.url);
+              const isImg = typeof p === "string" || String(p.type||"").startsWith("image/") || /^data:image\//.test(String(p.data||""));
+              const name = typeof p === "string" ? `Photo ${i+1}` : (p.name || `File ${i+1}`);
+              return (
               <div key={i} style={{position:"relative",borderRadius:10,overflow:"hidden",border:`1px solid ${Z.borderMd}`,background:Z.overlay}}>
-                {p.type&&p.type.startsWith("image/")
-                  ? <img src={p.data||p.url} alt={p.name} style={{width:"100%",height:80,objectFit:"cover",display:"block"}}/>
-                  : <div style={{height:80,display:"flex",alignItems:"center",justifyContent:"center",fontSize:28}}>📄</div>
+                {isImg
+                  ? <img src={src} alt={name} style={{width:"100%",height:80,objectFit:"cover",display:"block"}}/>
+                  : <div style={{height:80,display:"flex",alignItems:"center",justifyContent:"center",fontSize:28}}>{E("📄","▤")}</div>
                 }
-                <div style={{padding:"4px 6px",fontSize:10,color:Z.muted,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{p.name}</div>
+                <div style={{padding:"4px 6px",fontSize:10,color:Z.muted,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{name}</div>
                 <button onClick={()=>setF("photos",(form.photos||[]).filter((_,j)=>j!==i))}
                   style={{position:"absolute",top:4,right:4,background:"rgba(0,0,0,0.6)",color:"#fff",border:"none",borderRadius:"50%",width:20,height:20,cursor:"pointer",fontSize:11,lineHeight:"20px",padding:0,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
         <label style={{display:"inline-flex",alignItems:"center",gap:8,background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:10,padding:"9px 18px",cursor:"pointer",fontFamily:font,fontSize:12,fontWeight:700,color:Z.muted}}>
           📎 Add Photos / Files
           <input type="file" accept={ACCEPT_IMG_DOCS} multiple style={{display:"none"}}
-            // ⚠ Two known issues with evidence attachments:
-            //  1. Selecting several files at once: each FileReader callback appends to the
-            //     `form.photos` captured at click time, so only the LAST file survives.
-            //     Fix: use the functional form, e.g. setF with (prev) => [...prev, item], or
-            //     read all files first (Promise.all) and set once.
-            //  2. Attachments are objects {name,type,data}, but App.jsx dbSaveIncident →
-            //     lib/photos.js uploadPhotos() only keeps STRING data-URLs/URLs, so these
-            //     objects are dropped on save. Map them to `p.data` strings (images only)
-            //     before saving, or extend uploadPhotos to accept objects.
-            onChange={e=>{
-              Array.from(e.target.files).forEach(file=>{
-                const reader=new FileReader();
-                reader.onload=ev=>setF("photos",[...(form.photos||[]),{name:file.name,type:file.type,data:ev.target.result}]);
-                reader.readAsDataURL(file);
-              });
+            // All selected files are read first, then added in one go (so choosing several
+            // at once keeps them all). Photos are shrunk to phone size; other files kept as-is.
+            // They're uploaded to storage when the report is saved (App.jsx → lib/photos.js).
+            onChange={async e=>{
+              const files = Array.from(e.target.files||[]);
               e.target.value="";
+              const readRaw = file => new Promise(res => { const r = new FileReader(); r.onload = ev => res(ev.target.result); r.onerror = () => res(null); r.readAsDataURL(file); });
+              const items = (await Promise.all(files.map(async file => {
+                const data = String(file.type||"").startsWith("image/") ? await compressToDataUrl(file) : await readRaw(file);
+                return data ? { name:file.name, type: String(file.type||"").startsWith("image/") && /^data:image\/jpeg/.test(data) ? "image/jpeg" : file.type, data } : null;
+              }))).filter(Boolean);
+              if (items.length) setF("photos",[...(form.photos||[]), ...items]);
             }}/>
         </label>
       </div>

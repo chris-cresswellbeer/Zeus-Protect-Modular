@@ -3,6 +3,7 @@ import { useWindowWidth } from "../../shared/hooks";
 import { Avatar } from "../../shared/primitives";
 import { ContractorDetail } from "./ContractorDetail";
 import { CompanyForm } from "./CompanyForm";
+import { useRemembered } from "../../lib/remembered";
 
 /**
  * ContractorsTab — admin contractor management: company list with status filter and
@@ -19,13 +20,19 @@ import { CompanyForm } from "./CompanyForm";
  *   NB: inductions and certs are keyed per WORKER using the composite "<companyId>_<workerId>"
  *   string (stored in the contractor_id column). Induction items / cert types: data/seedContractors.js.
  */
-function ContractorsTab({ contractors, setContractors, contractorInductions, setContractorInductions, contractorCerts, setContractorCerts, contractorVisits, setContractorVisits, dbSaveContractor, dbDeleteContractor, dbSaveContractorInductions, dbSaveContractorCerts, dbSaveContractorVisits, staff, T, font }) {
+function ContractorsTab({ contractors, setContractors, contractorInductions, setContractorInductions, contractorCerts, setContractorCerts, contractorVisits, setContractorVisits, dbSaveContractor, dbDeleteContractor, dbSaveContractorInductions, dbSaveContractorCerts, dbSaveContractorVisits, staff, focusContractorId, setFocusContractorId, T, font }) {
   const isMobile = useWindowWidth() <= 1024;
   const [view, setView] = React.useState("list");
   const [selected, setSelected] = React.useState(null);
   const [showForm, setShowForm] = React.useState(false);
-  const [filterStatus, setFilterStatus] = React.useState("all");
+  const [filterStatus, setFilterStatus] = useRemembered("contractors.status", "all");
   const [search, setSearch] = React.useState("");
+  // Quick search (App.jsx) asks for a particular contractor: open it, then clear the request.
+  React.useEffect(() => {
+    if (!focusContractorId) return;
+    setSelected(focusContractorId); setView("detail");
+    setFocusContractorId && setFocusContractorId(null);
+  }, [focusContractorId]); // eslint-disable-line react-hooks/exhaustive-deps
   const today = new Date().toISOString().slice(0,10);
 
   const selCon = contractors.find(c=>c.id===selected);

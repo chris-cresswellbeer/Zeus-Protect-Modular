@@ -1,4 +1,5 @@
 import React, { useRef, useEffect } from "react";
+import { notify } from "../../shared/Feedback";
 import { sb, SUPABASE_URL } from "../../lib/supabase";
 import { ACCEPT_IMAGES } from "../../lib/constants";
 import { sanitizeHtml } from "../../lib/sanitizeHtml";
@@ -80,7 +81,7 @@ function RichTextEditor({ value, onChange, Z, font, placeholder, minHeight = 120
     const url = window.prompt("Link URL (https://…):");
     if (!url) return;
     const safe = url.trim();
-    if (!/^https?:\/\//i.test(safe)) { alert("Links must start with http:// or https://"); return; }
+    if (!/^https?:\/\//i.test(safe)) { notify("Links must start with http:// or https://", { kind: "error" }); return; }
     exec("createLink", safe);
   }
 
@@ -110,7 +111,7 @@ function RichTextEditor({ value, onChange, Z, font, placeholder, minHeight = 120
     if (error) {
       if (placeholder) placeholder.remove();
       emitChange();
-      alert("Image upload failed: " + error);
+      notify("Image upload failed: " + error, { kind: "error" });
       return;
     }
     const url = `${SUPABASE_URL}/storage/v1/object/public/documents/${path}`;

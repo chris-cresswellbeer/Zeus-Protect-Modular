@@ -212,7 +212,7 @@ function Today({
             {upToDate.map((m) => (
               <Row
                 key={m.id} Z={Z} font={font} icon={m.icon} title={m.title}
-                right={<StatusChip label={`${myComps[m.id].score}%`} color="#10b981" />}
+                right={<StatusChip label={myComps[m.id].recorded ? "Done" : `${myComps[m.id].score}%`} color="#10b981" />}
               />
             ))}
           </div>

@@ -1,7 +1,7 @@
 import { isPassed, scoreText } from "./completion";
 import { getExpiryStatus } from "../../lib/dates";
 import { EXT_CERT_TYPES } from "../../data/seedExtCerts";
-import { MACHINERY_TYPES } from "../../data/seedMachinery";
+import { MACHINERY_TYPES, machineState, compsFor } from "../../data/seedMachinery";
 import { E } from "../../lib/emoji";
 
 /**
@@ -89,15 +89,17 @@ function generateStaffPDF(u, allModules, assigns, comps, docs, docAssignments, d
   }).join("");
 
   // Machinery
-  const userMachineComps = Object.values(machineComps[u.id]||{});
+  const userMachineComps = compsFor(machineComps, u.id);
   const machineRows = userMachineComps.map(mc=>{
     const mType = machineTypes.find(x=>x.id===mc.machineId)||{label:mc.machineId,icon:"🔧"};
-    const expired = mc.licenceExpiry && mc.licenceExpiry < new Date().toISOString().slice(0,10);
+    const st = machineState(mc, machineTypes);
+    const expired = st.key === "expired";
+    const d = v => v ? String(v).slice(0,10).split("-").reverse().join("/") : "—";
     return `<tr style="background:${expired?"#fff8f0":"#fff"}">
       <td>${mType.icon||"🔧"} ${mType.label||mc.machineId}</td>
-      <td style="color:${mc.status==="competent"?"#15803d":mc.status==="provisional"?"#b45309":"#dc2626"};font-weight:600;text-transform:capitalize">${mc.status||"—"}</td>
-      <td>${mc.assessedDate||"—"}</td>
-      <td style="color:${expired?"#dc2626":"inherit"}">${mc.licenceExpiry||"—"}${expired?" ⚠ Expired":""}</td>
+      <td style="color:${{competent:"#15803d",expiring:"#b45309",expired:"#dc2626",provisional:"#1d4ed8"}[st.key]||"#475569"};font-weight:600">${st.label}</td>
+      <td>${d(mc.assessmentDate)}</td>
+      <td style="color:${expired?"#dc2626":"inherit"}">${st.ex?`${d(st.ex.expiryDate)} (${st.ex.why})`:"—"}</td>
     </tr>`;
   }).join("");
 
@@ -163,7 +165,7 @@ function generateStaffPDF(u, allModules, assigns, comps, docs, docAssignments, d
 
   ${userMachineComps.length>0?`
   <h2>${E("⚙ ","")}Machinery Competence</h2>
-  <table><thead><tr><th>Machine</th><th>Status</th><th>Assessed</th><th>Licence Expiry</th></tr></thead><tbody>${machineRows}</tbody></table>
+  <table><thead><tr><th>Machine</th><th>Status</th><th>Assessed</th><th>Renew by</th></tr></thead><tbody>${machineRows}</tbody></table>
   `:""}
 
   <div class="footer">

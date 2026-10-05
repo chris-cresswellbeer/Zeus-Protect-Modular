@@ -3,11 +3,18 @@
  * isWarehouseWorker(user) — the single rule deciding who gets machinery/"My Machinery".
  * MACHINERY_TYPES / MACHINE_CATEGORIES / COMP_STATUS are REFERENCE DATA (admins can add
  *   more types in-app → custom_machine_types). Competence records store the machine `id`.
- * machineExpiryStatus(comp, types) — expiry = assessmentDate + type.renewalMonths.
+ * machineExpiryStatus(comp, types) — expiry = the EARLIER of (assessmentDate + type.renewalMonths)
+ *   and the licence expiry date typed on the record. Either may be missing.
+ * machineState(comp, types) — the one status everything shows (matrix, lists, reports, PDF):
+ *   competent | expiring | expired | provisional | not_assessed  (see MACHINE_STATE).
+ *   Admins only choose Competent / Provisional / Not assessed; expiry is worked out.
+ *   (Records saved before this change with status "expired" still show as expired.)
+ * compsFor(machineComps, userId) — a person's records as an array. Records are kept as
+ *   { [userId]: { [recordId]: record } } (older seed data used arrays; both work).
  * INIT_MACHINE_COMPS is SEED / DEMO DATA — only used as a fallback when the matching Supabase table is empty
  * (e.g. a brand-new install). Once real rows exist, edits here have NO effect.
  */
-import { getExpiryStatus } from "../lib/dates";
+import { EXPIRY_WARNING_DAYS } from "../lib/dates";
 
 function isWarehouseWorker(user) {
   if (!user) return false;
@@ -39,12 +46,60 @@ const COMP_STATUS = {
   not_assessed:{ label:"Not Assessed",       color:"#64748b", bg:"rgba(100,116,139,0.12)",icon:"—"  },
 };
 
+// A date we can trust: "YYYY-MM-DD" that is a real day. Anything else (typed text, "TBC") is ignored.
+const okDate = d => typeof d === "string" && /^\d{4}-\d{2}-\d{2}/.test(d) && !isNaN(Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10))) ? d.slice(0, 10) : null;
+const utc = d => Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10));
+// months added in UTC, so a clock change can't move the date by a day
+const plusMonths = (d, n) => { const t = new Date(utc(d)); t.setUTCMonth(t.getUTCMonth() + n); return t.toISOString().slice(0, 10); };
+const todayLocal = () => { const t = new Date(); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`; };
+
 function machineExpiryStatus(comp, types) {
+  if (!comp) return null;
   const list = types || MACHINERY_TYPES;
   const m = list.find(x=>x.id===comp.machineId);
-  if (!m || !m.renewalMonths || !comp.assessmentDate) return null;
-  return getExpiryStatus(comp.assessmentDate, m.renewalMonths);
+  const dates = [];
+  const assessed = okDate(comp.assessmentDate), licence = okDate(comp.licenceExpiry);
+  if (m && Number(m.renewalMonths) > 0 && assessed) dates.push({ date: plusMonths(assessed, Number(m.renewalMonths)), source: "renewal" });
+  if (licence) dates.push({ date: licence, source: "licence" });
+  if (!dates.length) return null;
+  dates.sort((a,b)=>a.date.localeCompare(b.date));
+  const { date: expiryDate, source } = dates[0];
+  const daysLeft = Math.round((utc(expiryDate) - utc(todayLocal())) / 86400000);   // whole days; 0 = renew by today
+  const why = source === "licence" ? "licence expiry" : "renewal due";
+  if (daysLeft < 0) return { expiryDate, daysLeft, source, status:"expired", label:"Expired", why, color:"#ef4444", bg:"rgba(239,68,68,0.15)" };
+  if (daysLeft <= EXPIRY_WARNING_DAYS) return { expiryDate, daysLeft, source, status:"expiring", label:`Expires in ${daysLeft}d`, why, color:"#f59e0b", bg:"rgba(245,158,11,0.15)" };
+  return { expiryDate, daysLeft, source, status:"valid", label:`Valid until ${expiryDate}`, why, color:"#10b981", bg:"rgba(16,185,129,0.12)" };
 }
+
+/** What a record shows as. `fill`/`text` are the Excel colours; `sym` the matrix symbol. */
+const MACHINE_STATE = {
+  competent:    { key:"competent",    label:"Competent",          color:"#10b981", bg:"rgba(16,185,129,0.12)", sym:"✓", fill:"C6EFCE", text:"006100" },
+  expiring:     { key:"expiring",     label:"Expiring soon",      color:"#f59e0b", bg:"rgba(245,158,11,0.14)", sym:"!", fill:"FFEB9C", text:"9C5700" },
+  expired:      { key:"expired",      label:"Renewal required",   color:"#ef4444", bg:"rgba(239,68,68,0.14)",  sym:"✗", fill:"FFC7CE", text:"9C0006" },
+  provisional:  { key:"provisional",  label:"Provisional",        color:"#3b82f6", bg:"rgba(59,130,246,0.14)", sym:"◐", fill:"DDEBF7", text:"1F4E79" },
+  not_assessed: { key:"not_assessed", label:"Not assessed",       color:"#64748b", bg:"rgba(100,116,139,0.14)",sym:"–", fill:"F2F2F2", text:"595959" },
+};
+/** The statuses an admin can choose; expiry is worked out from the dates. */
+const CHOOSABLE_STATUS = ["competent", "provisional", "not_assessed"];
+
+function machineState(comp, types) {
+  if (!comp) return null;
+  const ex = machineExpiryStatus(comp, types);
+  let key;
+  if (comp.status === "provisional") key = "provisional";
+  else if (comp.status === "not_assessed") key = "not_assessed";
+  else if (comp.status === "expired") key = "expired";                 // marked by hand before expiry was automatic
+  else if (comp.status !== "competent") key = "not_assessed";          // missing / unknown status: never assume competent
+  else key = ex && ex.status === "expired" ? "expired" : ex && ex.status === "expiring" ? "expiring" : "competent";
+  // marked "expired" by hand while the dates say otherwise: no renew-by date to show
+  const manual = comp.status === "expired" && !(ex && ex.status === "expired");
+  return { ...MACHINE_STATE[key], ex: manual ? null : ex, manual };
+}
+
+const compsFor = (machineComps, userId) => Object.values((machineComps || {})[userId] || {}).filter(Boolean);
+
+/** Array-shaped seed data → { userId: { recordId: record } } */
+const toCompMap = m => Object.fromEntries(Object.entries(m || {}).map(([uid, v]) => [uid, Array.isArray(v) ? Object.fromEntries(v.map(c => [c.id, c])) : v]));
 
 // Seed data — competence records for warehouse staff
 const INIT_MACHINE_COMPS = {
@@ -91,4 +146,5 @@ const INIT_MACHINE_COMPS = {
 
 // ─── Machinery Competence Tab (Staff) ─────────────────────────────────────────
 
-export { isWarehouseWorker, MACHINERY_TYPES, MACHINE_CATEGORIES, COMP_STATUS, machineExpiryStatus, INIT_MACHINE_COMPS };
+export { isWarehouseWorker, MACHINERY_TYPES, MACHINE_CATEGORIES, COMP_STATUS, machineExpiryStatus, INIT_MACHINE_COMPS,
+  MACHINE_STATE, CHOOSABLE_STATUS, machineState, compsFor, toCompMap };

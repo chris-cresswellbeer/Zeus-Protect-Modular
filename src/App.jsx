@@ -73,7 +73,7 @@ import { INIT_INCIDENTS } from "./data/seedIncidents";
 import { INIT_SITE_INSPECTIONS, INSP_TYPES } from "./data/seedInspections";
 import { PERMIT_TYPES } from "./data/seedPermits";
 import { INIT_INVESTIGATIONS } from "./data/seedInvestigations";
-import { isWarehouseWorker, INIT_MACHINE_COMPS, MACHINERY_TYPES } from "./data/seedMachinery";
+import { isWarehouseWorker, INIT_MACHINE_COMPS, MACHINERY_TYPES, machineState, compsFor, toCompMap } from "./data/seedMachinery";
 import { INIT_RAS } from "./data/seedRiskAssessments";
 import { TRAINING_MODULES } from "./data/seedTraining";
 import { USERS } from "./data/seedUsers";
@@ -361,7 +361,7 @@ export default function App() {
   const [investigationView, setInvestigationView] = useState(null); // incidentId to open
   const [lastLoginMap, setLastLoginMap] = useState({}); // userId -> ISO date string
   const [equipment, setEquipment] = useState(USE_SEED ? INIT_EQUIPMENT : []);
-  const [machineComps, setMachineComps] = useState(USE_SEED ? INIT_MACHINE_COMPS : {});
+  const [machineComps, setMachineComps] = useState(USE_SEED ? toCompMap(INIT_MACHINE_COMPS) : {});
   const [siteInspections, setSiteInspections] = useState(USE_SEED ? INIT_SITE_INSPECTIONS : []);
   const [customModules, setCustomModules] = useState([]); // admin-created training modules
   const [customMachineTypes, setCustomMachineTypes] = useState([]); // admin-created machinery types
@@ -848,7 +848,7 @@ export default function App() {
         const mcRows = rows(mcRes);
         if (mcRows && mcRows.length) {
           const map = {};
-          mcRows.forEach(r => { const mcuid=String(r.user_id); map[mcuid] = map[mcuid] || {}; map[mcuid][r.machine_id] = r.data; });
+          mcRows.forEach(r => { const mcuid=String(r.user_id); map[mcuid] = map[mcuid] || {}; map[mcuid][r.machine_id] = { ...(r.data || {}), id: (r.data && r.data.id) || r.machine_id }; });
           setMachineComps(map);
         }
 
@@ -2079,11 +2079,11 @@ export default function App() {
   }
 
   async function dbSaveMachineComp(userId, machineId, data) {
-    await dbWrite(sb.from("machine_completions").upsert({ user_id: String(userId), machine_id: String(machineId), data }, { onConflict: "user_id,machine_id" }), "machine competence record", { alertOnError: true });
+    return dbWrite(sb.from("machine_completions").upsert({ user_id: String(userId), machine_id: String(machineId), data }, { onConflict: "user_id,machine_id" }), "machine competence record", { alertOnError: true });
   }
 
   async function dbDeleteMachineComp(userId, machineId) {
-    await dbWrite(sb.from("machine_completions").delete().match({ user_id: String(userId), machine_id: String(machineId) }), "machine competence delete", { alertOnError: true });
+    return dbWrite(sb.from("machine_completions").delete().match({ user_id: String(userId), machine_id: String(machineId) }), "machine competence delete", { alertOnError: true });
   }
 
   // UPSERT-AND-PRUNE (the preferred pattern): upsert everything in state, then read the ids
@@ -3104,6 +3104,12 @@ export default function App() {
               const pending = allModules.filter(m=>myIds.includes(m.id)&&!myC[m.id]);
               pending.forEach(m=>{ const d=dueInfo(dueDates,user.id,m.id,false);
                 notifications.push({type:"module",urgent:m.level==="Mandatory"||!!(d&&(d.overdue||d.soon)),title:`Complete: ${m.title}`,detail:d?`${dueText(d)}${m.level==="Mandatory"?" · Mandatory":""}`:m.level==="Mandatory"?"Mandatory module — action required":m.duration,nav:{tab:"training"}}); });
+              // My machinery competences needing renewal (warehouse roles)
+              if (isWarehouseWorker(user)) compsFor(machineComps, user.id).forEach(c=>{
+                const st = machineState(c, allMachineTypes); const t = allMachineTypes.find(x=>x.id===c.machineId);
+                if (!t || !st || (st.key!=="expired" && st.key!=="expiring")) return;
+                notifications.push({type:"module",urgent:st.key==="expired",title:`${st.key==="expired"?"Renewal required":"Renew soon"}: ${t.label}`,detail:st.ex?`${st.key==="expired"?"Expired":"Renew by"} ${st.ex.expiryDate.split("-").reverse().join("/")} (${st.ex.why}). Speak to your manager to book a reassessment.`:"Speak to your manager to book a reassessment.",nav:{tab:"machinery"}});
+              });
               // Expired or expiring modules
               allModules.filter(m=>myIds.includes(m.id)&&myC[m.id]&&m.renewalMonths).forEach(m=>{
                 const ex = getExpiryStatus(myC[m.id].date, m.renewalMonths);
@@ -4141,6 +4147,13 @@ export default function App() {
               const pastDuePeople = staff.filter(u=>(u.status||"active")!=="leaver" && pastDueBy[String(u.id)]);
               if(pastDuePeople.length) { const n = pastDuePeople.reduce((t,u)=>t+pastDueBy[String(u.id)],0);
                 notifications.push({type:"module",urgent:true,title:`${n} training assignment${n!==1?"s":""} past the due date`,detail:`${pastDuePeople.length} ${pastDuePeople.length!==1?"people":"person"}: ${pastDuePeople.map(u=>u.name.split(" ")[0]).slice(0,4).join(", ")}${pastDuePeople.length>4?` +${pastDuePeople.length-4} more`:""}`,nav:{tab:"users",staffProgress:"pastdue"}}); }
+              // Machinery competences expired / expiring (data/seedMachinery.js machineState)
+              { let ex = 0, soon = 0; const who = new Set();
+                staff.filter(u=>(u.status||"active")!=="leaver"&&u.role!=="admin"&&isWarehouseWorker(u)).forEach(u=>compsFor(machineComps,u.id).forEach(c=>{
+                  if (!allMachineTypes.some(t=>t.id===c.machineId)) return;
+                  const k = machineState(c, allMachineTypes).key; if (k==="expired") { ex++; who.add(u.name.split(" ")[0]); } else if (k==="expiring") { soon++; who.add(u.name.split(" ")[0]); } }));
+                if (ex || soon) notifications.push({type:"report",urgent:ex>0,title:ex?`${ex} machinery competence${ex!==1?"s":""} need${ex===1?"s":""} renewing${soon?` (+${soon} due within 60 days)`:""}`:`${soon} machinery competence${soon!==1?"s":""} due for renewal within 60 days`,
+                  detail:[...who].slice(0,4).join(", ")+(who.size>4?` +${who.size-4} more`:""),nav:{tab:"machinery",preset:{tab:"machinery",show:"attention"}}}); }
               // Unread required documents
               const unreadDoc = staff.filter(u=>docs.some(d=>(docAssignments[String(d.id)]||[]).includes(String(u.id))&&!(docAcknowledgements[u.id]||{})[d.id]));
               if(unreadDoc.length) notifications.push({type:"document",urgent:false,title:`${unreadDoc.length} staff with unread required documents`,detail:"Check Documents tab for details",nav:{tab:"reports"}});
@@ -4216,7 +4229,7 @@ export default function App() {
               const soonReviews = docs.filter(d=>d.reviewDate&&d.reviewDate>=today2&&Math.ceil((new Date(d.reviewDate)-new Date())/86400000)<=30);
               if(overdueReviews.length) notifications.push({type:"document",urgent:true,title:`${overdueReviews.length} document${overdueReviews.length!==1?"s":""} overdue for review`,detail:overdueReviews.map(d=>d.title).join(", "),nav:{tab:"documents"}});
               else if(soonReviews.length) notifications.push({type:"document",urgent:false,title:`${soonReviews.length} document${soonReviews.length!==1?"s":""} due for review soon`,detail:soonReviews.map(d=>d.title).join(", "),nav:{tab:"documents"}});
-              return <NotificationBell notifications={notifications} onNavigate={n=>{ if(n.staffProgress){ setStaffFilterSearch(""); setStaffFilterManager("all"); setStaffStatusFilter("all"); setStaffFilterProgress(n.staffProgress); } setAtab(n.tab);if(n.view)setAdminReportView(n.view);}} Z={T} font={font}/>;
+              return <NotificationBell notifications={notifications} onNavigate={n=>{ if(n.preset) setPagePreset(n.preset); if(n.staffProgress){ setStaffFilterSearch(""); setStaffFilterManager("all"); setStaffStatusFilter("all"); setStaffFilterProgress(n.staffProgress); } setAtab(n.tab);if(n.view)setAdminReportView(n.view);}} Z={T} font={font}/>;
             })()}
             <QuickSearch getItems={quickItems} Z={T} font={font} compact={winW<2200}/>
             {!navCompact && <div style={{width:1,height:20,background:T.headerBgMd,margin:"0 4px"}}/>}
@@ -4415,6 +4428,11 @@ export default function App() {
                     { id:"openIncidents", node: card(E("⚠️",""),"Open Incidents",openIncidents2.length,`${riddorOpen2.length} RIDDOR unreported`,null,riddorOpen2.length>0,showOpenIncidents) },
                     { id:"unreadDocuments", node: card(E("📄",""),"Unread Documents",unreadDocs.length,"assigned but unacknowledged",unreadDocs.length>0,false,()=>{setAtab("reports");setAdminReportView("documents");}) },
                     { id:"equipmentOverdue", node: card(E("🔧",""),"Equipment Overdue",overdueEquipment.length,"inspection overdue",null,overdueEquipment.length>0,()=>setAtab("equipment")) },
+                    { id:"machineryRenewals", node: (()=>{ let ex=0, soon=0;
+                        staffList.filter(u=>(u.status||"active")!=="leaver"&&u.role!=="admin"&&isWarehouseWorker(u)).forEach(u=>compsFor(machineComps,u.id).forEach(c=>{
+                          if (!allMachineTypes.some(t=>t.id===c.machineId)) return;
+                          const k=machineState(c,allMachineTypes).key; if(k==="expired")ex++; else if(k==="expiring")soon++; }));
+                        return card(E("🏗",""),"Machinery Renewals",ex+soon,ex?`${ex} overdue · ${soon} due in 60 days`:soon?`${soon} due in 60 days`:"all in date",soon>0&&!ex,ex>0,()=>{setPagePreset({tab:"machinery",show:"attention"});setAtab("machinery");}); })() },
                     { id:"outOfService", node: card(E("📋",""),"Out of Service",outOfService.length,"equipment items",null,false,()=>{setPagePreset({tab:"equipment",status:"inactive"});setAtab("equipment");}) },
                     { id:"quizFailures", node: card(E("❌",""),"Quiz Failures",unreviewedFailures.length,"unreviewed",unreviewedFailures.length>0,false,()=>{setAtab("reports");setAdminReportView("failures");}) },
                     { id:"reviewsOverdue", node: card(E("📅",""),"Reviews Overdue",overdueDocReviews.length+overdueRAReviews.length,"docs & RAs",overdueDocReviews.length+overdueRAReviews.length>0,false,()=>setAtab(overdueDocReviews.length||!overdueRAReviews.length?"documents":"ra")) },
@@ -5715,7 +5733,7 @@ export default function App() {
 
           {atab==="machinery" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
-            <LazyAdminMachineryTab allStaff={staff} machineComps={machineComps} setMachineComps={setMachineComps} allMachineTypes={allMachineTypes} allMachineCategories={allMachineCategories} setCustomMachineTypes={setCustomMachineTypes} dbDeleteCustomMachineType={dbDeleteCustomMachineType} dbSaveMachineComp={dbSaveMachineComp} dbDeleteMachineComp={dbDeleteMachineComp} Z={T} font={font}/>
+            <LazyAdminMachineryTab allStaff={staff} machineComps={machineComps} setMachineComps={setMachineComps} allMachineTypes={allMachineTypes} allMachineCategories={allMachineCategories} customMachineTypes={customMachineTypes} preset={pagePreset&&pagePreset.tab==="machinery"?pagePreset:null} clearPreset={()=>setPagePreset(null)} onOpenStaff={()=>setAtab("users")} setCustomMachineTypes={setCustomMachineTypes} dbDeleteCustomMachineType={dbDeleteCustomMachineType} dbSaveMachineComp={dbSaveMachineComp} dbDeleteMachineComp={dbDeleteMachineComp} Z={T} font={font}/>
             </React.Suspense>
           )}
 

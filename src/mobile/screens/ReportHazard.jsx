@@ -5,7 +5,7 @@
 // that modal produces, so the admin side and Supabase need no changes.
 
 import React from "react";
-import { QUICK_LOCATIONS } from "../../data/seedQuickReport";
+import { useSiteLists } from "../../lib/siteLists";
 import { Screen, SectionLabel, PrimaryButton } from "../ui";
 import { compressToDataUrl } from "../../lib/photos";
 
@@ -22,6 +22,7 @@ const URGENCY_OPTIONS = [
 // Photos are compressed on the phone (lib/photos.js) and uploaded when the incident is
 // saved (App.jsx dbSaveIncident → uploadPhotos).
 function ReportHazard({ user, managerName, suggestedLocation, online, onSubmit, onDone, Z, font }) {
+  const siteLists = useSiteLists();                 // "Where was it?" choices: Site Settings
   const [step, setStep] = React.useState(1);
   const [what, setWhat] = React.useState("");
   const [where, setWhere] = React.useState(suggestedLocation || "");
@@ -180,7 +181,7 @@ function ReportHazard({ user, managerName, suggestedLocation, online, onSubmit, 
             {suggestedLocation ? "We've guessed from your last sign-in. Tap to change." : "Pick the closest match."}
           </p>
           <div style={{ display: "flex", flexDirection: "column", gap: 9, marginBottom: 18 }}>
-            {QUICK_LOCATIONS.map((loc) => {
+            {siteLists.reportLocations.map((loc) => {
               const on = where === loc;
               const suggested = loc === suggestedLocation;
               return (

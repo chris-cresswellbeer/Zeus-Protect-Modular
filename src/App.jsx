@@ -63,20 +63,11 @@ import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from 
 import { SortableContext, rectSortingStrategy, arrayMove, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 // ── Seed / reference data (src/data). Used as defaults until Supabase has rows. ──
-import { INIT_DSE_REPORTS } from "./data/dseReports";
-import { HS_DOCS, INIT_ASSIGN, INIT_COMPLETE } from "./data/seedDocs";
-import { INIT_EQUIPMENT } from "./data/seedEquipment";
 import { EXT_CERT_TYPES } from "./data/seedExtCerts";
-import { INIT_FIRE_WARDENS, INIT_FIRE_DRILLS, INIT_ALARM_TESTS, INIT_EXTINGUISHERS, INIT_EMERG_LIGHTING, INIT_FRA_REVIEWS } from "./data/seedFireSafety";
-import { FA_ZONES } from "./data/seedFirstAid";
-import { INIT_INCIDENTS } from "./data/seedIncidents";
-import { INIT_SITE_INSPECTIONS, INSP_TYPES } from "./data/seedInspections";
+import { INSP_TYPES } from "./data/seedInspections";
 import { PERMIT_TYPES } from "./data/seedPermits";
-import { INIT_INVESTIGATIONS } from "./data/seedInvestigations";
-import { isWarehouseWorker, INIT_MACHINE_COMPS, MACHINERY_TYPES, machineState, compsFor, toCompMap } from "./data/seedMachinery";
-import { INIT_RAS } from "./data/seedRiskAssessments";
+import { isWarehouseWorker, MACHINERY_TYPES, machineState, compsFor } from "./data/seedMachinery";
 import { TRAINING_MODULES } from "./data/seedTraining";
-import { USERS } from "./data/seedUsers";
 // ── Domain tabs. `React.lazy` = the tab's code is only downloaded the first time it is
 // opened (code-splitting). Each lazy tab must be rendered inside <React.Suspense>.
 // The `.then(m => ({ default: m.X }))` adapts a NAMED export to what React.lazy expects.
@@ -113,6 +104,7 @@ const LazyInvestigationTab = React.lazy(() => import("./domains/incidents/Invest
 import { QuickReportModal } from "./domains/incidents/QuickReportModal";
 import { isIncompleteQuickReport, myIncompleteQuickReports, isQuickReportOverdue, quickReportDueLabel } from "./domains/incidents/quickReportStatus";
 const LazySiteInspectionsTab = React.lazy(() => import("./domains/inspections/SiteInspectionsTab").then(m => ({ default: m.SiteInspectionsTab })));
+const LazySiteSettingsTab = React.lazy(() => import("./domains/settings/SiteSettingsTab").then(m => ({ default: m.SiteSettingsTab })));
 const LazyAdminMachineryTab = React.lazy(() => import("./domains/machinery/AdminMachineryTab").then(m => ({ default: m.AdminMachineryTab })));
 const LazyMachineryCompetenceTab = React.lazy(() => import("./domains/machinery/MachineryCompetenceTab").then(m => ({ default: m.MachineryCompetenceTab })));
 const LazyPermitsTab = React.lazy(() => import("./domains/permits/PermitsTab").then(m => ({ default: m.PermitsTab })));
@@ -155,6 +147,7 @@ import { useSort, sortRows, SortButton } from "./shared/Sortable";
 import { getProgress, saveProgress, clearProgress, resumeLabel } from "./lib/moduleProgress";
 import { mapDueRows, dueInfo, dueText, formatDue, addDays, DUE_CHOICES, overdueByPerson, today as todayISO } from "./lib/dueDates";
 import { startSession, stopSession, setSessionTheme } from "./shared/SessionTimeout";
+import { loadSiteLists, getSiteLists, coverShifts, isAllShift } from "./lib/siteLists";
 import { loadWelcomeVideo, showWelcome, hideWelcome, WelcomeReplay, WelcomeVideoSettings } from "./shared/WelcomeVideo";
 import { useRemembered, clearRemembered } from "./lib/remembered";
 import { setAuditUser, primeAudit, primeAuditList, primeAuditMap, auditRecord, auditList, auditDelete, auditEvent } from "./lib/audit";
@@ -284,10 +277,9 @@ const INCIDENT_CORE_KEYS = new Set([
   "quickReport","urgency",
 ]);
 
-// Demo / seed data (INIT_*) fills screens on a brand-new install in the old sign-in
-// mode. With Supabase sign-in the database decides what each person may see, so an
-// empty result must stay empty — never replaced by demo records.
-const USE_SEED = AUTH_MODE !== "supabase";
+// No demo data is built into the portal any more (it used to fill empty screens in the
+// old sign-in mode, and the bundle carried a real staff list). Every screen shows only
+// what is in the database. The demo data now lives in demo/ for the test scripts.
 
 export default function App() {
   const [darkMode, setDarkMode] = useState(true); // kept for backward compat
@@ -297,12 +289,12 @@ export default function App() {
   useEffect(() => { applyLightThemeFix(isLightTheme(theme)); }, [theme]);
   const [user,    setUser]    = useState(null);
   const [view,    setViewRaw] = useState("login");
-  const [allUsers,setAllUsers]= useState([]); // loaded from Supabase users table; USERS constant is seed-only
+  const [allUsers,setAllUsers]= useState([]); // loaded from the Supabase users table
   // ── Auth & users ──
   const [passwords, setPasswords] = useState({}); // userId -> password (overrides default)
   // ── Training: assigns = { [userId]: [moduleId,...] }, comps = { [userId]: { [moduleId]: {score,date,certId,answers} } } ──
-  const [assigns, setAssigns] = useState(USE_SEED ? INIT_ASSIGN : {});
-  const [comps,   setComps]   = useState(USE_SEED ? INIT_COMPLETE : {});
+  const [assigns, setAssigns] = useState({});
+  const [comps,   setComps]   = useState({});
   const [email,   setEmail]   = useState("");
   const [pass,    setPass]    = useState("");
   const [err,     setErr]     = useState("");
@@ -335,7 +327,7 @@ export default function App() {
   const [quickEditId, setQuickEditId] = useState(null); // quick report to open in the full form (reminder deep link)
   const [cert,    setCert]    = useState(null);
   const [target,  setTarget]  = useState("1");
-  const [docs,    setDocs]    = useState(HS_DOCS);
+  const [docs,    setDocs]    = useState([]);
   const [docName, setDocName] = useState("");
   const [previewDoc, setPreviewDoc] = useState(null);
   const [docAssignments, setDocAssignments] = useState({}); // { docId: [userId, ...] }
@@ -353,19 +345,19 @@ export default function App() {
   const [dseComments, setDseComments] = useState({});
   const [dseSection, setDseSection] = useState(0);
   const [dseSubmitted, setDseSubmitted] = useState(false);
-  const [dseReports, setDseReports] = useState(USE_SEED ? INIT_DSE_REPORTS : {});
+  const [dseReports, setDseReports] = useState({});
   const [adminResponses, setAdminResponses] = useState({}); // { userId: { reportIdx_issueIdx: { comment, resolved } } }
   // ── Incidents, investigations and other H&S registers ──
-  const [incidents, setIncidents] = useState(USE_SEED ? INIT_INCIDENTS : []);
-  const [investigations, setInvestigations] = useState(USE_SEED ? INIT_INVESTIGATIONS : {});   // { incidentId: { ... } }
+  const [incidents, setIncidents] = useState([]);
+  const [investigations, setInvestigations] = useState({});   // { incidentId: { ... } }
   const [investigationView, setInvestigationView] = useState(null); // incidentId to open
   const [lastLoginMap, setLastLoginMap] = useState({}); // userId -> ISO date string
-  const [equipment, setEquipment] = useState(USE_SEED ? INIT_EQUIPMENT : []);
-  const [machineComps, setMachineComps] = useState(USE_SEED ? toCompMap(INIT_MACHINE_COMPS) : {});
-  const [siteInspections, setSiteInspections] = useState(USE_SEED ? INIT_SITE_INSPECTIONS : []);
+  const [equipment, setEquipment] = useState([]);
+  const [machineComps, setMachineComps] = useState({});
+  const [siteInspections, setSiteInspections] = useState([]);
   const [customModules, setCustomModules] = useState([]); // admin-created training modules
   const [customMachineTypes, setCustomMachineTypes] = useState([]); // admin-created machinery types
-  const [ras, setRas] = useState(INIT_RAS);
+  const [ras, setRas] = useState([]);
   const [permits, setPermits] = useState([]);
   const [contractors, setContractors] = useState([]);
   const [contractorInductions, setContractorInductions] = useState({});
@@ -392,7 +384,7 @@ export default function App() {
   }, [emojiMode]);
   useEffect(() => { ensureRteStyles(); }, []);
   // Fire safety is ONE state object holding six lists; each list maps to its own Supabase table (see dbSaveFireSafety).
-  const [fireSafety, setFireSafety] = useState(USE_SEED ? { wardens:INIT_FIRE_WARDENS, drills:INIT_FIRE_DRILLS, alarmTests:INIT_ALARM_TESTS, extinguishers:INIT_EXTINGUISHERS, emergLighting:INIT_EMERG_LIGHTING, fraReviews:INIT_FRA_REVIEWS } : { wardens:[], drills:[], alarmTests:[], extinguishers:[], emergLighting:[], fraReviews:[] });
+  const [fireSafety, setFireSafety] = useState({ wardens:[], drills:[], alarmTests:[], extinguishers:[], emergLighting:[], fraReviews:[] });
   const [firstAidData, setFirstAidData] = useState({ aiders:[], kits:[], assessment:{} });
   // ── Module merge model ─────────────────────────────────────────────────────
   // Built-in modules live in data/seedTraining.js (TRAINING_MODULES, read-only code).
@@ -574,7 +566,7 @@ export default function App() {
   // Runs ONCE on first render. Each table is fetched in parallel, then converted
   // from database shape (snake_case columns, one row per record) into the
   // in-memory shape the UI uses (camelCase, often maps keyed by userId).
-  // If a table returns no rows, the matching seed data (INIT_*) is kept.
+  // If a table returns no rows, that screen is simply empty.
   // ADDING A NEW TABLE: add the query to the array below, add a matching
   // variable name (same position!) in the destructuring list, add it to the
   // error-logging list, then add a block that converts rows → state.
@@ -585,6 +577,7 @@ export default function App() {
   const loadAllRef = useRef(null);
   useEffect(() => {
     async function loadAll() {
+      loadSiteLists();          // site-specific lists (Site Settings)
       try {
         // Fire all 35 independent reads concurrently instead of one at a
         // time. None of these queries depends on another's result, so
@@ -653,17 +646,14 @@ export default function App() {
         [aRes,cRes,iRes,invRes,ackRes,daRes,docRes,dseRes,resRes,llRes,pwRes,upRes,ecRes,qfRes,conRes,conIndRes,conCertRes,conVisitRes,permitRes,raRes,cmRes,mcRes,eqRes,siRes,msdsRes,ccRes,fwRes,fdRes,fatRes,fexRes,felRes,ffrRes,faRes,cmtRes,dlRes,caRes,dahRes,chRes,mvRes,bdRes]
           .forEach(r => { if (r.status === "rejected") console.error("Supabase load error:", r.reason); });
 
-        // Pattern used below: rows(x) → null/[] means "nothing stored" → keep seed data.
+        // Pattern used below: rows(x) → null/[] means "nothing stored".
         // Training assigns
         const aRows = rows(aRes);
         if (aRows && aRows.length) {
           setAssigns(mapAssignRows(aRows));
           setDueDates(mapDueRows(aRows));
         } else {
-          // Normalise INIT_ASSIGN keys to strings
-          const normalised = {};
-          if (USE_SEED) Object.entries(INIT_ASSIGN).forEach(([k,v]) => { normalised[String(k)] = v; });
-          setAssigns(normalised);
+          setAssigns({});
         }
 
         // Training completions
@@ -753,18 +743,10 @@ export default function App() {
         }
 
         // The users table stores the whole user object in a JSON `data` column.
-        // Users — DB is source of truth; seed with USERS constant on first run
+        // Users — the database is the only source (a new site starts with new_site_first_admin.sql)
         const usersRows = rows(usersRes);
         if (usersRows && usersRows.length) {
           setAllUsers(usersRows.map(r => r.data));
-        } else if (USE_SEED) {
-          // First run — seed the users table from the hardcoded USERS constant
-          setAllUsers(USERS);
-          try {
-            await dbWrite(sb.from("users").insert(USERS.map(u => ({ id: String(u.id), data: u }))), "seed users");
-          } catch(seedErr) {
-            console.warn("User seed error (may already exist):", seedErr);
-          }
         }
 
         // Stored on `window` (a global) rather than state so login() and dbSaveTheme()
@@ -806,7 +788,7 @@ export default function App() {
         if (permitRows?.length) setPermits(permitRows.map(r=>r.data));
 
         // Same override idea as modules: DB rows are merged ON TOP of seed RAs with the same id.
-        // Risk assessments (custom/edited ones override INIT_RAS)
+        // Risk assessments (all from the database)
         const raRows = rows(raRes);
         if (raRows && raRows.length) {
           setRas(prev => {
@@ -902,14 +884,14 @@ export default function App() {
         const ffrRows = rows(ffrRes);
         // Only override each sub-array if the DB returned rows for it.
         // If none of the tables have any rows yet (fresh install), keep seed data.
-        const anyFireData = !USE_SEED || [fwRows,fdRows,fatRows,fexRows,felRows,ffrRows].some(r=>r&&r.length>0);
+        
         setFireSafety({
-          wardens:      fwRows  && fwRows.length  ? fwRows.map(r=>r.data)  : (anyFireData ? [] : INIT_FIRE_WARDENS),
-          drills:       fdRows  && fdRows.length  ? fdRows.map(r=>r.data)  : (anyFireData ? [] : INIT_FIRE_DRILLS),
-          alarmTests:   fatRows && fatRows.length ? fatRows.map(r=>r.data) : (anyFireData ? [] : INIT_ALARM_TESTS),
-          extinguishers:fexRows && fexRows.length ? fexRows.map(r=>r.data) : (anyFireData ? [] : INIT_EXTINGUISHERS),
-          emergLighting:felRows && felRows.length ? felRows.map(r=>r.data) : (anyFireData ? [] : INIT_EMERG_LIGHTING),
-          fraReviews:   ffrRows && ffrRows.length ? ffrRows.map(r=>r.data) : (anyFireData ? [] : INIT_FRA_REVIEWS),
+          wardens:      fwRows  && fwRows.length  ? fwRows.map(r=>r.data)  : [],
+          drills:       fdRows  && fdRows.length  ? fdRows.map(r=>r.data)  : [],
+          alarmTests:   fatRows && fatRows.length ? fatRows.map(r=>r.data) : [],
+          extinguishers:fexRows && fexRows.length ? fexRows.map(r=>r.data) : [],
+          emergLighting:felRows && felRows.length ? felRows.map(r=>r.data) : [],
+          fraReviews:   ffrRows && ffrRows.length ? ffrRows.map(r=>r.data) : [],
         });
 
         // The first aid register is a single JSON document stored in one row with id "singleton".
@@ -1045,7 +1027,7 @@ export default function App() {
       // Training completions, assignments and document confirmations made elsewhere
       // (a member of staff finishing a module, a manager assigning one) appear here
       // without a reload. With the old sign-in an empty table means "use the demo data".
-      const okRows = r => !r.error && Array.isArray(r.data) && (r.data.length > 0 || !USE_SEED);
+      const okRows = r => !r.error && Array.isArray(r.data);
       const recent = recentWriteRef.current;
       if (okRows(cRes)) setComps(cur => mergeNested(cur, mapCompRows(cRes.data), recent, "c"));
       if (okRows(ackRes)) setDocAcknowledgements(cur => mergeNested(cur, mapAckRows(ackRes.data), recent, "k"));
@@ -2359,7 +2341,7 @@ export default function App() {
     if (isAdmin) {
       const ADMIN_PAGES = [["dashboard", "Admin dashboard", ""], ["users", "Staff", "staff accounts people users"], ["assign", "Assign Training", "training"], ["modules", "Training Library", "modules training"],
         ["create", "Create Module", "new module training"], ["reports", "Reports", "training matrix report excel"], ["documents", "H&S Documents", "documents bundles policies"], ["coshh", "COSHH Register", "chemicals"],
-        ["audit", "Audit Trail", "log history"], ["incidents", "Incidents", "accidents near miss riddor"], ["inspections", "Inspections", "site inspection"], ["ra", "Risk Assessments", "risk"],
+        ["audit", "Audit Trail", "log history"], ["settings", "Site Settings", "locations first aid zones shifts report locations"], ["incidents", "Incidents", "accidents near miss riddor"], ["inspections", "Inspections", "site inspection"], ["ra", "Risk Assessments", "risk"],
         ["firesafety", "Fire Safety", "wardens extinguishers drills"], ["firstaid", "First Aid", "first aiders"], ["contractors", "Contractors", ""], ["permits", "Permits", "permit to work"],
         ["machinery", "Machinery Competence", "forklift"], ["equipment", "Equipment Register", "equipment"], ["account", "My Account", "password"]];
       ADMIN_PAGES.forEach(([t, l, w]) => items.push({ id: `p:a:${t}`, group: "Pages", icon: "🧭", label: l, sub: "Admin page", words: w, run: () => toAdmin(t) }));
@@ -4120,8 +4102,8 @@ export default function App() {
               {(()=>{ const CON_TABS=["contractors","permits"]; const conActive=CON_TABS.includes(atab); return (
                 <NavMenu label="Contractors" active={conActive} items={[["contractors","Contractors"],["permits","Permits"]]} current={atab} onPick={setAtab} btnStyle={{...navBtn(conActive,T.gold),maxWidth:"none",whiteSpace:"nowrap"}} Z={T} font={font}/>
               ); })()}
-              {(()=>{ const DOC_TABS=["documents","coshh","audit"]; const docActive=DOC_TABS.includes(atab); return (
-                <NavMenu label="Documents" active={docActive} items={[["documents","H&S Documents"],["coshh","COSHH Register"],["audit","Audit Trail"]]} current={atab} onPick={setAtab} btnStyle={{...navBtn(docActive,T.gold),maxWidth:"none",whiteSpace:"nowrap"}} Z={T} font={font}/>
+              {(()=>{ const DOC_TABS=["documents","coshh","audit","settings"]; const docActive=DOC_TABS.includes(atab); return (
+                <NavMenu label="Documents" active={docActive} items={[["documents","H&S Documents"],["coshh","COSHH Register"],["audit","Audit Trail"],["settings","Site Settings"]]} current={atab} onPick={setAtab} btnStyle={{...navBtn(docActive,T.gold),maxWidth:"none",whiteSpace:"nowrap"}} Z={T} font={font}/>
               ); })()}
               <NavMenu label="Machinery & Equipment" active={meActive} items={[["machinery","Machinery Competence"],["equipment","Equipment Register"]]} current={atab} onPick={setAtab} btnStyle={{...navBtn(meActive,T.gold),maxWidth:navTight?124:"none"}} Z={T} font={font}/>
             </>);
@@ -4291,6 +4273,7 @@ export default function App() {
               ["documents","📄 H&S Documents"],
               ["coshh","🧪 COSHH Register"],
               ["audit", E("🕘 ","")+"Audit Trail"],
+              ["settings", E("⚙ ","")+"Site Settings"],
               ["machinery","🔧 Machinery Competence"],
               ["equipment","📦 Equipment Register"],
               ["account","👤 My Account"],
@@ -4468,7 +4451,7 @@ export default function App() {
                       const fa = firstAidData||{};
                       const faAiders = fa.aiders||[];
                       const faCustomZones = fa.customZones||[];
-                      const faAllZones = [...FA_ZONES, ...faCustomZones];
+                      const faAllZones = [...new Set([...getSiteLists().firstAidZones, ...faCustomZones])];
                       const minPerShift = fa.assessment?.minPerShift||1;
                       // Build combined aider list (manual + cert-detected), same logic as FirstAidRegisterTab
                       const faCertAiders = [];
@@ -4482,12 +4465,12 @@ export default function App() {
                       // A "gap" = a zone/shift combination with fewer valid first aiders than minPerShift.
                       // Keep in step with the equivalent logic in FirstAidRegisterTab.jsx.
                       // Count coverage gaps
-                      const SHIFTS3 = ["Day Shift (08:30–16:00)","Late Shift (16:00–02:00)","Office Hours (08:30–17:30)"];
+                      const SHIFTS3 = coverShifts(getSiteLists().firstAidShifts);   // this site's shifts (Site Settings)
                       let gapCount = 0;
                       faAllZones.forEach(zone=>{
                         SHIFTS3.forEach(shift=>{
                           const count = validAiders.filter(a=>{
-                            const shiftsOk = !a.shifts?.length || a.shifts.includes("All Shifts") || a.shifts.includes(shift);
+                            const shiftsOk = !a.shifts?.length || a.shifts.some(isAllShift) || a.shifts.includes(shift);
                             const zonesOk  = !a.zones?.length  || a.zones.includes(zone);
                             return shiftsOk && zonesOk;
                           }).length;
@@ -5685,6 +5668,12 @@ export default function App() {
           {atab==="coshh" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
             <LazyCoshhTab Z={T} font={font} msdsFiles={msdsFiles} setMsdsFiles={setMsdsFiles} customChemicals={customChemicals} setCustomChemicals={setCustomChemicals} assessments={coshhAssessments} setAssessments={setCoshhAssessments}/>
+            </React.Suspense>
+          )}
+
+          {atab==="settings" && (
+            <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
+            <LazySiteSettingsTab Z={T} font={font}/>
             </React.Suspense>
           )}
 

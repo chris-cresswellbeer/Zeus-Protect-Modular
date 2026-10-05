@@ -4,7 +4,7 @@ import { useWindowWidth } from "../../shared/hooks";
 import { sb } from "../../lib/supabase";
 import { ACCEPT_IMG_DOCS } from "../../lib/constants";
 import { EXT_CERT_TYPES } from "../../data/seedExtCerts";
-import { FA_SHIFTS, FA_ZONES } from "../../data/seedFirstAid";
+import { useSiteLists } from "../../lib/siteLists";
 
 /**
  * ExternalCertsSection — admin upload/management of externally-issued certificates
@@ -19,7 +19,9 @@ import { FA_SHIFTS, FA_ZONES } from "../../data/seedFirstAid";
  * Files go to the "documents" bucket under ext_certs/<userId>_<certType>_<name>.
  */
 function ExternalCertsSection({ staff, extCerts, setExtCerts, dbSaveExtCert, dbDeleteExtCert, customZones=[], T, font }) {
-  const allZones = [...FA_ZONES, ...customZones];
+  const site = useSiteLists();                       // zones and shifts: Site Settings (lib/siteLists.js)
+  const FA_SHIFTS = site.firstAidShifts;
+  const allZones = [...new Set([...site.firstAidZones, ...customZones])];
   const isMobile = useWindowWidth() <= 1024;
   const [selectedUser, setSelectedUser] = React.useState(staff[0]?.id || null);
   const [uploadingFor, setUploadingFor] = React.useState(null); // certType being uploaded

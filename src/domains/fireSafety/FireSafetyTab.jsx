@@ -12,7 +12,7 @@ import { EXPIRY_WARNING_DAYS } from "../../lib/dates";
  *   extinguishers  → fire_extinguishers  { id, location, type, serialNo, lastService, nextServiceDue, lastVisualDate, visualOk, notes }
  *   lighting       → fire_emerg_lighting { id, date, testType: monthly|annual, zone, testedBy, result, notes }
  *   fra            → fire_fra_reviews    { id, date, reviewedBy, trigger, changes, nextReviewDue, fileName?, fileUrl? }
- * (Examples in data/seedFireSafety.js; the per-tab form below is the source of truth.)
+ * (Examples in demo/seedFireSafety.js; the per-tab form below is the source of truth.)
  *
  * All six live in ONE state object `fireSafety` in App.jsx; any change is saved by the
  * [fireSafety] auto-sync effect → dbSaveFireSafety (upsert-and-prune per table).

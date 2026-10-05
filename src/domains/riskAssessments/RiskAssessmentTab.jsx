@@ -22,7 +22,7 @@ import { ask } from "../../shared/Feedback";
  *   (EMPTY_HAZARD in data/seedRiskAssessments.js is the template for a new hazard row)
  * Scores use the 5×5 matrix (shared/RiskMatrix.jsx).
  *
- * Saved via dbSaveRA → risk_assessments (JSON per RA). Seed RAs (INIT_RAS) are merged
+ * Saved via dbSaveRA → risk_assessments (JSON per RA). All RAs come from the database (formerly merged with built-in INIT_RAS)d
  * with DB rows on load in App.jsx.
  */
 function RiskAssessmentTab({ docs, setDocs, setAtab, ras, setRas, dbSaveRA, Z, font }) {

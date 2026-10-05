@@ -152,8 +152,8 @@ function Certificates({ certificates, Z, font }) {
           }}>
             <span style={{ fontSize: 26 }}>{c.icon}</span>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 14, fontWeight: 800, color: Z.white }}>{c.title}</div>
-              <div style={{ fontSize: 11, color: Z.muted, marginTop: 2 }}>
+              <div style={{ fontSize: 14, fontWeight: 800, color: "#ffffff" }}>{c.title}</div>
+              <div style={{ fontSize: 11, color: "#cbd5e1", marginTop: 2 }}>
                 {c.certId} · {c.score}%{c.validUntil ? ` · valid to ${c.validUntil}` : ""}
               </div>
             </div>

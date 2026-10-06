@@ -5601,10 +5601,10 @@ export default function App() {
 
               {/* Folder tabs */}
               <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:16}}>
-                {(["all",...Array.from(new Set(docs.map(d=>d.type||"Document"))).sort()]).map(f=>(
+                {(["all",...Array.from(new Set([...docs.map(d=>d.type||"Document"),...(docFolder!=="all"?[docFolder]:[])])).sort()]).map(f=>(
                   <button key={f} onClick={()=>setDocFolder(f)}
                     style={{padding:"6px 14px",borderRadius:20,border:`1px solid ${docFolder===f?T.accent:T.borderMd}`,background:docFolder===f?`linear-gradient(135deg,${T.accent},${T.blue})`:T.overlay,color:docFolder===f?"#fff":T.muted,fontWeight:docFolder===f?700:400,cursor:"pointer",fontFamily:font,fontSize:12}}>
-                    {f==="all"?`📁 All (${docs.length})`:`${f==="Policy"?"📋":f==="Procedure"?"📝":f==="Guidance"?"📖":f==="Risk Assessment"?"⚠️":f==="COSHH"?"🧪":"📄"} ${f} (${docs.filter(d=>(d.type||"Document")===f).length})`}
+                    {f==="all"?`📁 All (${docs.length})`:`${f==="Policy"?"📋":f==="Procedure"?"📝":f==="Guidance"?"📖":f==="Risk Assessment"?"⚠️":f==="COSHH"?"🧪":f==="User Manual"?"📘":"📄"} ${f} (${docs.filter(d=>(d.type||"Document")===f).length})`}
                   </button>
                 ))}
               </div>
@@ -5617,7 +5617,7 @@ export default function App() {
                     <span style={{fontSize:11,color:T.muted}}>Category:</span>
                     <select value={docFolder==="all"?"Document":docFolder} onChange={e=>setDocFolder(e.target.value)}
                       style={{background:T.overlay,border:`1px solid ${T.borderMd}`,borderRadius:8,padding:"5px 10px",color:T.white,fontSize:12,outline:"none",fontFamily:font,cursor:"pointer"}}>
-                      {["Policy","Procedure","Guidance","Risk Assessment","COSHH","Report","Presentation","Document"].map(t=><option key={t} value={t}>{t}</option>)}
+                      {["Policy","Procedure","Guidance","User Manual","Risk Assessment","COSHH","Report","Presentation","Document"].map(t=><option key={t} value={t}>{t}</option>)}
                     </select>
                   </div>
                 </div>

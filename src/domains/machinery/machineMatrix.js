@@ -12,6 +12,7 @@
 import { isWarehouseWorker, machineState, compsFor, MACHINE_STATE } from "../../data/seedMachinery";
 import { buildXlsx, downloadBlob, colName } from "../../lib/xlsxWriter";
 
+import { todayISO } from "../../lib/dates";
 export const SHOW_OPTIONS = [
   ["all", "Everyone"],
   ["attention", "Needs attention (expired or expiring)"],
@@ -71,7 +72,7 @@ function cellText(c) {
 
 export function exportMachineMatrixXlsx(matrix, { filterText = "", companyName = "Zeus Protect", filename } = {}) {
   const { cols, rows, totals } = matrix;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayISO();
   const FIXED = 3;
   const lastCol = colName(Math.max(FIXED + cols.length - 1, 5));
   const head = { bold: true, fill: "1F3864", color: "FFFFFF", border: true, v: "center", wrap: true };

@@ -1,5 +1,5 @@
 import { isPassed, scoreText } from "./completion";
-import { getExpiryStatus } from "../../lib/dates";
+import { getExpiryStatus, todayISO } from "../../lib/dates";
 import { EXT_CERT_TYPES } from "../../data/seedExtCerts";
 import { MACHINERY_TYPES, machineState, compsFor } from "../../data/seedMachinery";
 import { E } from "../../lib/emoji";
@@ -79,7 +79,7 @@ function generateStaffPDF(u, allModules, assigns, comps, docs, docAssignments, d
   const extCertRows = EXT_CERT_TYPES.map(ct=>{
     const cert=userExtCerts[ct.id];
     if (!cert) return `<tr style="background:#fff2f2"><td>${ct.icon} ${ct.label}</td><td style="color:#dc2626;font-weight:600">Not uploaded</td><td>—</td><td>—</td></tr>`;
-    const expired = cert.expiryDate && cert.expiryDate < new Date().toISOString().slice(0,10);
+    const expired = cert.expiryDate && cert.expiryDate < todayISO();
     return `<tr style="background:${expired?"#fff8f0":"#f0fff4"}">
       <td>${ct.icon} ${ct.label}</td>
       <td style="color:${expired?"#b45309":"#15803d"};font-weight:600">${expired?"⚠ Expired":"✓ Valid"}</td>

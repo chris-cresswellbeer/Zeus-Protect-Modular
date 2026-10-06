@@ -1,3 +1,4 @@
+import { todayISO } from "../../lib/dates";
 /**
  * quickReportStatus.js — "finish your quick hazard report" reminder rules.
  *
@@ -34,7 +35,7 @@ function quickReportDueDate(inc) {
 }
 
 /** true once the due date has passed. */
-function isQuickReportOverdue(inc, today = new Date().toISOString().slice(0, 10)) {
+function isQuickReportOverdue(inc, today = todayISO()) {
   const due = quickReportDueDate(inc);
   return !!due && today > due;
 }

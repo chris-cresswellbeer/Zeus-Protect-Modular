@@ -1,3 +1,4 @@
+import { localISO, todayISO } from "./dates";
 /**
  * dueDates.js — optional "complete by" dates on assigned training.
  *
@@ -8,12 +9,12 @@
  * Once passed, its due date no longer matters (renewals are handled by expiry dates).
  */
 
-export const today = () => new Date().toISOString().slice(0, 10);
+export const today = () => todayISO();
 
 export function addDays(n, from) {
   const d = from ? new Date(from + "T12:00:00") : new Date();
   d.setDate(d.getDate() + n);
-  return d.toISOString().slice(0, 10);
+  return localISO(d);
 }
 
 /** rows from training_assigns → { uid: { mid: due } } (only rows that have a due date) */

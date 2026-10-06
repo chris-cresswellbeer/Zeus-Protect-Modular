@@ -1,3 +1,4 @@
+import { todayISO } from "./dates";
 /**
  * ═══════════════════════════════════════════════════════════════════════════
  * lib/openActions.js — every open corrective action in one list
@@ -13,7 +14,7 @@
 const DONE = new Set(["complete", "completed", "closed", "done"]);
 const daysBetween = (a, b) => Math.floor((new Date(b) - new Date(a)) / 86400000);
 
-function collectOpenActions({ incidents = [], investigations = {}, inspections = [], ras = [], today = new Date().toISOString().slice(0, 10) } = {}) {
+function collectOpenActions({ incidents = [], investigations = {}, inspections = [], ras = [], today = todayISO() } = {}) {
   const out = [];
   const od = due => due ? daysBetween(due, today) : null;
 

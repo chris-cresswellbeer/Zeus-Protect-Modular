@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { notify, ask } from "../../shared/Feedback";
 import { E } from "../../lib/emoji";
 import { parseCompletionDate } from "./completion";
-import { getExpiryStatus } from "../../lib/dates";
+import { getExpiryStatus, todayISO } from "../../lib/dates";
 import { EvidencePicker } from "./TrainingEvidence";
 import { uploadEvidence } from "./evidence";
 
@@ -15,7 +15,7 @@ import { uploadEvidence } from "./evidence";
  * never overwrites a result the person already has. See completion.js.
  */
 
-const todayIso = () => new Date().toISOString().slice(0, 10);
+const todayIso = () => todayISO();
 const fmt = d => { const [y, m, day] = String(d || "").split("-"); return y && m && day ? `${day}/${m}/${y}` : String(d || ""); };
 
 function Shell({ title, onClose, children, Z, font, wide }) {

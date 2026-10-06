@@ -6,7 +6,7 @@ import { riskLevel } from "../../shared/RiskMatrix";
 import { E } from "../../lib/emoji";
 import { sb, dbWrite } from "../../lib/supabase";
 import { TRAINING_MODULES } from "../../data/seedTraining";
-import { getExpiryStatus, EXPIRY_WARNING_DAYS } from "../../lib/dates";
+import { EXPIRY_WARNING_DAYS, getExpiryStatus, localISO, todayISO } from "../../lib/dates";
 import { isWarehouseWorker, machineExpiryStatus, machineState, compsFor } from "../../data/seedMachinery";
 import { EXT_CERT_TYPES } from "../../data/seedExtCerts";
 import { ManagerRow } from "./ManagerRow";
@@ -47,7 +47,7 @@ import { useSort, sortRows, SortButton } from "../../shared/Sortable";
 // { id (row number), data (the failure record) }, so match on the record's own id
 // inside `data`; very old records without one fall back to the row number.
 function saveQuizFailureReviewed(f) {
-  const data = { ...f, acknowledged: true, reviewedAt: new Date().toISOString().slice(0,10) };
+  const data = { ...f, acknowledged: true, reviewedAt: todayISO() };
   delete data._rowId;
   const req = f.id ? sb.from("quiz_failures").update({ data }).eq("data->>id", f.id)
                    : f._rowId != null ? sb.from("quiz_failures").update({ data }).eq("id", f._rowId) : null;
@@ -116,7 +116,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
   // One CSV row per staff member: progress, pending modules, cert ids, expired modules,
   // last login, and First Aid / Fire Marshal certificate status (by EXT_CERT_TYPES id).
   function exportStaffReport() {
-    const today = new Date().toISOString().slice(0,10);
+    const today = todayISO();
     const rows = [
       ["Zeus Protect — Staff Compliance Report"],
       [`Generated: ${today}`],
@@ -151,7 +151,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
 
   // Manager summary rows, then a per-member breakdown with every external cert type as a column.
   function exportManagerReport() {
-    const today = new Date().toISOString().slice(0,10);
+    const today = todayISO();
     const certCols = EXT_CERT_TYPES.map(ct => ct.label);
     const rows = [
       ["Zeus Protect — Manager Performance Report"],
@@ -286,7 +286,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
                       const extCertRows = EXT_CERT_TYPES.map(ct=>{
                         const cert=userExtCerts[ct.id];
                         if (!cert) return `<tr style="background:#fff2f2"><td>${ct.icon} ${ct.label}</td><td style="color:#dc2626;font-weight:600">Not uploaded</td><td>—</td><td>—</td></tr>`;
-                        const expired = cert.expiryDate && cert.expiryDate < new Date().toISOString().slice(0,10);
+                        const expired = cert.expiryDate && cert.expiryDate < todayISO();
                         return `<tr style="background:${expired?"#fff8f0":"#f0fff4"}">
                           <td>${ct.icon} ${ct.label}</td>
                           <td style="color:${expired?"#b45309":"#15803d"};font-weight:600">${expired?"⚠ Expired":"✓ Valid"}</td>
@@ -929,7 +929,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
 
       {/* ── OPEN ACTIONS: merges three sources into one prioritised list; each row links to its source tab via setAtab. ── */}
       {reportView === "actions" && (() => {
-        const today = new Date().toISOString().slice(0,10);
+        const today = todayISO();
         const allActions = [];
 
         // ── Incident corrective actions ────────────────────────────────────
@@ -1355,7 +1355,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
                               <div style={{flex:1,minWidth:0}}>
                                 <div style={{fontSize:12,fontWeight:700,color:"#fff",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{mType.label}</div>
                                 <div style={{fontSize:10,color:Z.muted,marginTop:1}}>
-                                  {expDate ? `${status==="expired"?"Expired":"Renew by"} ${expDate.toISOString().slice(0,10).split("-").reverse().join("/")} (${comp.licenceExpiry && expDate.toISOString().slice(0,10)===String(comp.licenceExpiry).slice(0,10)?"licence expiry":"renewal due"})` : "Marked as renewal required"}{comp.licenceRef?` · ${comp.licenceRef}`:""}
+                                  {expDate ? `${status==="expired"?"Expired":"Renew by"} ${localISO(expDate).split("-").reverse().join("/")} (${comp.licenceExpiry && localISO(expDate)===String(comp.licenceExpiry).slice(0,10)?"licence expiry":"renewal due"})` : "Marked as renewal required"}{comp.licenceRef?` · ${comp.licenceRef}`:""}
                                 </div>
                               </div>
                               <span style={{fontSize:10,fontWeight:800,color,flexShrink:0,whiteSpace:"nowrap"}}>

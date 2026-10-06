@@ -6,6 +6,7 @@ import { CompanyForm } from "./CompanyForm";
 import { useRemembered } from "../../lib/remembered";
 import { HelpTip } from "../../shared/HelpTip";
 
+import { localISO, todayISO } from "../../lib/dates";
 /**
  * ContractorsTab — admin contractor management: company list with status filter and
  * search, an "on site now" panel (today's visits), upcoming scheduled visits, and
@@ -34,7 +35,7 @@ function ContractorsTab({ contractors, setContractors, contractorInductions, set
     setSelected(focusContractorId); setView("detail");
     setFocusContractorId && setFocusContractorId(null);
   }, [focusContractorId]); // eslint-disable-line react-hooks/exhaustive-deps
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayISO();
 
   const selCon = contractors.find(c=>c.id===selected);
   const filtered = contractors.filter(c=>{
@@ -114,7 +115,7 @@ function ContractorsTab({ contractors, setContractors, contractorInductions, set
           {/* Upcoming today / this week */}
           {(()=>{
             const upcomingAll=[];
-            const soon=new Date(Date.now()+7*86400000).toISOString().slice(0,10);
+            const soon=localISO(new Date(Date.now()+7*86400000));
             contractors.forEach(c=>{
               (contractorVisits[c.id]||[]).filter(v=>v.date>today&&v.date<=soon).forEach(v=>{
                 const daysUntil=Math.ceil((new Date(v.date)-new Date())/86400000);

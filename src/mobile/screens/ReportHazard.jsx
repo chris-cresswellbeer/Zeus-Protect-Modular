@@ -9,6 +9,7 @@ import { useSiteLists } from "../../lib/siteLists";
 import { Screen, SectionLabel, PrimaryButton } from "../ui";
 import { compressToDataUrl } from "../../lib/photos";
 
+import { todayISO } from "../../lib/dates";
 const URGENCY_OPTIONS = [
   { id: "low",    label: "Safe to leave",     desc: "Not an immediate risk — log for awareness", icon: "🟡", color: "#f59e0b", bg: "rgba(245,158,11,0.12)", border: "rgba(245,158,11,0.45)" },
   { id: "medium", label: "Needs attention",   desc: "Should be fixed today",                     icon: "🟠", color: "#f97316", bg: "rgba(249,115,22,0.12)", border: "rgba(249,115,22,0.45)" },
@@ -58,7 +59,7 @@ function ReportHazard({ user, managerName, suggestedLocation, online, onSubmit, 
     const location = where === "Other" ? (whereOther.trim() || "Other") : where;
     const rec = {
       id: "qr_" + Date.now(),
-      date: new Date().toISOString().slice(0, 10),
+      date: todayISO(),
       time: new Date().toTimeString().slice(0, 5),
       type: urgency === "high" ? "unsafe_condition" : "near_miss",
       location,

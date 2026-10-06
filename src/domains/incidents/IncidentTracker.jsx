@@ -9,6 +9,7 @@ import { INCIDENT_TYPES, ACCIDENT_CODES, NUMBER_CODES } from "../../data/seedInc
 import { IncidentPhotos } from "../../shared/IncidentPhotos";
 import { isIncompleteQuickReport, myIncompleteQuickReports, isQuickReportOverdue, quickReportDueLabel } from "./quickReportStatus";
 
+import { todayISO } from "../../lib/dates";
 /**
  * IncidentTracker — the STAFF "Report Incident" tab.
  * Lists incidents the logged-in user reported (matched on reportedBy === user id),
@@ -23,7 +24,7 @@ import { isIncompleteQuickReport, myIncompleteQuickReports, isQuickReportOverdue
 function IncidentTracker({ user, incidents, setIncidents, equipment, setEquipment, autoEditId, onAutoEditDone, formOnly, onClose, Z, font }) {
   const isMobile = useWindowWidth() <= 1024;
   const BLANK_FORM = {
-    type:"near_miss", date:new Date().toISOString().slice(0,10), time:"",
+    type:"near_miss", date:todayISO(), time:"",
     location:"", description:"", accidentCode:"", numberCode:"",
     injuryType:"None / No injury", riddor:false,
     personName:"", personDob:"", personAddress:"", personPostcode:"",
@@ -71,7 +72,7 @@ function IncidentTracker({ user, incidents, setIncidents, equipment, setEquipmen
   // equipment's defect log. Saved via App.jsx's [equipment] auto-sync effect.
   function applyEquipmentSideEffects(f) {
     if (!f.equipmentInvolved || !f.equipmentId) return;
-    const today = new Date().toISOString().slice(0,10);
+    const today = todayISO();
     setEquipment(prev => prev.map(eq => {
       if (eq.id !== f.equipmentId) return eq;
       let updated = {...eq};

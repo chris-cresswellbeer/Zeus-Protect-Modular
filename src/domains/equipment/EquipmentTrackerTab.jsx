@@ -5,6 +5,7 @@ import { HelpTip } from "../../shared/HelpTip";
 import { E } from "../../lib/emoji";
 import { EQ_CATEGORIES } from "../../data/seedEquipment";
 
+import { localISO, todayISO } from "../../lib/dates";
 /**
  * EquipmentTrackerTab — admin asset register for work equipment (FLTs, MEWPs,
  * racking, ladders, etc.) supporting PUWER / LOLER record-keeping.
@@ -61,11 +62,11 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPres
   // Dashboard stats
   const openDefects   = equipment.flatMap(e=>e.defects.filter(d=>d.status==="open")).length;
   const overdueService = equipment.filter(e=>e.nextService && e.nextService < today && e.status==="active").length;
-  const dueSoon = equipment.filter(e=>e.nextService && e.nextService >= today && e.nextService <= new Date(Date.now()+60*86400000).toISOString().slice(0,10) && e.status==="active").length;
+  const dueSoon = equipment.filter(e=>e.nextService && e.nextService >= today && e.nextService <= localISO(new Date(Date.now()+60*86400000)) && e.status==="active").length;
   const totalActive = equipment.filter(e=>e.status==="active").length;
   // Fire extinguishers are kept in Fire Safety → Extinguishers (one list); shown here as a link.
   const extOverdue = (extinguishers||[]).filter(x=>x.nextServiceDue&&x.nextServiceDue<today).length;
-  const soonDate = new Date(Date.now()+60*86400000).toISOString().slice(0,10);
+  const soonDate = localISO(new Date(Date.now()+60*86400000));
   const matchesShow = e => showFilter==="all" ? true
     : showFilter==="overdue" ? !!(e.nextService && e.nextService < today && e.status==="active")
     : showFilter==="soon" ? !!(e.nextService && e.nextService >= today && e.nextService <= soonDate && e.status==="active")
@@ -167,7 +168,7 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPres
   // Excel export (3 sheets: assets, maintenance log, open defects).
   // ⚠ Loads SheetJS from cdnjs at click time — same caveat as AdminIncidentTab's export.
   function exportEquipment() {
-    const today = new Date().toISOString().slice(0,10);
+    const today = todayISO();
     const script = document.createElement("script");
     script.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
     script.onload = () => {
@@ -424,7 +425,7 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPres
             const c = cat(e.category);
             const openDef = e.defects.filter(d=>d.status==="open").length;
             const svcOverdue = e.nextService && e.nextService < today && e.status==="active";
-            const svcSoon = e.nextService && e.nextService >= today && e.nextService <= new Date(Date.now()+60*86400000).toISOString().slice(0,10) && e.status==="active";
+            const svcSoon = e.nextService && e.nextService >= today && e.nextService <= localISO(new Date(Date.now()+60*86400000)) && e.status==="active";
             return (
               <div key={e.id} style={{background:`linear-gradient(135deg,${Z.navyMd},${Z.navy})`,borderRadius:14,border:`1px solid ${openDef||svcOverdue?"rgba(239,68,68,0.3)":Z.border}`,padding:"14px 18px",display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
                 <span style={{fontSize:28,flexShrink:0}}>{c.icon}</span>

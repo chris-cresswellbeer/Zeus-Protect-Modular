@@ -22,7 +22,7 @@
  * Pure JS — no React — so it can be tested on its own.
  */
 import { isPassed } from "./completion";
-import { getExpiryStatus, EXPIRY_WARNING_DAYS } from "../../lib/dates";
+import { EXPIRY_WARNING_DAYS, getExpiryStatus, todayISO } from "../../lib/dates";
 import { buildXlsx, downloadBlob, colName } from "../../lib/xlsxWriter";
 
 const MATRIX_STATUS = {
@@ -43,7 +43,7 @@ function cellFor(user, mod, assigns, comps, dueDates) {
   if (!comp || !isPassed(comp, mod)) {
     // due date (lib/dueDates.js): an assignment not done by then is "overdue"
     const due = assigned ? ((dueDates || {})[String(user.id)] || {})[String(mod.id)] || "" : "";
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayISO();
     return { status: !assigned ? "na" : due && due < today ? "overdue" : "missing", assigned, due };
   }
   const ex = mod.renewalMonths ? getExpiryStatus(comp.date, mod.renewalMonths) : null;
@@ -127,7 +127,7 @@ function cellText(c) {
 /** Download the matrix as an .xlsx file. `filterText` describes the filters used. */
 function exportTrainingMatrixXlsx(matrix, { filterText = "", companyName = "Zeus Protect", filename } = {}) {
   const { cols, rows, colStats, totals } = matrix;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayISO();
   const FIXED = 4;                                     // Name, Job title, Manager, Compliance
   const lastCol = colName(FIXED + cols.length - 1);
   const st = k => ({ fill: MATRIX_STATUS[k].fill, color: MATRIX_STATUS[k].text, h: "center", v: "center", border: true, size: 9, bold: k === "expired" || k === "overdue" });

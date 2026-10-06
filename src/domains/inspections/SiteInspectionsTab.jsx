@@ -10,6 +10,7 @@ import { embedFiles } from "../../lib/fileAccess";
 import { useRemembered } from "../../lib/remembered";
 import { latestByKey, supersededBy, overdueInspections } from "./inspectionDue";
 
+import { todayISO } from "../../lib/dates";
 /**
  * SiteInspectionsTab — admin workplace inspections (checklists + non-conformances).
  *
@@ -33,7 +34,7 @@ import { latestByKey, supersededBy, overdueInspections } from "./inspectionDue";
  * "Flag as NC", which jumps to the NC section with the finding pre-filled and then
  * returns to the originating section on save/cancel (ncReturnSection).
  */
-function SiteInspectionsTab({ inspections, setInspections, staff, preset, clearPreset, Z, font }) {
+function SiteInspectionsTab({ inspections, setInspections, staff, userName = "", preset, clearPreset, Z, font }) {
   const isMobile = useWindowWidth() <= 1024;
   const [view, setView] = useState("list"); // "list"|"new"|"detail"|"report"
   const [activeId, setActiveId] = useState(null);
@@ -48,7 +49,7 @@ function SiteInspectionsTab({ inspections, setInspections, staff, preset, clearP
   const [photoError, setPhotoError] = useState("");
 
   // New inspection form state
-  const BLANK_FORM = { type:"annual_hs", date:new Date().toISOString().slice(0,10), inspector:"", location:"", summary:"", sections:{}, nonConformances:[] };
+  const BLANK_FORM = { type:"annual_hs", date:todayISO(), inspector:userName, location:"", summary:"", sections:{}, nonConformances:[] };
   const [form, setForm] = useState(BLANK_FORM);
   const [formSection, setFormSection] = useState(0);
   const [ncForm, setNcForm] = useState(null); // { section, finding, severity, photos, actionOwner, actionDue }
@@ -457,11 +458,14 @@ function SiteInspectionsTab({ inspections, setInspections, staff, preset, clearP
             </div>
             <div>
               <label style={lbl}>Inspector Name *</label>
-              <input value={form.inspector} onChange={e=>setForm(p=>({...p,inspector:e.target.value}))} placeholder="e.g. Linda Osei" style={inp}/>
+              <input value={form.inspector} onChange={e=>setForm(p=>({...p,inspector:e.target.value}))} placeholder="e.g. Linda Osei" list="insp-staff" aria-label="Inspector name" style={inp}/>
+              <datalist id="insp-staff">{(staff||[]).filter(u=>u.status!=="leaver").map(u=><option key={u.id} value={u.name}/>)}</datalist>
             </div>
             <div>
               <label style={lbl}>Location / Area *</label>
-              <input value={form.location} onChange={e=>setForm(p=>({...p,location:e.target.value}))} placeholder="e.g. Zeus HQ — Full Site" style={inp}/>
+              <input value={form.location} onChange={e=>setForm(p=>({...p,location:e.target.value}))} placeholder="e.g. Zeus HQ — Full Site" list="insp-places" aria-label="Location / Area" style={inp}/>
+              {/* places used before for this type first: the same name each time keeps "overdue re-inspections" right */}
+              <datalist id="insp-places">{[...new Set([...inspections.filter(i=>i.type===form.type).map(i=>i.location), ...inspections.map(i=>i.location)].filter(Boolean))].map(l=><option key={l} value={l}/>)}</datalist>
             </div>
           </div>
         </div>

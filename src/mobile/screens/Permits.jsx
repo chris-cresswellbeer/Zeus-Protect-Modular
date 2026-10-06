@@ -11,6 +11,7 @@ import React from "react";
 import { PERMIT_TYPES } from "../../data/seedPermits";
 import { Screen, SectionLabel, Card, Row, StatusChip, PrimaryButton } from "../ui";
 
+import { todayISO } from "../../lib/dates";
 function typeFor(id) {
   return PERMIT_TYPES.find((t) => t.id === id) || PERMIT_TYPES[PERMIT_TYPES.length - 1];
 }
@@ -126,7 +127,7 @@ function PermitDetail({ permit, user, onSignOn, onSignOff, Z, font }) {
       ref: permit.ref,
       userId: user.id,
       signedOnAt: at,
-      date: new Date().toISOString().slice(0, 10),
+      date: todayISO(),
       precautionsConfirmed: precautions,
     });
   }

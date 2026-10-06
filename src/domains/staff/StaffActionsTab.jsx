@@ -1,5 +1,5 @@
 import React, { useState, useRef } from "react";
-import { getExpiryStatus } from "../../lib/dates";
+import { getExpiryStatus, todayISO } from "../../lib/dates";
 import { ACCEPT_IMG_DOCS } from "../../lib/constants";
 import { myIncompleteQuickReports, isQuickReportOverdue, quickReportDueLabel } from "../incidents/quickReportStatus";
 
@@ -17,7 +17,7 @@ import { myIncompleteQuickReports, isQuickReportOverdue, quickReportDueLabel } f
  * sets completedDate. Reports that show a completion date should check both.
  */
 function StaffActionsTab({ user, onCompleteQuickReport, incidents, investigations, setInvestigations, assigns, comps, allModules, docs, docAssignments, docAcknowledgements, dseReports, adminResponses, setStab, setMod, Z, font }) {
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayISO();
 
   // ── Outstanding training modules ──────────────────────────────────────────
   const myIds   = assigns[user.id]||[];

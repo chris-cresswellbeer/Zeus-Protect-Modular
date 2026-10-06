@@ -8,6 +8,7 @@ import { InvestigationDashboard } from "./InvestigationDashboard";
 import { mergeInvestigation, changedSince } from "./investigationMerge";
 import { useFormGuard, DraftBanner } from "../../lib/unsaved";
 
+import { todayISO } from "../../lib/dates";
 /**
  * InvestigationTab — admin incident investigations (root cause + corrective actions).
  *
@@ -53,7 +54,7 @@ function InvestigationTab({ incidents, setIncidents, staff, investigations, setI
   const [conflict, setConflict] = useState(null); // { theirs, merged, theirChanges, conflicts } while the prompt is open
   const [checking, setChecking] = useState(false);
 
-  const BLANK_INV = { summary:"", rootCause:"", contributingFactors:"", immediateActions:"", recommendations:"", investigator:"", investigationDate:new Date().toISOString().slice(0,10), status:"open", photos:[], actions:[] };
+  const BLANK_INV = { summary:"", rootCause:"", contributingFactors:"", immediateActions:"", recommendations:"", investigator:"", investigationDate:todayISO(), status:"open", photos:[], actions:[] };
   const BLANK_ACTION = { description:"", owner:"", dueDate:"", priority:"medium", status:"open" };
 
   // When another screen asks to open a specific incident (focusedId), load its
@@ -207,7 +208,7 @@ function InvestigationTab({ incidents, setIncidents, staff, investigations, setI
     ${(invForm.actions||[]).length>0?`
       <h2>Corrective Actions (${(invForm.actions||[]).length})</h2>
       ${(invForm.actions||[]).map((a,i)=>{
-        const today2=new Date().toISOString().slice(0,10);
+        const today2=todayISO();
         const overdue=a.status!=="closed"&&a.dueDate&&a.dueDate<today2;
         const cls=overdue?"overdue":a.status==="closed"?"closed":"open";
         return `<div class="action ${cls}">
@@ -260,7 +261,7 @@ function InvestigationTab({ incidents, setIncidents, staff, investigations, setI
     files.forEach(f => {
       const reader = new FileReader();
       reader.onload = ev => {
-        newPhotos.push({ name:f.name, type:f.type, data:ev.target.result, uploaded:new Date().toISOString().slice(0,10) });
+        newPhotos.push({ name:f.name, type:f.type, data:ev.target.result, uploaded:todayISO() });
         loaded++;
         if (loaded===files.length) {
           setInvForm(p=>({...p, photos:[...(p.photos||[]), ...newPhotos]}));
@@ -300,7 +301,7 @@ function InvestigationTab({ incidents, setIncidents, staff, investigations, setI
   }
 
   const inc = incidents.find(i=>i.id===activeId);
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayISO();
   const inputStyle = {width:"100%",background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:10,padding:"9px 12px",color:Z.white,fontSize:13,outline:"none",boxSizing:"border-box",fontFamily:font,resize:"vertical"};
   const labelStyle = {fontSize:10,fontWeight:700,letterSpacing:.5,color:Z.muted,textTransform:"uppercase",marginBottom:5,display:"block"};
   const PRIORITIES = [{v:"low",label:"Low",col:"#10b981"},{v:"medium",label:"Medium",col:"#f59e0b"},{v:"high",label:"High",col:"#f87171"},{v:"critical",label:"Critical",col:"#ef4444"}];

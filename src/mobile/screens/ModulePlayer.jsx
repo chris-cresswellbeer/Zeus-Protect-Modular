@@ -19,6 +19,7 @@ import { videoSource } from "../../lib/videoLink";
 // Must match the desktop pass mark in App.jsx submitQuiz (also 70).
 import { PASS_MARK, passMarkOf } from "../../domains/training/completion";
 
+import { todayISO } from "../../lib/dates";
 function ModulePlayer({
   mod, user, initialSlide = 0, offline,
   onExit, onProgress, onComplete,
@@ -65,7 +66,7 @@ function ModulePlayer({
         correct,
         total: quiz.length,
         passed,
-        date: new Date().toISOString().slice(0, 10),
+        date: todayISO(),
         certId: passed ? makeCertId(user.id, mod.id) : null,
       };
       setResult(record);

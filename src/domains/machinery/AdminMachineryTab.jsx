@@ -10,6 +10,7 @@ import { machineState, machineExpiryStatus, compsFor, MACHINE_STATE, CHOOSABLE_S
 import { buildMachineMatrix, exportMachineMatrixXlsx, machineOperators, SHOW_OPTIONS } from "./machineMatrix";
 import { uploadMachineEvidence, removeMachineEvidence, evidenceFiles, checkMachineFiles, migrateMachineEvidence, hasLegacyFiles, MACHINE_EVIDENCE_ACCEPT } from "./machineEvidence";
 
+import { todayISO } from "../../lib/dates";
 /**
  * AdminMachineryTab — Machinery Competence for admins.
  *
@@ -32,7 +33,7 @@ import { uploadMachineEvidence, removeMachineEvidence, evidenceFiles, checkMachi
 let migration = null;           // null = not started; a Promise while running / once done
 
 const fmt = d => { const [y, m, day] = String(d || "").slice(0, 10).split("-"); return y && m && day ? `${day}/${m}/${y}` : ""; };
-const todayIso = () => new Date().toISOString().slice(0, 10);
+const todayIso = () => todayISO();
 const ICONS = ["🏗", "📦", "🔼", "🔀", "🛒", "🔋", "🌀", "➡", "🚪", "🚜", "🪜", "🔧", "⚙", "🧰", "🚛", "🏭", "✂", "🔥", "💧", "⚡"];
 const blank = machineId => ({ machineId: machineId || "", status: "provisional", trainerName: "", trainerQual: "", theoryDate: "", assessmentDate: "", observationDates: [], licenceRef: "", licenceExpiry: "", notes: "", fileNames: [] });
 

@@ -7,6 +7,7 @@ import { DocAssignPanel } from "./DocAssignPanel";
 import { NewVersionModal } from "../../shared/NewVersionModal";
 import { auditEvent } from "../../lib/audit";
 
+import { todayISO } from "../../lib/dates";
 /**
  * DocCard — one document in the admin Documents library.
  *
@@ -33,7 +34,7 @@ function DocCard({ d, staff, assignedIds, assignedStaff, readCount, unreadCount,
   const extIcons={PDF:"📕",DOCX:"📘",DOC:"📘",XLSX:"📗",XLS:"📗",PPTX:"📙",PPT:"📙",PNG:"🖼️",JPG:"🖼️",JPEG:"🖼️",TXT:"📄",CSV:"📊"};
   const docIcon = extIcons[d.ext] || "📄";
 
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayISO();
   const reviewDate = d.reviewDate || null;
   const daysToReview = reviewDate ? Math.ceil((new Date(reviewDate) - new Date()) / 86400000) : null;
   const reviewOverdue = daysToReview !== null && daysToReview < 0;
@@ -63,7 +64,7 @@ function DocCard({ d, staff, assignedIds, assignedStaff, readCount, unreadCount,
   // so everyone assigned must read it again — the earlier confirmations remain in
   // doc_ack_history. "minor" keeps them (each records the version that was read).
   function uploadNewVersion(file, change, note) {
-    const prevVer = d.version||1, newVer = prevVer+1, today = new Date().toISOString().slice(0,10);
+    const prevVer = d.version||1, newVer = prevVer+1, today = todayISO();
     const ext2=file.name.split(".").pop().toUpperCase();
     const path2=`doc_${d.id}_v${newVer}_${file.name.replace(/[^a-zA-Z0-9._-]/g,"_")}`;
     const prevEntry={version:prevVer,date:d.date,fileName:d.fileName||"",fileUrl:d.fileUrl||d.fileData||null,size:d.size||"",ext:d.ext||"",replacedOn:today,replacedBy:change,note:d.versionNote||""}; // note = what changed IN that version
@@ -198,13 +199,7 @@ function DocCard({ d, staff, assignedIds, assignedStaff, readCount, unreadCount,
           style={{background:showVersions?"rgba(37,99,235,0.2)":T.headerBgMd,color:showVersions?T.accentLt:T.muted,border:`1px solid ${showVersions?T.accent+"55":T.borderMd}`,borderRadius:8,padding:"7px 12px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font,whiteSpace:"nowrap"}}>
           v{d.version||1} · Versions
         </button>
-        {/* Delete asks for confirmation first (it removes the file, assignments and read records).
-            Risk-assessment documents are rebuilt from their RA on every load, so they can't be
-            deleted here — the admin is told to delete or edit the risk assessment instead. */}
-        <button onClick={confirmDelete}
-          style={{background:"rgba(239,68,68,0.1)",color:"#f87171",border:"1px solid rgba(239,68,68,0.25)",borderRadius:8,padding:"7px 12px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font,whiteSpace:"nowrap"}}>
-          Remove
-        </button>
+        {/* Remove is inside the Versions panel, away from the everyday buttons */}
       </div>
       {pendingFile && (
         <NewVersionModal kind="document" title={`${d.title} — ${pendingFile.name}`} fromVersion={d.version||1}
@@ -231,6 +226,15 @@ function DocCard({ d, staff, assignedIds, assignedStaff, readCount, unreadCount,
             );
           })}
           <div style={{fontSize:11,color:T.muted,marginTop:8}}>Hover a "read" count to see who confirmed that version.</div>
+          {/* Delete asks for confirmation first (it removes the file, assignments and read records).
+              Risk-assessment documents are rebuilt from their RA on every load, so they can't be
+              deleted here — the admin is told to delete or edit the risk assessment instead. */}
+          <div style={{display:"flex",justifyContent:"flex-end",marginTop:12,paddingTop:10,borderTop:`1px solid ${T.border}`}}>
+            <button onClick={confirmDelete}
+              style={{background:"rgba(239,68,68,0.1)",color:"#f87171",border:"1px solid rgba(239,68,68,0.25)",borderRadius:8,padding:"7px 12px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font,whiteSpace:"nowrap"}}>
+              🗑 Remove this document
+            </button>
+          </div>
         </div>
       )}
       {expanded && (

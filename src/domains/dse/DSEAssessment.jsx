@@ -3,6 +3,7 @@ import { useFormGuard, DraftBanner, confirmLeave } from "../../lib/unsaved";
 import { ZeusLogo } from "../../shared/Logo";
 import { DSE_SECTIONS } from "../../data/seedDse";
 
+import { todayISO } from "../../lib/dates";
 /**
  * DSEAssessment — full-screen staff wizard for the DSE workstation self-assessment
  * (Health and Safety (Display Screen Equipment) Regulations 1992).
@@ -61,7 +62,7 @@ function DSEAssessment({ user, dseAnswers, setDseAnswers, dseComments, setDseCom
     const report = {
       userId: user.id,
       userName: user.name,
-      date: new Date().toISOString().slice(0, 10),
+      date: todayISO(),
       answers: { ...dseAnswers },
       issues,
       totalQuestions: DSE_SECTIONS.reduce((s, sec) => s + sec.questions.length, 0),

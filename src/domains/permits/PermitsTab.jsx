@@ -4,6 +4,7 @@ import { useWindowWidth } from "../../shared/hooks";
 import { PERMIT_TYPES } from "../../data/seedPermits";
 import { PermitForm } from "./PermitForm";
 import { HelpTip } from "../../shared/HelpTip";
+import { localDateTime } from "../../lib/dates";
 
 /**
  * PermitsTab — admin Permit to Work register: list (filter by status/type), create/edit
@@ -27,7 +28,8 @@ function PermitsTab({ permits, setPermits, dbSavePermit, dbDeletePermit, staff, 
   const [selected, setSelected] = React.useState(null);
   const [filterStatus, setFilterStatus] = React.useState("all");
   const [filterType, setFilterType] = React.useState("all");
-  const now = new Date().toISOString();
+  // permit start/end come from datetime-local boxes (UK local time), so compare in local time too
+  const now = localDateTime();
   const today = now.slice(0,10);
 
   const selPermit = permits.find(p=>p.id===selected);

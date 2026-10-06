@@ -5,9 +5,11 @@ import { sb } from "../../lib/supabase";
 import { openFile } from "../../lib/fileAccess";
 import { auditEvent } from "../../lib/audit";
 import { useSiteLists } from "../../lib/siteLists";
+import { useRemembered } from "../../lib/remembered";
 import { checkMachineFiles, MACHINE_EVIDENCE_ACCEPT } from "../machinery/machineEvidence";
 import { fireSummary, expiryState, plusMonths, todayLocal, WARDEN_CERT } from "./fireLogic";
 
+import { todayISO } from "../../lib/dates";
 /**
  * FireSafetyTab — admin fire safety log book (Regulatory Reform (Fire Safety) Order 2005).
  *
@@ -37,14 +39,16 @@ import { fireSummary, expiryState, plusMonths, todayLocal, WARDEN_CERT } from ".
  * lastservice, nextservicedue — validated and previewed before import).
  */
 function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDeleteFraDoc,
-  extCerts={}, setExtCerts, onSaveCert, onDeleteCert, inspections=[], onOpenInspection, preset, clearPreset, Z, font }) {
+  extCerts={}, setExtCerts, onSaveCert, onDeleteCert, inspections=[], onOpenInspection, preset, clearPreset, userName="", Z, font }) {
   const {
     alarmTests=[], extinguishers=[], emergLighting=[]
   } = fireSafety;
   const site = useSiteLists();
   const sum = fireSummary({ fireSafety, extCerts, staff, inspections, today: todayLocal() });
 
-  const [subTab, setSubTab] = useState("wardens");
+  // remembered while signed in, so the page reopens on the tab you were using (and a
+  // refresh of the page underneath can't drop you back on Wardens)
+  const [subTab, setSubTab] = useRemembered("fire.tab", "wardens");
   // opened from elsewhere on a particular list (e.g. Equipment Register → extinguishers)
   useEffect(() => { if (preset && preset.sub) { setSubTab(preset.sub); clearPreset && clearPreset(); } }, [preset]); // eslint-disable-line react-hooks/exhaustive-deps
   const [showModal, setShowModal] = useState(false);
@@ -60,7 +64,7 @@ function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDel
   const [wBusy, setWBusy] = useState(false);
   const wFileRef = useRef(null);
 
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayISO();
 
   // helpers
   // Short random id for new rows (7 chars). Not globally unique, but ample per list.
@@ -96,8 +100,9 @@ function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDel
 
   // ── MODALS ──
   // New entries start with the choices the drop-downs show, so what you see is what is saved.
-  const ADD_DEFAULTS = { drills:{ headcountOk:"true", weather:"Dry", date:todayLocal() }, alarm:{ result:"pass", date:todayLocal() }, extinguishers:{ type:"CO2", visualOk:"true" },
-    lighting:{ testType:"monthly", result:"pass", date:todayLocal() }, fra:{ reviewType:"internal", trigger:"Annual review", date:todayLocal() } };
+  // …and your own name as the person who did it (change it if someone else did)
+  const ADD_DEFAULTS = { drills:{ headcountOk:"true", weather:"Dry", date:todayLocal(), conductedBy:userName }, alarm:{ result:"pass", date:todayLocal(), testedBy:userName }, extinguishers:{ type:"CO2", visualOk:"true" },
+    lighting:{ testType:"monthly", result:"pass", date:todayLocal(), testedBy:userName }, fra:{ reviewType:"internal", trigger:"Annual review", date:todayLocal(), reviewedBy:userName } };
   function openAdd() { if (subTab==="wardens") { openWarden(null); return; } setEditId(null); setModalForm({ ...(ADD_DEFAULTS[subTab]||{}) }); setFraFileUploading(false); setShowModal(true); }
   function openEdit(item) { setEditId(item.id); setModalForm({...item}); setFraFileUploading(false); setShowModal(true); }
   // `key` maps the active sub-tab to its list inside the fireSafety object.
@@ -181,6 +186,10 @@ function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDel
   const fInp = (k, type="text", placeholder="") => (
     <input type={type} value={modalForm[k]||""} onChange={e=>fSet(k,e.target.value)} placeholder={placeholder} style={{...inp,marginBottom:0}}/>
   );
+  // a name box that suggests staff names (anyone can still be typed, e.g. a contractor)
+  const fName = (k, placeholder="Name") => (
+    <input value={modalForm[k]||""} onChange={e=>fSet(k,e.target.value)} placeholder={placeholder} list="fs-staff" aria-label={placeholder} style={{...inp,marginBottom:0}}/>
+  );
   const fSel = (k, options) => (
     <select value={modalForm[k]||""} onChange={e=>fSet(k,e.target.value)} style={{...inp,marginBottom:0}}>
       {options.map(o=><option key={o.v||o} value={o.v||o}>{o.l||o}</option>)}
@@ -196,13 +205,13 @@ function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDel
     {label("Zone / Scope")} {fInp("zone","text","e.g. Full Site")}
     {label("Evacuation Time (mm:ss)")} {fInp("evacuTime","text","e.g. 4:15")}
     {label("Headcount Confirmed?")} {fSel("headcountOk",[{v:"true",l:"Yes — all accounted for"},{v:"false",l:"No — discrepancy noted"}])}
-    {label("Conducted By")} {fInp("conductedBy","text","Name")}
+    {label("Conducted By")} {fName("conductedBy","Name")}
     {label("Weather Conditions")} {fSel("weather",["Dry","Wet","Cold","Hot","Windy"])}
     {label("Issues / Observations")} {fTA("issues",4,"Record any issues, deviations, or observations...")}
   </>) : subTab==="alarm" ? (<>
     {label("Date")} {fInp("date","date")}
     {label("Call Point Tested")} {fInp("callPoint","text","e.g. MCP-03 — Loading Dock")}
-    {label("Tested By")} {fInp("testedBy","text","Name")}
+    {label("Tested By")} {fName("testedBy","Name")}
     {label("Result")} {fSel("result",[{v:"pass",l:"Pass"},{v:"fault",l:"Fault — action required"}])}
     {label("Notes / Actions")} {fTA("notes",3,"Note any issues or follow-up actions...")}
   </>) : subTab==="extinguishers" ? (<>
@@ -218,13 +227,13 @@ function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDel
     {label("Date")} {fInp("date","date")}
     {label("Test Type")} {fSel("testType",[{v:"monthly",l:"Monthly functional (flick test)"},{v:"annual",l:"Annual full-duration (3-hour discharge)"}])}
     {label("Zone / Area")} {fInp("zone","text","e.g. Office Block A")}
-    {label("Tested By")} {fInp("testedBy","text","Name or contractor")}
+    {label("Tested By")} {fName("testedBy","Name or contractor")}
     {label("Result")} {fSel("result",[{v:"pass",l:"Pass"},{v:"fault",l:"Fault — action required"}])}
     {label("Notes / Actions")} {fTA("notes",3,"Any failed luminaires, follow-up actions...")}
   </>) : subTab==="fra" ? (<>
     {label("Review Type")} {fSel("reviewType",[{v:"internal",l:"Internal review"},{v:"external",l:"External company review"}])}
     {label("Review Date")} {fInp("date","date")}
-    {label("Reviewed By")} {fInp("reviewedBy","text",modalForm.reviewType==="external"?"Lead assessor name":"Name")}
+    {label("Reviewed By")} {fName("reviewedBy",modalForm.reviewType==="external"?"Lead assessor name":"Name")}
     {modalForm.reviewType==="external" && (<>
       {label("Company Name")} {fInp("externalCompany","text","e.g. FireSafe Consulting Ltd")}
       {label("Assessor Qualifications")} {fInp("assessorQual","text","e.g. NEBOSH Fire, IFE Member, CFPA-E")}
@@ -960,6 +969,7 @@ function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDel
               <button onClick={()=>setShowModal(false)} style={{background:"none",border:"none",color:Z.muted,fontSize:20,cursor:"pointer",fontFamily:font,lineHeight:1}}>✕</button>
             </div>
             {formContent}
+            <datalist id="fs-staff">{(staff||[]).filter(u=>u.status!=="leaver").map(u=><option key={u.id} value={u.name}/>)}</datalist>
             <div style={{display:"flex",gap:10,marginTop:22}}>
               <button onClick={saveModal} style={{flex:1,background:`linear-gradient(135deg,#ef4444,#dc2626)`,border:"none",borderRadius:10,padding:"11px",color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer",fontFamily:font}}>
                 {editId?"Save Changes":"Add Record"}

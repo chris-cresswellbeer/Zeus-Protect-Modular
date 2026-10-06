@@ -65,7 +65,7 @@ function getExpiryStatus(completionDate, renewalMonths) {
   const today  = new Date();
   // Milliseconds → whole days, rounded UP so "expires later today" still counts as 1 day left.
   const daysLeft = Math.ceil((expiry - today) / (1000 * 60 * 60 * 24));
-  const expiryStr = expiry.toISOString().slice(0,10);
+  const expiryStr = localISO(expiry);
   if (daysLeft < 0)  return { expiryDate:expiryStr, daysLeft, status:"expired",  label:"Expired",          color:"#ef4444", bg:"rgba(239,68,68,0.15)"  };
   if (daysLeft <= EXPIRY_WARNING_DAYS) return { expiryDate:expiryStr, daysLeft, status:"expiring", label:`Expires in ${daysLeft}d`, color:"#f59e0b", bg:"rgba(245,158,11,0.15)" };
   return               { expiryDate:expiryStr, daysLeft, status:"valid",    label:`Valid until ${expiryStr}`,  color:"#10b981", bg:"rgba(16,185,129,0.12)" };
@@ -74,4 +74,18 @@ function getExpiryStatus(completionDate, renewalMonths) {
 // (Leftover section marker from the original single-file build — the logo now lives in shared/Logo.jsx.)
 // ─── Zeus Logo SVG (text-based approximation) ────────────────────────────────
 
-export { addMonths, getExpiryStatus, EXPIRY_WARNING_DAYS };
+/**
+ * Dates as "YYYY-MM-DD" in the computer's own (UK) time. Use these, not
+ * new Date().toISOString().slice(0,10), which gives the UTC date: during British
+ * Summer Time anything between midnight and 1am would get yesterday's date.
+ */
+function localISO(d = new Date()) {
+  const t = d instanceof Date ? d : new Date(d);
+  if (isNaN(t)) return "";
+  return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;
+}
+const todayISO = () => localISO(new Date());
+/** "YYYY-MM-DDTHH:mm" in local time — the format of <input type="datetime-local">. */
+const localDateTime = (d = new Date()) => { const t = d instanceof Date ? d : new Date(d); return isNaN(t) ? "" : `${localISO(t)}T${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`; };
+
+export { addMonths, getExpiryStatus, EXPIRY_WARNING_DAYS, localISO, todayISO, localDateTime };

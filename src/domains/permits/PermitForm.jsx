@@ -1,6 +1,7 @@
 import React from "react";
 import { useWindowWidth } from "../../shared/hooks";
 import { PERMIT_TYPES, PPE_OPTIONS } from "../../data/seedPermits";
+import { localDateTime } from "../../lib/dates";
 
 /**
  * PermitForm — create/edit a Permit to Work. The checklist of hazards, precautions
@@ -20,8 +21,8 @@ import { PERMIT_TYPES, PPE_OPTIONS } from "../../data/seedPermits";
 function PermitForm({ existing, staff, contractors, onSave, onCancel, T, font }) {
   const isMobile = useWindowWidth() <= 1024;
   const now = new Date();
-  const todayStr = now.toISOString().slice(0,16);
-  const endDefault = new Date(now.getTime()+8*3600000).toISOString().slice(0,16);
+  const todayStr = localDateTime(now);                                   // local time, as the boxes show it
+  const endDefault = localDateTime(new Date(now.getTime()+8*3600000));
 
   const [form, setForm] = React.useState(existing || {
     id:"ptw_"+Date.now(),

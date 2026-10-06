@@ -2,6 +2,7 @@ import React from "react";
 import { E } from "../../lib/emoji";
 import { useSiteLists } from "../../lib/siteLists";
 
+import { todayISO } from "../../lib/dates";
 /**
  * QuickReportModal — 30-second "Report a Hazard" pop-up for staff (desktop).
  * Three questions: what, where (the site's report locations — Site Settings — or "Other"), urgency.
@@ -33,7 +34,7 @@ function QuickReportModal({ user, onSubmit, onClose, Z, font }) {
     const urgencyOpt = URGENCY_OPTIONS.find(o=>o.id===urgency);
     const rec = {
       id: "qr_" + Date.now(),
-      date: new Date().toISOString().slice(0,10),
+      date: todayISO(),
       time: new Date().toTimeString().slice(0,5),
       type: urgency==="high" ? "unsafe_condition" : "near_miss",
       location,

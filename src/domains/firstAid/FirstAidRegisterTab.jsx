@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { FA_CERT_TYPES, FA_KIT_TYPES } from "../../data/seedFirstAid";
 import { useSiteLists, coverShifts, isAllShift } from "../../lib/siteLists";
-import { EXPIRY_WARNING_DAYS } from "../../lib/dates";
+import { EXPIRY_WARNING_DAYS, localISO, todayISO } from "../../lib/dates";
 
 /**
  * FirstAidRegisterTab — admin first aid arrangements (Health and Safety (First-Aid)
@@ -32,7 +32,7 @@ function FirstAidRegisterTab({ staff, extCerts, firstAidData, setFirstAidData, Z
   const site = useSiteLists();                       // zones and shifts: Site Settings (lib/siteLists.js)
   const FA_SHIFTS = site.firstAidShifts;
   const allZones = [...new Set([...site.firstAidZones, ...customZones])];
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayISO();
 
   // ── Pull first aiders from extCerts automatically ─────────────────────────
   // Build a combined list: manually added aiders + auto-detected from extCerts
@@ -86,7 +86,7 @@ function FirstAidRegisterTab({ staff, extCerts, firstAidData, setFirstAidData, Z
   }
   // Kits should be checked roughly monthly: due 35 days after the last check, amber in the final 7 days.
   function kitBadge(lastCheckDate) {
-    const d = daysUntil(lastCheckDate ? new Date(new Date(lastCheckDate).getTime()+35*86400000).toISOString().slice(0,10) : null);
+    const d = daysUntil(lastCheckDate ? localISO(new Date(new Date(lastCheckDate).getTime()+35*86400000)) : null);
     if (d === null) return { label:"Never checked", color:"#ef4444", bg:"rgba(239,68,68,0.15)" };
     if (d < 0)     return { label:"Check overdue",  color:"#ef4444", bg:"rgba(239,68,68,0.15)" };
     if (d <= 7)    return { label:`Due in ${d}d`,   color:"#f59e0b", bg:"rgba(245,158,11,0.15)" };

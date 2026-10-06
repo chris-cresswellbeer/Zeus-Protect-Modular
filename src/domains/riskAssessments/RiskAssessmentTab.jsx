@@ -8,6 +8,7 @@ import { generateRAHtml } from "./generateRAHtml";
 import { ask } from "../../shared/Feedback";
 import { useRemembered } from "../../lib/remembered";
 
+import { localISO, todayISO } from "../../lib/dates";
 /**
  * RiskAssessmentTab — admin risk assessments (Management of Health and Safety at Work
  * Regulations 1999, reg. 3).
@@ -45,7 +46,7 @@ function RiskAssessmentTab({ docs, setDocs, setAtab, ras, setRas, dbSaveRA, Z, f
   function newRA() {
     setForm({
       id:"ra"+Date.now(), title:"", location:"", activity:"", department:"",
-      assessor:"", reference:"", reviewDate:"", date:new Date().toISOString().slice(0,10),
+      assessor:"", reference:"", reviewDate:"", date:todayISO(),
       hazards:[ EMPTY_HAZARD() ],
     });
     setStep(0); setSaved(false); setView("new");
@@ -88,7 +89,7 @@ function RiskAssessmentTab({ docs, setDocs, setAtab, ras, setRas, dbSaveRA, Z, f
   // Tracker status for one hazard's further-control action.
   function trackerStatusOf(h) {
     if (h.actionComplete) return "complete";
-    if (h.targetDate && h.targetDate < new Date().toISOString().slice(0,10)) return "overdue";
+    if (h.targetDate && h.targetDate < todayISO()) return "overdue";
     return "pending";
   }
 
@@ -247,7 +248,7 @@ function RiskAssessmentTab({ docs, setDocs, setAtab, ras, setRas, dbSaveRA, Z, f
                   </button>
                   <button onClick={async()=>{
                     const v = await ask({ title: "Next review date", message: `When should "${ra.title}" next be reviewed?`, ok: "Save date",
-                      fields: [{ id: "date", label: "Review date", type: "date", required: true, value: ra.reviewDate || new Date(new Date().setFullYear(new Date().getFullYear()+1)).toISOString().slice(0,10) }] });
+                      fields: [{ id: "date", label: "Review date", type: "date", required: true, value: ra.reviewDate || localISO(new Date(new Date().setFullYear(new Date().getFullYear()+1))) }] });
                     if (!v) return;
                     const updated = {...ra, reviewDate:v.date};
                     setRas(p=>p.map(r=>r.id===ra.id?updated:r));

@@ -17,7 +17,7 @@
 
 import React from "react";
 import { getThemeTokens } from "../theme/tokens";
-import { getExpiryStatus } from "../lib/dates";
+import { getExpiryStatus, todayISO } from "../lib/dates";
 import { useOnline } from "./lib/useOnline";
 import { enqueue, listQueue, drainQueue } from "./lib/syncQueue";
 import { watchInstallPrompt } from "./registerSW";
@@ -37,6 +37,8 @@ import { bundlesFor } from "../domains/documents/bundles";
 import { progressMap, saveProgress as saveModuleProgress, clearProgress } from "../lib/moduleProgress";
 import { dueInfo } from "../lib/dueDates";
 import { latestByKey } from "../domains/inspections/inspectionDue";
+import { isPassed } from "../domains/training/completion";
+
 
 const FONT = "'Barlow','Trebuchet MS',system-ui,sans-serif";
 const OLD_PROGRESS_KEY = "zeus.mobile.progress";   // before Oct 2026: one list for everyone on the phone (removed)
@@ -203,12 +205,12 @@ function MobileApp({
   // Recorded completions (training done before the portal, entered by an admin)
   // have no portal certificate or score: they're listed in history only.
   const certificates = myMods
-    .filter((m) => myComps[m.id] && !myComps[m.id].recorded)
+    .filter((m) => myComps[m.id] && !myComps[m.id].recorded && isPassed(myComps[m.id], m))   // only passes are certificates
     .map((m) => {
       const c = myComps[m.id];
       const ex = m.renewalMonths ? getExpiryStatus(c.date, m.renewalMonths) : null;
       return {
-        moduleId: m.id, title: m.title, icon: m.icon, score: c.score, certId: c.certId,
+        moduleId: m.id, title: m.title, icon: m.icon, score: c.score, certId: c.certId, completed: c.date || "",
         validUntil: ex ? ex.expiryDate : null,
         lapsed: ex ? ex.status === "expired" : false,
         expiredOn: ex ? ex.expiryDate : null,
@@ -289,7 +291,7 @@ function MobileApp({
   }
 
   function acknowledgeDoc(doc) {
-    const date = new Date().toISOString().slice(0, 10);
+    const date = todayISO();
     write(
       "docAck",
       { userId: user.id, docId: doc.id, date },
@@ -472,7 +474,7 @@ function MobileApp({
           />
         )}
 
-        {screen === "certificates" && <Certificates certificates={certificates} Z={T} font={FONT} />}
+        {screen === "certificates" && <Certificates certificates={certificates} holder={user && user.name} Z={T} font={FONT} />}
 
         {screen === "actions" && (
           <CorrectiveActions

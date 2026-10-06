@@ -5,6 +5,7 @@ import { INDUCTION_ITEMS } from "../../data/seedContractors";
 import { WorkerDetailModal } from "./WorkerDetailModal";
 import { CompanyForm } from "./CompanyForm";
 
+import { localISO, todayISO } from "../../lib/dates";
 /**
  * ContractorDetail — one contractor company: tabs for visits (sign-in log and
  * scheduled visits), workers (with induction % and certificate status), and company
@@ -23,7 +24,7 @@ import { CompanyForm } from "./CompanyForm";
  *   string (stored in the contractor_id column). Induction items / cert types: data/seedContractors.js.
  */
 function ContractorDetail({ selCon, contractorInductions, setContractorInductions, contractorCerts, setContractorCerts, contractorVisits, setContractorVisits, contractors, setContractors, dbSaveContractor, dbDeleteContractor, dbSaveContractorInductions, dbSaveContractorCerts, dbSaveContractorVisits, staff, isMobile, setView, T, font }) {
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayISO();
   const [tab, setTab] = React.useState("visits");
   const [showVisitForm, setShowVisitForm] = React.useState(false);
   const [visitForm, setVisitForm] = React.useState({id:"",date:today,timeIn:"",timeOut:"",purpose:"",areas:"",signedInBy:"",workers:[],permitRequired:false,notes:""});
@@ -177,7 +178,7 @@ function ContractorDetail({ selCon, contractorInductions, setContractorInduction
             <div style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:14,padding:20,border:`1px solid rgba(245,158,11,0.3)`,marginBottom:16}}>
               <div style={{fontSize:12,fontWeight:700,color:"#f59e0b",marginBottom:12,textTransform:"uppercase",letterSpacing:.5}}>📅 Schedule Upcoming Visit</div>
               <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:10,marginBottom:10}}>
-                <div><label style={lbl}>Date *</label><input type="date" style={inp} min={new Date(Date.now()+86400000).toISOString().slice(0,10)} value={scheduleForm.date} onChange={e=>setScheduleForm(p=>({...p,date:e.target.value}))}/></div>
+                <div><label style={lbl}>Date *</label><input type="date" style={inp} min={localISO(new Date(Date.now()+86400000))} value={scheduleForm.date} onChange={e=>setScheduleForm(p=>({...p,date:e.target.value}))}/></div>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
                   <div><label style={lbl}>Expected Time In</label><input type="time" style={inp} value={scheduleForm.timeIn} onChange={e=>setScheduleForm(p=>({...p,timeIn:e.target.value}))}/></div>
                   <div><label style={lbl}>Expected Time Out</label><input type="time" style={inp} value={scheduleForm.timeOut} onChange={e=>setScheduleForm(p=>({...p,timeOut:e.target.value}))}/></div>

@@ -1,10 +1,11 @@
 import React from "react";
 import { E } from "../../lib/emoji";
-import { QUICK_LOCATIONS } from "../../data/seedQuickReport";
+import { useSiteLists } from "../../lib/siteLists";
 
+import { todayISO } from "../../lib/dates";
 /**
  * QuickReportModal — 30-second "Report a Hazard" pop-up for staff (desktop).
- * Three questions: what, where (QUICK_LOCATIONS list or "Other"), urgency.
+ * Three questions: what, where (the site's report locations — Site Settings — or "Other"), urgency.
  * Produces a minimal incident record (id "qr_<timestamp>", quickReport:true) and
  * hands it to onSubmit — App.jsx adds it to incidents and saves it.
  * Urgency "high" is filed as type "unsafe_condition", anything else as "near_miss".
@@ -14,6 +15,7 @@ import { QUICK_LOCATIONS } from "../../data/seedQuickReport";
  * STOP WORK hazards in person.
  */
 function QuickReportModal({ user, onSubmit, onClose, Z, font }) {
+  const siteLists = useSiteLists();                 // "Where was it?" choices: Site Settings
   const [what, setWhat] = React.useState("");
   const [where, setWhere] = React.useState("");
   const [whereOther, setWhereOther] = React.useState("");
@@ -32,7 +34,7 @@ function QuickReportModal({ user, onSubmit, onClose, Z, font }) {
     const urgencyOpt = URGENCY_OPTIONS.find(o=>o.id===urgency);
     const rec = {
       id: "qr_" + Date.now(),
-      date: new Date().toISOString().slice(0,10),
+      date: todayISO(),
       time: new Date().toTimeString().slice(0,5),
       type: urgency==="high" ? "unsafe_condition" : "near_miss",
       location,
@@ -91,7 +93,7 @@ function QuickReportModal({ user, onSubmit, onClose, Z, font }) {
               <select value={where} onChange={e=>{setWhere(e.target.value);setWhereOther("");}}
                 style={{width:"100%",background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:10,padding:"10px 14px",color:where?"#fff":Z.muted,fontSize:13,outline:"none",fontFamily:font,cursor:"pointer",boxSizing:"border-box"}}>
                 <option value="">Select location...</option>
-                {QUICK_LOCATIONS.map(l=><option key={l} value={l}>{l}</option>)}
+                {siteLists.reportLocations.map(l=><option key={l} value={l}>{l}</option>)}
               </select>
               {where==="Other" && (
                 <input value={whereOther} onChange={e=>setWhereOther(e.target.value)} placeholder="Describe the location..."

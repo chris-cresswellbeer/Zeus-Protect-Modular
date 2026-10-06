@@ -113,7 +113,7 @@ function Today({
             onClick={() => (inProgress ? onResume(nextUp) : onOpenModule(nextUp))}
             style={{
               width: "100%", textAlign: "left", display: "block", marginBottom: 16,
-              background: `linear-gradient(135deg,#1d3a8f,${Z.navyMd})`,
+              background: "linear-gradient(135deg,#1d3a8f,#0d1f5c)",
               border: `1px solid ${Z.accent}80`, borderRadius: 18, padding: 18,
               cursor: "pointer", fontFamily: font,
             }}
@@ -121,7 +121,7 @@ function Today({
             <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: inProgress ? 13 : 0 }}>
               <span style={{ fontSize: 32, lineHeight: 1 }}>{nextUp.icon}</span>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 16, fontWeight: 800, color: Z.white, lineHeight: 1.2 }}>
+                <div style={{ fontSize: 16, fontWeight: 800, color: "#ffffff", lineHeight: 1.2 }}>
                   {nextUp.title}
                 </div>
                 <div style={{ fontSize: 12, color: "#a5b4fc", marginTop: 3 }}>

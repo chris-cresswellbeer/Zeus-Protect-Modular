@@ -19,6 +19,7 @@ import { buildTrainingMatrix } from "../training/trainingMatrix";
 import { collectOpenActions } from "../../lib/openActions";
 import { INSP_TYPES } from "../../data/seedInspections";
 
+import { todayISO } from "../../lib/dates";
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const TYPE_LABELS = { accident: "Accident", near_miss: "Near miss", unsafe_condition: "Unsafe condition", unsafe_act: "Unsafe act" };
 const TYPE_COLORS = { accident: "#dc2626", near_miss: "#f59e0b", unsafe_condition: "#ea580c", unsafe_act: "#7c3aed" };
@@ -37,7 +38,7 @@ const avg = list => list.length ? Math.round(list.reduce((s, v) => s + v, 0) / l
  * @param period { year, month }  month is 0-11
  */
 function buildMonthlyReport(data, { year, month }) {
-  const today = data.today || new Date().toISOString().slice(0, 10);
+  const today = data.today || todayISO();
   const incidents = data.incidents || [];
   const inspections = data.inspections || [];
   const prev = shift(year, month, -1);

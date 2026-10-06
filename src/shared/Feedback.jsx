@@ -14,6 +14,7 @@ import React from "react";
  *   const v = await ask({ title, fields: [{ id:"date", label:"Date", type:"date", value:"2026-01-01", required:true }] })
  *                                                    → { date: "…" }, or false if cancelled
  *     field extras: options:[{value,label}] (drop-down), suggestions:["…"] (type or pick), help:"…"
+ *     type:"file" (+ accept:".pdf,image/*") — the answer holds the chosen File, or "" for none
  *
  * <FeedbackHost/> is rendered once (App.jsx, desktop and phone) and shows them.
  * A message can survive a page reload with notifyAfterReload() (e.g. "signed out").
@@ -129,7 +130,11 @@ function FeedbackHost() {
                 {d.fields.map(f => (
                   <label key={f.id} style={{ display: "grid", gap: 5, fontSize: 12, fontWeight: 700, color: Z.muted }}>
                     <span>{f.label}{f.required ? " *" : ""}</span>
-                    {f.options ? (
+                    {f.type === "file" ? (
+                      <input type="file" name={f.id} accept={f.accept || undefined}
+                        onChange={e => { const file = e.target.files && e.target.files[0]; setVals(p => ({ ...p, [f.id]: file || "" })); }}
+                        style={{ background: Z.overlay, border: `1px dashed ${Z.borderMd}`, borderRadius: 9, padding: "9px 12px", color: Z.white, fontSize: 13, fontFamily: font, colorScheme: "dark" }} />
+                    ) : f.options ? (
                       <select value={vals[f.id] || ""} name={f.id} onChange={e => { const v = e.target.value; setVals(p => ({ ...p, [f.id]: v })); }}
                         style={{ background: Z.navyMd || Z.overlay, border: `1px solid ${Z.borderMd}`, borderRadius: 9, padding: "9px 12px", color: Z.white, fontSize: 14, fontFamily: font }}>
                         <option value="">{f.placeholder || "Choose…"}</option>

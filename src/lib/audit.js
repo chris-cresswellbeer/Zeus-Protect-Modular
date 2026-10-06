@@ -161,7 +161,7 @@ const AUDIT_ENTITY_LABELS = {
   incident: "Incident", investigation: "Investigation", risk_assessment: "Risk assessment",
   coshh_assessment: "COSHH assessment", dse_report: "DSE assessment", dse_response: "DSE response",
   inspection: "Site inspection", corrective_action: "Corrective action", training_assign: "Training assignment",
-  document: "Document", module: "Training module", training_completion: "Training completion", backup: "Backup", staff: "Staff record", doc_bundle: "Document bundle", settings: "Settings",
+  fire_warden: "Fire warden", document: "Document", module: "Training module", training_completion: "Training completion", backup: "Backup", staff: "Staff record", doc_bundle: "Document bundle", settings: "Settings", machine_competence: "Machinery competence",
 };
 
 export {

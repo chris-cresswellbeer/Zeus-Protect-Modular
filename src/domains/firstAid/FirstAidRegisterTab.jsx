@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { FA_SHIFTS, FA_ZONES, FA_CERT_TYPES, FA_KIT_TYPES } from "../../data/seedFirstAid";
-import { EXPIRY_WARNING_DAYS } from "../../lib/dates";
+import { FA_CERT_TYPES, FA_KIT_TYPES } from "../../data/seedFirstAid";
+import { useSiteLists, coverShifts, isAllShift } from "../../lib/siteLists";
+import { EXPIRY_WARNING_DAYS, localISO, todayISO } from "../../lib/dates";
 
 /**
  * FirstAidRegisterTab — admin first aid arrangements (Health and Safety (First-Aid)
@@ -9,8 +10,8 @@ import { EXPIRY_WARNING_DAYS } from "../../lib/dates";
  *
  * DATA: firstAidData = { aiders:[], kits:[], assessment:{ minPerShift, ... }, customZones:[] }
  * stored as ONE JSON document (first_aid_register row id "singleton") via App.jsx's
- * [firstAidData] auto-sync effect. Zones = FA_ZONES (data/seedFirstAid.js) + customZones;
- * shifts = FA_SHIFTS.
+ * [firstAidData] auto-sync effect. Zones = the site's zones (Site Settings, lib/siteLists.js) + customZones;
+ * shifts = the site's shifts (Site Settings).
  *
  * FIRST AIDERS come from two sources, merged:
  *   1. entered manually on this tab (stored in firstAidData.aiders), and
@@ -28,8 +29,10 @@ function FirstAidRegisterTab({ staff, extCerts, firstAidData, setFirstAidData, Z
   const [newZone, setNewZone] = useState("");
 
   const { aiders=[], kits=[], assessment={}, customZones=[] } = firstAidData || {};
-  const allZones = [...FA_ZONES, ...customZones];
-  const today = new Date().toISOString().slice(0,10);
+  const site = useSiteLists();                       // zones and shifts: Site Settings (lib/siteLists.js)
+  const FA_SHIFTS = site.firstAidShifts;
+  const allZones = [...new Set([...site.firstAidZones, ...customZones])];
+  const today = todayISO();
 
   // ── Pull first aiders from extCerts automatically ─────────────────────────
   // Build a combined list: manually added aiders + auto-detected from extCerts
@@ -83,7 +86,7 @@ function FirstAidRegisterTab({ staff, extCerts, firstAidData, setFirstAidData, Z
   }
   // Kits should be checked roughly monthly: due 35 days after the last check, amber in the final 7 days.
   function kitBadge(lastCheckDate) {
-    const d = daysUntil(lastCheckDate ? new Date(new Date(lastCheckDate).getTime()+35*86400000).toISOString().slice(0,10) : null);
+    const d = daysUntil(lastCheckDate ? localISO(new Date(new Date(lastCheckDate).getTime()+35*86400000)) : null);
     if (d === null) return { label:"Never checked", color:"#ef4444", bg:"rgba(239,68,68,0.15)" };
     if (d < 0)     return { label:"Check overdue",  color:"#ef4444", bg:"rgba(239,68,68,0.15)" };
     if (d <= 7)    return { label:`Due in ${d}d`,   color:"#f59e0b", bg:"rgba(245,158,11,0.15)" };
@@ -94,15 +97,13 @@ function FirstAidRegisterTab({ staff, extCerts, firstAidData, setFirstAidData, Z
   );
 
   // ── Coverage matrix ───────────────────────────────────────────────────────
-  // (SHIFT_SHORT is currently unused — the matrix uses FA_SHIFTS. Safe to remove.)
-  const SHIFT_SHORT = ["Early","Late","Night","All"];
   // Number of in-date first aiders covering a zone on a shift. An aider with no zones/shifts
   // listed (or "All Shifts") counts everywhere/always. Expired aiders are excluded.
   function coverageCount(zone, shift) {
     return allAiders.filter(a => {
       const b = certBadge(a.expiryDate);
       if (b.color === "#ef4444") return false; // expired
-      const shiftsOk = !a.shifts?.length || a.shifts.includes("All Shifts") || a.shifts.includes(shift);
+      const shiftsOk = !a.shifts?.length || a.shifts.some(isAllShift) || a.shifts.includes(shift);
       const zonesOk  = !a.zones?.length  || a.zones.includes(zone);
       return shiftsOk && zonesOk;
     }).length;
@@ -202,7 +203,7 @@ function FirstAidRegisterTab({ staff, extCerts, firstAidData, setFirstAidData, Z
   const expiredCount = allAiders.filter(a=>certBadge(a.expiryDate).color==="#ef4444").length;
   const kitIssues    = kits.filter(k=>kitBadge(k.lastCheckDate).color==="#ef4444").length;
   const minPerShift  = assessment.minPerShift || 1;
-  const coverageGaps = allZones.reduce((acc,z) => acc + (["Day Shift (08:30–16:00)","Late Shift (16:00–02:00)","Office Hours (08:30–17:30)"].filter(s=>coverageCount(z,s)<minPerShift).length),0);
+  const coverageGaps = allZones.reduce((acc,z) => acc + (coverShifts(FA_SHIFTS).filter(s=>coverageCount(z,s)<minPerShift).length),0);
 
   const SUBTABS = [
     { id:"aiders",     label:"First Aiders",      alert: expiredCount>0, warn: expiringCount>0, count: expiredCount||expiringCount||null },
@@ -323,7 +324,7 @@ function FirstAidRegisterTab({ staff, extCerts, firstAidData, setFirstAidData, Z
               <thead>
                 <tr style={{background:Z.overlay}}>
                   <th style={{padding:"10px 14px",textAlign:"left",color:Z.muted,fontWeight:700,fontSize:11,letterSpacing:.7,textTransform:"uppercase",borderBottom:`1px solid ${Z.border}`}}>Zone / Area</th>
-                  {["Day Shift","Late Shift","Office Hours"].map(s=>(
+                  {coverShifts(FA_SHIFTS).map(s=>(
                     <th key={s} style={{padding:"10px 14px",textAlign:"center",color:Z.muted,fontWeight:700,fontSize:11,letterSpacing:.7,textTransform:"uppercase",borderBottom:`1px solid ${Z.border}`,whiteSpace:"nowrap"}}>{s}</th>
                   ))}
                   <th style={{padding:"10px 14px",borderBottom:`1px solid ${Z.border}`,width:40}}/>
@@ -340,7 +341,7 @@ function FirstAidRegisterTab({ staff, extCerts, firstAidData, setFirstAidData, Z
                           {isCustom && <span style={{fontSize:9,fontWeight:700,color:Z.muted,background:Z.overlay,border:`1px solid ${Z.border}`,borderRadius:4,padding:"1px 5px",textTransform:"uppercase",letterSpacing:.5}}>custom</span>}
                         </div>
                       </td>
-                      {["Day Shift (08:30–16:00)","Late Shift (16:00–02:00)","Office Hours (08:30–17:30)"].map(shift=>{
+                      {coverShifts(FA_SHIFTS).map(shift=>{
                         const count = coverageCount(zone,shift);
                         const alert = count < minPerShift;
                         const warn  = count === minPerShift;
@@ -390,7 +391,7 @@ function FirstAidRegisterTab({ staff, extCerts, firstAidData, setFirstAidData, Z
             <span><span style={{color:"#10b981",fontWeight:700}}>●</span> Good coverage ({`>${minPerShift}`})</span>
           </div>
           <div style={{marginTop:8,fontSize:11,color:Z.muted,background:Z.overlay,borderRadius:8,padding:"8px 12px",border:`1px solid ${Z.border}`}}>
-            <strong style={{color:Z.white}}>Site shifts:</strong> Warehouse — Day (08:30–16:00) and Late (16:00–02:00). Office — Office Hours (08:30–17:30) only. First aiders tagged "All Shifts" count across all columns.
+            <strong style={{color:Z.white}}>Columns:</strong> this site's first aid shifts (Documents ▼ → Site Settings). First aiders tagged with an "All shifts" option count in every column.
           </div>
         </div>
       )}

@@ -3,10 +3,10 @@ import { isPassed, scoreText } from "../training/completion";
 import { EvidenceLinks } from "../training/TrainingEvidence";
 import { evidenceLabel } from "../training/evidence";
 import { HelpTip } from "../../shared/HelpTip";
-import { getExpiryStatus } from "../../lib/dates";
+import { getExpiryStatus, todayISO } from "../../lib/dates";
 import { teamOf, normName } from "./team";
 import { E } from "../../lib/emoji";
-import { dueInfo, dueText, today as todayISO } from "../../lib/dueDates";
+import { dueInfo, dueText } from "../../lib/dueDates";
 
 /**
  * MyTeamTab — the "My Team" tab for users with role "manager".
@@ -162,7 +162,7 @@ function MemberDetail({ u, s, allModules, assigned, onAssign, onSignOffDse, onSi
       <div style={h}>Corrective actions</div>
       {s.actions.length === 0 ? <div style={{ fontSize: 12, color: Z.muted }}>None assigned.</div> : s.actions.map(({ a, incidentId }) => {
         const done = a.status === "complete" || a.status === "closed";
-        const late = !done && a.dueDate && a.dueDate < new Date().toISOString().slice(0, 10);
+        const late = !done && a.dueDate && a.dueDate < todayISO();
         return (
           <div key={incidentId + a.id} style={row}>
             <span style={{ fontSize: 13, color: Z.white, flex: 1, minWidth: 200 }}>{a.description}<span style={{ display: "block", fontSize: 12, color: late ? Z.red : Z.muted }}>Due {a.dueDate || "—"}{done ? ` · completed ${a.completedDate || ""}` : late ? " · overdue" : ""}</span></span>

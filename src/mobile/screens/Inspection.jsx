@@ -44,14 +44,23 @@ function typeFor(id) {
   return INSP_TYPES.find((t) => t.id === id) || INSP_TYPES[0];
 }
 
+// local dates (a check done just after midnight in summer time belongs to that day)
+const localIso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 function today() {
-  return new Date().toISOString().slice(0, 10);
+  return localIso(new Date());
 }
 
 function addDays(days) {
   const d = new Date();
   d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+  return localIso(d);
+}
+// next due from the type's frequency ("7 days", "6 months", "12 months")
+function nextDueFor(typeId) {
+  const m = String(typeFor(typeId).freq || "").match(/(\d+)\s*(day|month)/i);
+  if (!m) return addDays(7);
+  if (/day/i.test(m[2])) return addDays(Number(m[1]));
+  const d = new Date(); d.setMonth(d.getMonth() + Number(m[1])); return localIso(d);
 }
 
 // ─── List ────────────────────────────────────────────────────────────────────
@@ -197,7 +206,7 @@ function InspectionRun({ typeId, location, user, onSubmit, onExit, Z, font }) {
       summary: nonConformances.length
         ? `${nonConformances.length} finding${nonConformances.length === 1 ? "" : "s"} raised on the mobile walkround.`
         : "No non-conformances identified.",
-      nextDue: addDays(7),
+      nextDue: nextDueFor(typeId),
     };
   }
 

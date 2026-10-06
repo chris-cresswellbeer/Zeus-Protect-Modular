@@ -9,6 +9,7 @@ import { INCIDENT_TYPES, ACCIDENT_CODES, NUMBER_CODES } from "../../data/seedInc
 import { IncidentPhotos } from "../../shared/IncidentPhotos";
 import { isIncompleteQuickReport, myIncompleteQuickReports, isQuickReportOverdue, quickReportDueLabel } from "./quickReportStatus";
 
+import { todayISO } from "../../lib/dates";
 /**
  * IncidentTracker — the STAFF "Report Incident" tab.
  * Lists incidents the logged-in user reported (matched on reportedBy === user id),
@@ -17,11 +18,13 @@ import { isIncompleteQuickReport, myIncompleteQuickReports, isQuickReportOverdue
  *
  * Props: user, incidents/setIncidents, equipment/setEquipment (for the
  *        "equipment involved" section), Z, font.
+ *        formOnly + onClose: just the new-report form, already open (the admin
+ *        Incident Tracker's "+ Report Incident"); onClose runs on cancel or after saving.
  */
-function IncidentTracker({ user, incidents, setIncidents, equipment, setEquipment, autoEditId, onAutoEditDone, Z, font }) {
+function IncidentTracker({ user, incidents, setIncidents, equipment, setEquipment, autoEditId, onAutoEditDone, formOnly, onClose, Z, font }) {
   const isMobile = useWindowWidth() <= 1024;
   const BLANK_FORM = {
-    type:"near_miss", date:new Date().toISOString().slice(0,10), time:"",
+    type:"near_miss", date:todayISO(), time:"",
     location:"", description:"", accidentCode:"", numberCode:"",
     injuryType:"None / No injury", riddor:false,
     personName:"", personDob:"", personAddress:"", personPostcode:"",
@@ -32,12 +35,14 @@ function IncidentTracker({ user, incidents, setIncidents, equipment, setEquipmen
     equipmentDamageDesc:"", equipmentDamageSeverity:"medium", equipmentOOS:false,
     _equipmentList: equipment||[],
   };
-  const [showForm, setShowForm]   = useState(false);   // new report form
+  const [showForm, setShowForm]   = useState(!!formOnly);   // new report form
   const [editingId, setEditingId] = useState(null);    // id of incident being edited
   const [form, setForm]           = useState(BLANK_FORM);
   const [saved, setSaved]         = useState(false);
   const [err, setErr]             = useState("");
   const [expandedId, setExpandedId] = useState(null);
+  const closeTimer = React.useRef(null);
+  useEffect(() => () => clearTimeout(closeTimer.current), []);   // no late close after leaving
 
   const myIncidents = incidents.filter(i=>String(i.reportedBy)===String(user.id)).sort((a,b)=>b.date.localeCompare(a.date));
   // Quick hazard reports this user still needs to complete (see quickReportStatus.js).
@@ -52,7 +57,7 @@ function IncidentTracker({ user, incidents, setIncidents, equipment, setEquipmen
 
   function openNew() { setForm({...BLANK_FORM,_equipmentList:equipment||[]}); setEditingId(null); setSaved(false); setErr(""); setShowForm(true); }
   function openEdit(inc) { setForm(incToForm(inc, equipment||[])); setEditingId(inc.id); setSaved(false); setErr(""); setShowForm(true); setExpandedId(null); }
-  function cancelForm() { guard.done(); setShowForm(false); setEditingId(null); setErr(""); setSaved(false); }
+  function cancelForm() { guard.done(); setShowForm(false); setEditingId(null); setErr(""); setSaved(false); if (formOnly && onClose) onClose(); }
 
   // Deep link from a reminder (dashboard, bell, My Actions, mobile): open that report's form.
   useEffect(() => {
@@ -67,7 +72,7 @@ function IncidentTracker({ user, incidents, setIncidents, equipment, setEquipmen
   // equipment's defect log. Saved via App.jsx's [equipment] auto-sync effect.
   function applyEquipmentSideEffects(f) {
     if (!f.equipmentInvolved || !f.equipmentId) return;
-    const today = new Date().toISOString().slice(0,10);
+    const today = todayISO();
     setEquipment(prev => prev.map(eq => {
       if (eq.id !== f.equipmentId) return eq;
       let updated = {...eq};
@@ -105,7 +110,8 @@ function IncidentTracker({ user, incidents, setIncidents, equipment, setEquipmen
     guard.done();
     setSaved(true);
     setForm({...BLANK_FORM,_equipmentList:equipment||[]});
-    setTimeout(()=>{ setShowForm(false); setSaved(false); }, 1400);
+    clearTimeout(closeTimer.current);
+    closeTimer.current = setTimeout(()=>{ setShowForm(false); setSaved(false); if (formOnly && onClose) onClose(); }, 1400);
   }
 
   function saveEdit() {
@@ -118,6 +124,13 @@ function IncidentTracker({ user, incidents, setIncidents, equipment, setEquipmen
   }
 
   const typeInfo = (id) => INCIDENT_TYPES.find(t=>t.id===id)||INCIDENT_TYPES[0];
+
+  if (formOnly) return (
+    <div>
+      <DraftBanner guard={guard} Z={Z} font={font} what="this incident report"/>
+      <IncidentForm form={form} setF={setF} err={err} saved={saved} onSubmit={submitNew} onCancel={cancelForm} isEdit={false} Z={Z} font={font}/>
+    </div>
+  );
 
   return (
     <div>

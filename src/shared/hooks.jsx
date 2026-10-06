@@ -43,11 +43,11 @@ function rGrid(cols, gap = 14, mobileGap = 10) {
 
 // ─── Mobile card helper ─────────────────────────────────────────────────────────
 // Renders a key-value card for mobile table rows
-// Colours are hard-coded for dark themes; pass `style` to override (e.g. for light mode).
+// Neutral see-through colours and the page's own text colour, so it reads in every theme.
 function MobileCard({ children, style }) {
   const s = Object.assign({
-    background:"rgba(255,255,255,0.04)",
-    border:"1px solid rgba(255,255,255,0.08)",
+    background:"rgba(128,128,128,0.08)",
+    border:"1px solid rgba(128,128,128,0.22)",
     borderRadius:12,
     padding:"14px 16px",
     marginBottom:10,
@@ -61,8 +61,8 @@ function MobileCard({ children, style }) {
 function MobileCardRow({ label, value }) {
   return (
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
-      <span style={{fontSize:11,fontWeight:700,letterSpacing:.5,color:"rgba(255,255,255,0.4)",textTransform:"uppercase",flexShrink:0}}>{label}</span>
-      <span style={{fontSize:13,color:"rgba(255,255,255,0.9)",textAlign:"right",minWidth:0,wordBreak:"break-word"}}>{value}</span>
+      <span style={{fontSize:11,fontWeight:700,letterSpacing:.5,color:"inherit",opacity:.6,textTransform:"uppercase",flexShrink:0}}>{label}</span>
+      <span style={{fontSize:13,color:"inherit",textAlign:"right",minWidth:0,wordBreak:"break-word"}}>{value}</span>
     </div>
   );
 }

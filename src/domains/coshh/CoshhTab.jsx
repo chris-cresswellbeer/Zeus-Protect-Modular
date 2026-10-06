@@ -1,10 +1,9 @@
 import { useState, useEffect, useRef } from "react";
-import { notify } from "../../shared/Feedback";
+import { notify, ask } from "../../shared/Feedback";
 import { useWindowWidth } from "../../shared/hooks";
 import { HelpTip } from "../../shared/HelpTip";
 import { sb, dbWrite } from "../../lib/supabase";
 import { coshhHazardLevel } from "./coshhHazardLevel";
-import { COSHH_DATA } from "../../data/seedCoshh";
 import { CoshhAssessmentForm } from "./CoshhAssessmentForm";
 import { auditRecord } from "../../lib/audit";
 import { useRemembered } from "../../lib/remembered";
@@ -12,7 +11,8 @@ import { useRemembered } from "../../lib/remembered";
 /**
  * CoshhTab — admin COSHH register (Control of Substances Hazardous to Health).
  *
- * Lists every substance = built-in COSHH_DATA (data/seedCoshh.js) + admin-added
+ * Lists every substance in the custom_chemicals table (the Biggleswade list was put
+ * there by site_content.sql; a new site starts empty and adds its own). Formerly built-in +
  * customChemicals, with search / supplier / hazard-level filters. Each row expands to:
  *   • hazard info (CLP classification, UN number, hazard band from coshhHazardLevel)
  *   • the Safety Data Sheet (MSDS/SDS) upload, preview and removal
@@ -46,7 +46,7 @@ function CoshhTab({ Z, font, msdsFiles, setMsdsFiles, customChemicals, setCustom
 
   useEffect(()=>{ if(showAddForm && addFormRef.current) addFormRef.current.scrollIntoView({behavior:"smooth",block:"nearest"}); },[showAddForm]);
 
-  const allChemicals = [...COSHH_DATA, ...customChemicals];
+  const allChemicals = customChemicals;          // all substances are in the database now
   const suppliers = ["all", ...Array.from(new Set(allChemicals.map(c=>c.supplier))).sort()];
 
   const filtered = allChemicals.filter(c => {
@@ -69,7 +69,7 @@ function CoshhTab({ Z, font, msdsFiles, setMsdsFiles, customChemicals, setCustom
 
   // Add a custom substance. `code` is the unique key (product code) — duplicates are rejected.
   function saveChemical() {
-    if (!addForm.code.trim()) { setAddErr("Zeus Code is required."); return; }
+    if (!addForm.code.trim()) { setAddErr("Product code is required."); return; }
     if (!addForm.name.trim()) { setAddErr("Product name is required."); return; }
     if (allChemicals.some(c=>c.code.trim().toLowerCase()===addForm.code.trim().toLowerCase())) { setAddErr(`Code ${addForm.code.trim()} already exists in the register.`); return; }
     const chem = {...addForm, code:addForm.code.trim(), name:addForm.name.trim(), supplier:addForm.supplier.trim(), _custom:true};
@@ -88,13 +88,14 @@ function CoshhTab({ Z, font, msdsFiles, setMsdsFiles, customChemicals, setCustom
     await dbWrite(sb.from("coshh_assessments").upsert({ code, data }, { onConflict: "code" }), "COSHH assessment", { alertOnError: true });
   }
 
-  // ⚠ Removes the SDS file at msds/<code>/<fileName>, but uploads use the flat path
-  // msds_<code>_<safeName> (see handleMsdsUpload/removeMsds), so the file itself is
-  // left behind in storage. Use the same path as removeMsds to fix.
+  // Removes a substance (asks first), its SDS file (same flat path as removeMsds) and SDS record.
   async function deleteChemical(code) {
+    const chem = allChemicals.find(c=>c.code===code);
+    if (!(await ask({ title: "Remove this substance from the register?", danger: true, ok: "Remove substance",
+      message: `${code}${chem ? " · " + chem.name : ""}\n\nIts safety data sheet is deleted too. A COSHH assessment already saved for it is kept in the database.` }))) return;
     setCustomChemicals(prev=>prev.filter(c=>c.code!==code));
     const msds = msdsFiles[code];
-    if (msds) await dbWrite(sb.storage.remove("documents", [`msds/${code}/${msds.fileName}`]), "MSDS file delete");
+    if (msds) await dbWrite(sb.storage.remove("documents", [`msds_${code}_${String(msds.fileName||"").replace(/[^a-zA-Z0-9._-]/g, "_")}`]), "MSDS file delete");
     setMsdsFiles(prev=>{ const n={...prev}; delete n[code]; return n; });
     await dbWrite(sb.from("custom_chemicals").delete().eq("code", code), "chemical delete");
     await dbWrite(sb.from("msds_files").delete().eq("code", code), "MSDS record delete");
@@ -198,7 +199,7 @@ function CoshhTab({ Z, font, msdsFiles, setMsdsFiles, customChemicals, setCustom
           <h4 style={{margin:"0 0 18px",fontSize:12,fontWeight:700,letterSpacing:1,color:Z.muted,textTransform:"uppercase"}}>New Chemical Entry</h4>
           <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:14,marginBottom:14}}>
             <div>
-              <label style={{fontSize:11,fontWeight:700,color:Z.muted,letterSpacing:.5,textTransform:"uppercase",display:"block",marginBottom:5}}>Zeus Code *</label>
+              <label style={{fontSize:11,fontWeight:700,color:Z.muted,letterSpacing:.5,textTransform:"uppercase",display:"block",marginBottom:5}}>Product Code *</label>
               <input value={addForm.code} onChange={e=>setAddForm(p=>({...p,code:e.target.value}))} placeholder="e.g. CHEM000200" style={inp}/>
             </div>
             <div>
@@ -260,14 +261,14 @@ function CoshhTab({ Z, font, msdsFiles, setMsdsFiles, customChemicals, setCustom
 
       {/* Results count */}
       <div style={{fontSize:12,color:Z.muted,marginBottom:12,fontWeight:600}}>
-        Showing {filtered.length} of {COSHH_DATA.length} products
+        Showing {filtered.length} of {allChemicals.length} products
         {hazardFilter!=="all" && <span style={{marginLeft:8,color:hazardConfig[hazardFilter].color}}>· {hazardConfig[hazardFilter].label} filter active</span>}
       </div>
 
       {/* Table header - desktop only */}
       {!isMobile && (
         <div style={{background:Z.overlay,borderRadius:"10px 10px 0 0",border:`1px solid ${Z.borderMd}`,borderBottom:"none",padding:"10px 16px",display:"grid",gridTemplateColumns:"130px 1fr 140px 110px 90px 60px",gap:12,alignItems:"center"}}>
-          {["Zeus Code","Product Name","Supplier","MSDS Date","Hazard","MSDS"].map(h=>(
+          {["Product Code","Product Name","Supplier","MSDS Date","Hazard","MSDS"].map(h=>(
             <div key={h} style={{fontSize:10,fontWeight:700,letterSpacing:1,color:Z.muted,textTransform:"uppercase"}}>{h}</div>
           ))}
         </div>
@@ -276,7 +277,7 @@ function CoshhTab({ Z, font, msdsFiles, setMsdsFiles, customChemicals, setCustom
       {/* Rows */}
       <div style={{borderRadius:isMobile?"14px":"0 0 14px 14px",overflow:"hidden",border:`1px solid ${Z.borderMd}`}}>
         {filtered.length===0 ? (
-          <div style={{padding:32,textAlign:"center",color:Z.muted,fontSize:14,background:Z.overlay}}>No products match your search.</div>
+          <div style={{padding:32,textAlign:"center",color:Z.muted,fontSize:14,background:Z.overlay}}>{allChemicals.length ? "No products match your search." : "No substances in the register yet. Click + Add Chemical to add the products used on this site."}</div>
         ) : filtered.map((c,i)=>{
           const level = coshhHazardLevel(c.classification);
           const hc = hazardConfig[level];
@@ -427,7 +428,7 @@ function CoshhTab({ Z, font, msdsFiles, setMsdsFiles, customChemicals, setCustom
                   </div>
 
                   {/* Delete custom chemical */}
-                  {c._custom && (
+                  {(
                     <div style={{marginTop:12,display:"flex",justifyContent:"flex-end"}}>
                       <button onClick={()=>deleteChemical(c.code)}
                         style={{background:"rgba(239,68,68,0.1)",color:"#f87171",border:"1px solid rgba(239,68,68,0.25)",borderRadius:8,padding:"7px 16px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font}}>

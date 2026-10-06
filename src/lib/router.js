@@ -12,7 +12,7 @@
 
 export const ADMIN_TABS = ["dashboard", "users", "assign", "modules", "create", "reports", "documents", "coshh", "audit",
   "incidents", "investigation", "inspections", "ra", "firesafety", "firstaid", "contractors", "permits", "machinery",
-  "equipment", "account"];
+  "equipment", "settings", "account"];
 export const STAFF_TABS = ["dashboard", "training", "history", "documents", "incidents", "dse", "machinery", "actions", "team", "account"];
 
 // Pages that need context which can't be in a link fall back to their list page.

@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { HelpTip } from "../../shared/HelpTip";
 import { loadAuditLog, AUDIT_ENTITY_LABELS } from "../../lib/audit";
 
+import { localISO, todayISO } from "../../lib/dates";
 /**
  * AuditTrailTab — admin view of the audit_log table (lib/audit.js).
  * Filters: record type, person, free text (label / summary / record id), date range.
@@ -107,8 +108,8 @@ function AuditTrailTab({ Z, font, entityIds = null, compact = false }) {
   const filtered = rows.filter(r =>
     (entity === "all" || r.entity === entity) &&
     (person === "all" || r.user_name === person) &&
-    (!from || String(r.at).slice(0, 10) >= from) &&
-    (!to || String(r.at).slice(0, 10) <= to) &&
+    (!from || localISO(new Date(r.at)) >= from) &&     // the UK date of the entry, like the date boxes
+    (!to || localISO(new Date(r.at)) <= to) &&
     (!q || [r.entity_label, r.summary, r.entity_id, r.user_name].some(x => String(x || "").toLowerCase().includes(q)))
   );
 
@@ -120,7 +121,7 @@ function AuditTrailTab({ Z, font, entityIds = null, compact = false }) {
     const blob = new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `zeus-protect-audit-trail-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `zeus-protect-audit-trail-${todayISO()}.csv`;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   }

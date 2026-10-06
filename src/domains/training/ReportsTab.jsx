@@ -6,8 +6,8 @@ import { riskLevel } from "../../shared/RiskMatrix";
 import { E } from "../../lib/emoji";
 import { sb, dbWrite } from "../../lib/supabase";
 import { TRAINING_MODULES } from "../../data/seedTraining";
-import { getExpiryStatus, EXPIRY_WARNING_DAYS } from "../../lib/dates";
-import { isWarehouseWorker, machineExpiryStatus } from "../../data/seedMachinery";
+import { EXPIRY_WARNING_DAYS, getExpiryStatus, localISO, todayISO } from "../../lib/dates";
+import { isWarehouseWorker, machineExpiryStatus, machineState, compsFor } from "../../data/seedMachinery";
 import { EXT_CERT_TYPES } from "../../data/seedExtCerts";
 import { ManagerRow } from "./ManagerRow";
 import { isPassed, scoreText, recordedText } from "./completion";
@@ -47,7 +47,7 @@ import { useSort, sortRows, SortButton } from "../../shared/Sortable";
 // { id (row number), data (the failure record) }, so match on the record's own id
 // inside `data`; very old records without one fall back to the row number.
 function saveQuizFailureReviewed(f) {
-  const data = { ...f, acknowledged: true, reviewedAt: new Date().toISOString().slice(0,10) };
+  const data = { ...f, acknowledged: true, reviewedAt: todayISO() };
   delete data._rowId;
   const req = f.id ? sb.from("quiz_failures").update({ data }).eq("data->>id", f.id)
                    : f._rowId != null ? sb.from("quiz_failures").update({ data }).eq("id", f._rowId) : null;
@@ -116,12 +116,12 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
   // One CSV row per staff member: progress, pending modules, cert ids, expired modules,
   // last login, and First Aid / Fire Marshal certificate status (by EXT_CERT_TYPES id).
   function exportStaffReport() {
-    const today = new Date().toISOString().slice(0,10);
+    const today = todayISO();
     const rows = [
       ["Zeus Protect — Staff Compliance Report"],
       [`Generated: ${today}`],
       [],
-      ["Name","Email","Job Title","Manager","Last Login","Modules Assigned","Modules Completed","Modules Pending","Compliance %","Status","Incomplete Modules","Certificates","First Aid Cert","First Aid Expiry","Fire Marshall Cert","Fire Marshall Expiry"],
+      ["Name","Email","Job Title","Manager","Last Login","Modules Assigned","Modules Completed","Modules Pending","Compliance %","Status","Incomplete Modules","Certificates","First Aid Cert","First Aid Expiry","Fire Warden Cert","Fire Warden Expiry"],
     ];
     staff.forEach(u => {
       const assignedIds = assigns[u.id]||[];
@@ -137,8 +137,9 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
       const userExtCerts = (extCerts||{})[u.id] || {};
       const firstAid = userExtCerts["first_aid"];
       const fireMarshal = userExtCerts["fire_marshall"];
-      const firstAidStatus = firstAid ? (new Date(firstAid.expiryDate) < new Date() ? "Expired" : "Valid") : "Not uploaded";
-      const fireMarshalStatus = fireMarshal ? (new Date(fireMarshal.expiryDate) < new Date() ? "Expired" : "Valid") : "Not uploaded";
+      const certStatus = c => !c ? "Not uploaded" : !c.expiryDate ? "No expiry date" : (new Date(c.expiryDate) < new Date() ? "Expired" : "Valid");
+      const firstAidStatus = certStatus(firstAid);
+      const fireMarshalStatus = certStatus(fireMarshal);
       rows.push([u.name, u.email, u.jobTitle||"", u.manager||"", lastLogin, a, d, a-d, pct+"%", status, pending, certs,
         firstAidStatus, firstAid?.expiryDate||"",
         fireMarshalStatus, fireMarshal?.expiryDate||""]);
@@ -150,7 +151,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
 
   // Manager summary rows, then a per-member breakdown with every external cert type as a column.
   function exportManagerReport() {
-    const today = new Date().toISOString().slice(0,10);
+    const today = todayISO();
     const certCols = EXT_CERT_TYPES.map(ct => ct.label);
     const rows = [
       ["Zeus Protect — Manager Performance Report"],
@@ -181,11 +182,11 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
           const isExpired = cert.expiryDate && new Date(cert.expiryDate) < new Date();
           return isExpired ? `Expired (${cert.expiryDate})` : `Valid (exp ${cert.expiryDate||"—"})`;
         });
-        const userMachComps = Object.values((machineComps||{})[u.id]||{});
         const machineTypes = allMachineTypes || [];
-        const machCompetent   = userMachComps.filter(c=>{const ex=machineExpiryStatus(c,machineTypes);return c.status==="competent"&&!(ex?.status==="expired");}).length;
-        const machProvisional = userMachComps.filter(c=>c.status==="provisional").length;
-        const machExpired     = userMachComps.filter(c=>{const ex=machineExpiryStatus(c,machineTypes);return c.status==="expired"||ex?.status==="expired";}).length;
+        const mStates = compsFor(machineComps, u.id).map(c=>machineState(c,machineTypes).key);
+        const machCompetent   = mStates.filter(k=>k==="competent"||k==="expiring").length;
+        const machProvisional = mStates.filter(k=>k==="provisional").length;
+        const machExpired     = mStates.filter(k=>k==="expired").length;
         rows.push(["  "+u.name, "  "+(u.jobTitle||""), a, d, pct+"%", pending, ...certValues, machCompetent, machProvisional, machExpired]);
       });
       rows.push([]);
@@ -285,7 +286,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
                       const extCertRows = EXT_CERT_TYPES.map(ct=>{
                         const cert=userExtCerts[ct.id];
                         if (!cert) return `<tr style="background:#fff2f2"><td>${ct.icon} ${ct.label}</td><td style="color:#dc2626;font-weight:600">Not uploaded</td><td>—</td><td>—</td></tr>`;
-                        const expired = cert.expiryDate && cert.expiryDate < new Date().toISOString().slice(0,10);
+                        const expired = cert.expiryDate && cert.expiryDate < todayISO();
                         return `<tr style="background:${expired?"#fff8f0":"#f0fff4"}">
                           <td>${ct.icon} ${ct.label}</td>
                           <td style="color:${expired?"#b45309":"#15803d"};font-weight:600">${expired?"⚠ Expired":"✓ Valid"}</td>
@@ -293,16 +294,17 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
                           <td>${cert.expiryDate||"—"}</td>
                         </tr>`;
                       }).join("");
-                      const userMachineComps = Object.values((machineComps||{})[u.id]||{});
+                      const userMachineComps = compsFor(machineComps, u.id);
                       const machineTypesForExport = allMachineTypes || [];
                       const machineRows = userMachineComps.map(mc=>{
                         const mType = machineTypesForExport.find(x=>x.id===mc.machineId)||{label:mc.machineId,icon:"🔧"};
-                        const expired = mc.licenceExpiry && mc.licenceExpiry < new Date().toISOString().slice(0,10);
+                        const st = machineState(mc, machineTypesForExport); const expired = st.key==="expired";
+                        const dd = v => v ? String(v).slice(0,10).split("-").reverse().join("/") : "—";
                         return `<tr style="background:${expired?"#fff8f0":"#fff"}">
                           <td>${mType.icon||"🔧"} ${mType.label||mc.machineId}</td>
-                          <td style="color:${mc.status==="competent"?"#15803d":mc.status==="provisional"?"#b45309":"#dc2626"};font-weight:600;text-transform:capitalize">${mc.status||"—"}</td>
-                          <td>${mc.assessmentDate||"—"}</td>
-                          <td style="color:${expired?"#dc2626":"inherit"}">${mc.licenceExpiry||"—"}${expired?" ⚠ Expired":""}</td>
+                          <td style="color:${{competent:"#15803d",expiring:"#b45309",expired:"#dc2626",provisional:"#1d4ed8"}[st.key]||"#475569"};font-weight:600">${st.label}</td>
+                          <td>${dd(mc.assessmentDate)}</td>
+                          <td style="color:${expired?"#dc2626":"inherit"}">${st.ex?`${dd(st.ex.expiryDate)} (${st.ex.why})`:"—"}</td>
                         </tr>`;
                       }).join("");
                       return `<div class="page-break">
@@ -627,7 +629,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
 
                       {/* Machinery Competence */}
                       {(() => {
-                        const userMachComps = Object.values(machineComps[u.id]||{});
+                        const userMachComps = compsFor(machineComps, u.id);
                         if (!userMachComps.length) return null;
                         const machineTypes = allMachineTypes || [];
                         return (
@@ -636,21 +638,17 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
                             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:8}}>
                               {userMachComps.map(comp => {
                                 const mType = machineTypes.find(m=>m.id===comp.machineId) || {label:comp.machineId, icon:"🔧"};
-                                const ex = machineExpiryStatus(comp, machineTypes);
-                                const isExpired = comp.status==="expired" || ex?.status==="expired";
-                                const isProvisional = comp.status==="provisional";
-                                const bg = isExpired?"rgba(239,68,68,0.08)":isProvisional?"rgba(245,158,11,0.08)":"rgba(16,185,129,0.08)";
-                                const border = isExpired?"rgba(239,68,68,0.25)":isProvisional?"rgba(245,158,11,0.25)":"rgba(16,185,129,0.25)";
-                                const statusColor = isExpired?"#f87171":isProvisional?Z.amber:Z.green;
+                                const st = machineState(comp, machineTypes); const ex = st.ex;
+                                const bg = st.bg, border = `${st.color}44`, statusColor = st.color;
                                 return (
                                   <div key={comp.id} style={{background:bg,border:`1px solid ${border}`,borderRadius:12,padding:"10px 12px",display:"flex",alignItems:"center",gap:10}}>
                                     <span style={{fontSize:20,flexShrink:0}}>{mType.icon}</span>
                                     <div style={{flex:1,minWidth:0}}>
                                       <div style={{fontWeight:700,fontSize:12,color:Z.white,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{mType.label}</div>
                                       <div style={{fontSize:10,color:statusColor,marginTop:2}}>
-                                        {isExpired?"⚠ Renewal required":isProvisional?"⏳ Provisional":"✓ Competent"}
+                                        {st.sym} {st.label}
                                       </div>
-                                      {comp.licenceExpiry && <div style={{fontSize:10,color:Z.muted}}>Licence expires: {comp.licenceExpiry}</div>}
+                                      {ex && <div style={{fontSize:10,color:Z.muted}}>Renew by {ex.expiryDate.split("-").reverse().join("/")} ({ex.why})</div>}
                                       {comp.licenceRef && <div style={{fontSize:9,fontFamily:"monospace",color:Z.gold,marginTop:1}}>{comp.licenceRef}</div>}
                                     </div>
                                   </div>
@@ -931,7 +929,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
 
       {/* ── OPEN ACTIONS: merges three sources into one prioritised list; each row links to its source tab via setAtab. ── */}
       {reportView === "actions" && (() => {
-        const today = new Date().toISOString().slice(0,10);
+        const today = todayISO();
         const allActions = [];
 
         // ── Incident corrective actions ────────────────────────────────────
@@ -1286,12 +1284,16 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
             const today = new Date();
             // Build flat list of comps with expiry dates
             const machExpiries = [];
-            staff.forEach(u => {
-              Object.values(machineComps[u.id]||{}).forEach(comp => {
-                if(!comp.licenceExpiry) return;
-                const expDate = new Date(comp.licenceExpiry);
-                const daysLeft = Math.round((expDate - today) / 86400000);
-                const status = daysLeft < 0 ? "expired" : daysLeft <= EXPIRY_WARNING_DAYS ? "expiring" : "valid";
+            staff.filter(u=>(u.status||"active")!=="leaver"&&u.role!=="admin"&&isWarehouseWorker(u)).forEach(u => {
+              compsFor(machineComps, u.id).forEach(comp => {
+                // same rule as the matrix, dashboard and bell (data/seedMachinery.js machineState)
+                if (!(allMachineTypes||[]).some(t=>t.id===comp.machineId)) return;
+                const st = machineState(comp, allMachineTypes);
+                if (st.key==="provisional" || st.key==="not_assessed" || (!st.ex && !st.manual)) return;
+                const mx = st.ex;
+                const expDate = mx ? new Date(mx.expiryDate) : null;
+                const daysLeft = mx ? mx.daysLeft : null;
+                const status = st.key==="expired" ? "expired" : st.key==="expiring" ? "expiring" : "valid";
                 const bg = status==="expired"?"rgba(239,68,68,0.08)":status==="expiring"?"rgba(245,158,11,0.08)":"rgba(16,185,129,0.08)";
                 const color = status==="expired"?"#ef4444":status==="expiring"?"#f59e0b":"#10b981";
                 const mType = (allMachineTypes||[]).find(x=>x.id===comp.machineId)||{label:comp.machineId,icon:"🔧"};
@@ -1315,7 +1317,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
               <div style={{marginTop:32}}>
                 <div style={{marginBottom:16,paddingTop:24,borderTop:`1px solid ${Z.border}`}}>
                   <h3 style={{fontSize:15,fontWeight:800,color:Z.white,margin:"0 0 4px"}}>Machinery Competency Expiry</h3>
-                  <p style={{color:Z.muted,fontSize:13,margin:"0 0 16px"}}>Licence and competency expiry dates from the machinery competency register</p>
+                  <p style={{color:Z.muted,fontSize:13,margin:"0 0 16px"}}>When each machinery competence must be renewed: the earlier of the renewal date and the licence expiry date</p>
                   <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
                     <div style={{background:"rgba(239,68,68,0.1)",borderRadius:12,padding:"14px 20px",flex:1,minWidth:100,textAlign:"center",border:"1px solid rgba(239,68,68,0.2)"}}>
                       <div style={{fontSize:28,fontWeight:900,color:"#ef4444"}}>{mExpired}</div>
@@ -1353,11 +1355,11 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
                               <div style={{flex:1,minWidth:0}}>
                                 <div style={{fontSize:12,fontWeight:700,color:"#fff",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{mType.label}</div>
                                 <div style={{fontSize:10,color:Z.muted,marginTop:1}}>
-                                  Expires {comp.licenceExpiry}{comp.licenceRef?` · ${comp.licenceRef}`:""}
+                                  {expDate ? `${status==="expired"?"Expired":"Renew by"} ${localISO(expDate).split("-").reverse().join("/")} (${comp.licenceExpiry && localISO(expDate)===String(comp.licenceExpiry).slice(0,10)?"licence expiry":"renewal due"})` : "Marked as renewal required"}{comp.licenceRef?` · ${comp.licenceRef}`:""}
                                 </div>
                               </div>
                               <span style={{fontSize:10,fontWeight:800,color,flexShrink:0,whiteSpace:"nowrap"}}>
-                                {status==="expired"?`⚠ ${Math.abs(daysLeft)}d ago`:status==="expiring"?`⏳ ${daysLeft}d left`:"✓ Valid"}
+                                {status==="expired"?(daysLeft===null?"⚠ Renew":`⚠ ${Math.abs(daysLeft)}d ago`):status==="expiring"?`⏳ ${daysLeft}d left`:"✓ Valid"}
                               </span>
                             </div>
                           ))}

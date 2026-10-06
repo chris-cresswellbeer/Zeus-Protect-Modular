@@ -3,11 +3,18 @@
  * isWarehouseWorker(user) — the single rule deciding who gets machinery/"My Machinery".
  * MACHINERY_TYPES / MACHINE_CATEGORIES / COMP_STATUS are REFERENCE DATA (admins can add
  *   more types in-app → custom_machine_types). Competence records store the machine `id`.
- * machineExpiryStatus(comp, types) — expiry = assessmentDate + type.renewalMonths.
- * INIT_MACHINE_COMPS is SEED / DEMO DATA — only used as a fallback when the matching Supabase table is empty
+ * machineExpiryStatus(comp, types) — expiry = the EARLIER of (assessmentDate + type.renewalMonths)
+ *   and the licence expiry date typed on the record. Either may be missing.
+ * machineState(comp, types) — the one status everything shows (matrix, lists, reports, PDF):
+ *   competent | expiring | expired | provisional | not_assessed  (see MACHINE_STATE).
+ *   Admins only choose Competent / Provisional / Not assessed; expiry is worked out.
+ *   (Records saved before this change with status "expired" still show as expired.)
+ * compsFor(machineComps, userId) — a person's records as an array. Records are kept as
+ *   { [userId]: { [recordId]: record } } (older seed data used arrays; both work).
+ * (The demo competence records moved to demo/seedMachinery.js — test scripts only.)
  * (e.g. a brand-new install). Once real rows exist, edits here have NO effect.
  */
-import { getExpiryStatus } from "../lib/dates";
+import { EXPIRY_WARNING_DAYS } from "../lib/dates";
 
 function isWarehouseWorker(user) {
   if (!user) return false;
@@ -39,56 +46,63 @@ const COMP_STATUS = {
   not_assessed:{ label:"Not Assessed",       color:"#64748b", bg:"rgba(100,116,139,0.12)",icon:"—"  },
 };
 
+// A date we can trust: "YYYY-MM-DD" that is a real day. Anything else (typed text, "TBC") is ignored.
+const okDate = d => typeof d === "string" && /^\d{4}-\d{2}-\d{2}/.test(d) && !isNaN(Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10))) ? d.slice(0, 10) : null;
+const utc = d => Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10));
+// months added in UTC, so a clock change can't move the date by a day
+const plusMonths = (d, n) => { const t = new Date(utc(d)); t.setUTCMonth(t.getUTCMonth() + n); return t.toISOString().slice(0, 10); };
+const todayLocal = () => { const t = new Date(); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`; };
+
 function machineExpiryStatus(comp, types) {
+  if (!comp) return null;
   const list = types || MACHINERY_TYPES;
   const m = list.find(x=>x.id===comp.machineId);
-  if (!m || !m.renewalMonths || !comp.assessmentDate) return null;
-  return getExpiryStatus(comp.assessmentDate, m.renewalMonths);
+  const dates = [];
+  const assessed = okDate(comp.assessmentDate), licence = okDate(comp.licenceExpiry);
+  if (m && Number(m.renewalMonths) > 0 && assessed) dates.push({ date: plusMonths(assessed, Number(m.renewalMonths)), source: "renewal" });
+  if (licence) dates.push({ date: licence, source: "licence" });
+  if (!dates.length) return null;
+  dates.sort((a,b)=>a.date.localeCompare(b.date));
+  const { date: expiryDate, source } = dates[0];
+  const daysLeft = Math.round((utc(expiryDate) - utc(todayLocal())) / 86400000);   // whole days; 0 = renew by today
+  const why = source === "licence" ? "licence expiry" : "renewal due";
+  if (daysLeft < 0) return { expiryDate, daysLeft, source, status:"expired", label:"Expired", why, color:"#ef4444", bg:"rgba(239,68,68,0.15)" };
+  if (daysLeft <= EXPIRY_WARNING_DAYS) return { expiryDate, daysLeft, source, status:"expiring", label:`Expires in ${daysLeft}d`, why, color:"#f59e0b", bg:"rgba(245,158,11,0.15)" };
+  return { expiryDate, daysLeft, source, status:"valid", label:`Valid until ${expiryDate}`, why, color:"#10b981", bg:"rgba(16,185,129,0.12)" };
 }
 
-// Seed data — competence records for warehouse staff
-const INIT_MACHINE_COMPS = {
-  2: [  // James Okafor — Warehouse Operative
-    { id:"mc201", machineId:"flt",     status:"competent",   trainerName:"Mark Davies",    trainerQual:"RTITB Instructor",  theoryDate:"2023-02-10", assessmentDate:"2023-02-14", observationDates:["2023-03-01","2023-06-15","2024-02-20"], licenceRef:"RTITB-2023-JO01", licenceExpiry:"2026-02-14", notes:"Passed first assessment. Excellent spatial awareness.", fileNames:[] },
-    { id:"mc202", machineId:"reach",   status:"competent",   trainerName:"Mark Davies",    trainerQual:"RTITB Instructor",  theoryDate:"2023-04-05", assessmentDate:"2023-04-09", observationDates:["2023-05-10","2024-01-12"],               licenceRef:"RTITB-2023-JO02", licenceExpiry:"2026-04-09", notes:"",                                             fileNames:[] },
-    { id:"mc203", machineId:"pump",    status:"competent",   trainerName:"Mark Davies",    trainerQual:"Warehouse Manager", theoryDate:"2022-09-01", assessmentDate:"2022-09-01", observationDates:["2023-01-10"],                            licenceRef:"",                licenceExpiry:"",           notes:"Manual pump truck. Informal assessment.",         fileNames:[] },
-    { id:"mc204", machineId:"epump",   status:"competent",   trainerName:"Mark Davies",    trainerQual:"Warehouse Manager", theoryDate:"2023-02-14", assessmentDate:"2023-02-14", observationDates:["2023-07-20"],                            licenceRef:"",                licenceExpiry:"2025-02-14", notes:"",                                             fileNames:[] },
-    { id:"mc205", machineId:"wrapper", status:"competent",   trainerName:"Mark Davies",    trainerQual:"Warehouse Manager", theoryDate:"2022-09-01", assessmentDate:"2022-09-01", observationDates:[],                                       licenceRef:"",                licenceExpiry:"",           notes:"",                                             fileNames:[] },
-  ],
-  5: [  // Tom Bradley — Warehouse Operative
-    { id:"mc501", machineId:"flt",     status:"competent",   trainerName:"Mark Davies",    trainerQual:"RTITB Instructor",  theoryDate:"2022-06-12", assessmentDate:"2022-06-16", observationDates:["2022-09-01","2023-04-14","2024-06-01"], licenceRef:"RTITB-2022-TB01", licenceExpiry:"2025-06-16", notes:"Long-standing operator. Consistent safe operation.", fileNames:[] },
-    { id:"mc502", machineId:"reach",   status:"expired",     trainerName:"Mark Davies",    trainerQual:"RTITB Instructor",  theoryDate:"2022-06-17", assessmentDate:"2022-06-20", observationDates:["2022-10-05"],                            licenceRef:"RTITB-2022-TB02", licenceExpiry:"2025-06-20", notes:"Renewal overdue — arrange refresher.",            fileNames:[] },
-    { id:"mc503", machineId:"pump",    status:"competent",   trainerName:"Mark Davies",    trainerQual:"Warehouse Manager", theoryDate:"2021-03-01", assessmentDate:"2021-03-01", observationDates:[],                                       licenceRef:"",                licenceExpiry:"",           notes:"",                                             fileNames:[] },
-    { id:"mc504", machineId:"baler",   status:"competent",   trainerName:"Daniel Okonkwo", trainerQual:"Maintenance Tech",  theoryDate:"2023-09-10", assessmentDate:"2023-09-12", observationDates:["2024-01-08"],                            licenceRef:"",                licenceExpiry:"2025-09-12", notes:"LOTO briefing completed. Observed clearing jam correctly.", fileNames:[] },
-    { id:"mc505", machineId:"docklevy",status:"competent",   trainerName:"Mark Davies",    trainerQual:"Warehouse Manager", theoryDate:"2022-06-16", assessmentDate:"2022-06-16", observationDates:["2023-02-20"],                            licenceRef:"",                licenceExpiry:"2024-06-16", notes:"",                                             fileNames:[] },
-  ],
-  7: [  // Connor Walsh — Logistics Driver
-    { id:"mc701", machineId:"flt",     status:"competent",   trainerName:"External RTITB", trainerQual:"RTITB Instructor",  theoryDate:"2021-11-08", assessmentDate:"2021-11-12", observationDates:["2022-05-01","2023-06-10"],               licenceRef:"RTITB-2021-CW01", licenceExpiry:"2024-11-12", notes:"Licence expired — renewal required urgently.",   fileNames:[] },
-    { id:"mc702", machineId:"tractor", status:"competent",   trainerName:"Mark Davies",    trainerQual:"Warehouse Manager", theoryDate:"2022-03-14", assessmentDate:"2022-03-16", observationDates:["2022-08-22","2023-08-14"],               licenceRef:"ZEUS-YD-2022-01", licenceExpiry:"2025-03-16", notes:"Site yard tractor only. Not licensed for road use.", fileNames:[] },
-    { id:"mc703", machineId:"epump",   status:"competent",   trainerName:"Mark Davies",    trainerQual:"Warehouse Manager", theoryDate:"2022-03-14", assessmentDate:"2022-03-14", observationDates:[],                                       licenceRef:"",                licenceExpiry:"2024-03-14", notes:"",                                             fileNames:[] },
-  ],
-  6: [  // Aisha Patel — Production Technician
-    { id:"mc601", machineId:"conveyor",status:"competent",   trainerName:"Daniel Okonkwo", trainerQual:"Maintenance Tech",  theoryDate:"2023-01-10", assessmentDate:"2023-01-12", observationDates:["2023-06-01","2024-01-15"],               licenceRef:"",                licenceExpiry:"2026-01-12", notes:"E-stop locations tested. Induction on all sections.", fileNames:[] },
-    { id:"mc602", machineId:"baler",   status:"provisional", trainerName:"Daniel Okonkwo", trainerQual:"Maintenance Tech",  theoryDate:"2025-03-20", assessmentDate:"",           observationDates:[],                                       licenceRef:"",                licenceExpiry:"",           notes:"Theory complete. Practical assessment pending.", fileNames:[] },
-    { id:"mc603", machineId:"wrapper", status:"competent",   trainerName:"Liam Harrison",  trainerQual:"Shift Supervisor",  theoryDate:"2023-01-12", assessmentDate:"2023-01-12", observationDates:[],                                       licenceRef:"",                licenceExpiry:"",           notes:"",                                             fileNames:[] },
-  ],
-  9: [  // Daniel Okonkwo — Maintenance Technician
-    { id:"mc901", machineId:"scissor", status:"competent",   trainerName:"External IPAF",  trainerQual:"IPAF Instructor",   theoryDate:"2023-05-08", assessmentDate:"2023-05-09", observationDates:["2023-09-12","2024-04-03"],               licenceRef:"IPAF-2023-DO01", licenceExpiry:"2026-05-09", notes:"PA1/PA3A. Boom and scissor platforms.",           fileNames:[] },
-    { id:"mc902", machineId:"flt",     status:"competent",   trainerName:"External RTITB", trainerQual:"RTITB Instructor",  theoryDate:"2022-08-15", assessmentDate:"2022-08-18", observationDates:["2023-03-10"],                            licenceRef:"RTITB-2022-DO01", licenceExpiry:"2025-08-18", notes:"Counter-balance. Used for maintenance access only.", fileNames:[] },
-    { id:"mc903", machineId:"conveyor",status:"competent",   trainerName:"Daniel Okonkwo", trainerQual:"Maintenance Tech",  theoryDate:"2022-01-10", assessmentDate:"2022-01-10", observationDates:["2023-01-10","2024-01-10"],               licenceRef:"",               licenceExpiry:"",           notes:"In-house competency. LOTO trained.",              fileNames:[] },
-  ],
-  11: [ // Liam Harrison — Shift Supervisor
-    { id:"mc1101", machineId:"flt",     status:"competent",  trainerName:"External RTITB", trainerQual:"RTITB Instructor",  theoryDate:"2020-09-14", assessmentDate:"2020-09-17", observationDates:["2021-03-01","2022-09-01","2023-09-01"], licenceRef:"RTITB-2020-LH01", licenceExpiry:"2023-09-17", notes:"Expired — supervisor role, not regular operator. Reassess if to resume operation.", fileNames:[] },
-    { id:"mc1102", machineId:"pump",    status:"competent",  trainerName:"Mark Davies",    trainerQual:"Warehouse Manager", theoryDate:"2020-09-17", assessmentDate:"2020-09-17", observationDates:[],                                       licenceRef:"",               licenceExpiry:"",           notes:"",                                             fileNames:[] },
-    { id:"mc1103", machineId:"baler",   status:"competent",  trainerName:"Daniel Okonkwo", trainerQual:"Maintenance Tech",  theoryDate:"2021-11-01", assessmentDate:"2021-11-03", observationDates:["2022-11-03","2023-11-03"],               licenceRef:"",               licenceExpiry:"2023-11-03", notes:"Annual observation sign-off completed.",          fileNames:[] },
-  ],
-  13: [ // Ryan Fitzgerald — Warehouse Operative
-    { id:"mc1301", machineId:"pump",    status:"competent",  trainerName:"Mark Davies",    trainerQual:"Warehouse Manager", theoryDate:"2024-01-15", assessmentDate:"2024-01-15", observationDates:[],                                       licenceRef:"",               licenceExpiry:"",           notes:"New starter assessment. Manual pump only.",      fileNames:[] },
-    { id:"mc1302", machineId:"flt",     status:"provisional",trainerName:"Mark Davies",    trainerQual:"RTITB Instructor",  theoryDate:"2025-01-20", assessmentDate:"",           observationDates:[],                                       licenceRef:"",               licenceExpiry:"",           notes:"Theory passed. Awaiting practical assessment date.", fileNames:[] },
-    { id:"mc1303", machineId:"wrapper", status:"competent",  trainerName:"Mark Davies",    trainerQual:"Warehouse Manager", theoryDate:"2024-01-15", assessmentDate:"2024-01-15", observationDates:[],                                       licenceRef:"",               licenceExpiry:"",           notes:"",                                             fileNames:[] },
-  ],
+/** What a record shows as. `fill`/`text` are the Excel colours; `sym` the matrix symbol. */
+const MACHINE_STATE = {
+  competent:    { key:"competent",    label:"Competent",          color:"#10b981", bg:"rgba(16,185,129,0.12)", sym:"✓", fill:"C6EFCE", text:"006100" },
+  expiring:     { key:"expiring",     label:"Expiring soon",      color:"#f59e0b", bg:"rgba(245,158,11,0.14)", sym:"!", fill:"FFEB9C", text:"9C5700" },
+  expired:      { key:"expired",      label:"Renewal required",   color:"#ef4444", bg:"rgba(239,68,68,0.14)",  sym:"✗", fill:"FFC7CE", text:"9C0006" },
+  provisional:  { key:"provisional",  label:"Provisional",        color:"#3b82f6", bg:"rgba(59,130,246,0.14)", sym:"◐", fill:"DDEBF7", text:"1F4E79" },
+  not_assessed: { key:"not_assessed", label:"Not assessed",       color:"#64748b", bg:"rgba(100,116,139,0.14)",sym:"–", fill:"F2F2F2", text:"595959" },
 };
+/** The statuses an admin can choose; expiry is worked out from the dates. */
+const CHOOSABLE_STATUS = ["competent", "provisional", "not_assessed"];
+
+function machineState(comp, types) {
+  if (!comp) return null;
+  const ex = machineExpiryStatus(comp, types);
+  let key;
+  if (comp.status === "provisional") key = "provisional";
+  else if (comp.status === "not_assessed") key = "not_assessed";
+  else if (comp.status === "expired") key = "expired";                 // marked by hand before expiry was automatic
+  else if (comp.status !== "competent") key = "not_assessed";          // missing / unknown status: never assume competent
+  else key = ex && ex.status === "expired" ? "expired" : ex && ex.status === "expiring" ? "expiring" : "competent";
+  // marked "expired" by hand while the dates say otherwise: no renew-by date to show
+  const manual = comp.status === "expired" && !(ex && ex.status === "expired");
+  return { ...MACHINE_STATE[key], ex: manual ? null : ex, manual };
+}
+
+const compsFor = (machineComps, userId) => Object.values((machineComps || {})[userId] || {}).filter(Boolean);
+
+/** Array-shaped seed data → { userId: { recordId: record } } */
+const toCompMap = m => Object.fromEntries(Object.entries(m || {}).map(([uid, v]) => [uid, Array.isArray(v) ? Object.fromEntries(v.map(c => [c.id, c])) : v]));
+
+// Seed data — competence records for warehouse staff
 
 // ─── Machinery Competence Tab (Staff) ─────────────────────────────────────────
 
-export { isWarehouseWorker, MACHINERY_TYPES, MACHINE_CATEGORIES, COMP_STATUS, machineExpiryStatus, INIT_MACHINE_COMPS };
+export { isWarehouseWorker, MACHINERY_TYPES, MACHINE_CATEGORIES, COMP_STATUS, machineExpiryStatus, MACHINE_STATE, CHOOSABLE_STATUS, machineState, compsFor, toCompMap };

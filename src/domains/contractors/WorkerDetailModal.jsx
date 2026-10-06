@@ -6,6 +6,7 @@ import { sb } from "../../lib/supabase";
 import { ACCEPT_IMG_DOCS } from "../../lib/constants";
 import { INDUCTION_ITEMS, CONTRACTOR_CERT_TYPES } from "../../data/seedContractors";
 
+import { todayISO } from "../../lib/dates";
 /**
  * WorkerDetailModal — a single contractor worker: site-induction checklist (tick items;
  * records date and "Admin" as the person who signed it off) and certificate uploads
@@ -24,7 +25,7 @@ import { INDUCTION_ITEMS, CONTRACTOR_CERT_TYPES } from "../../data/seedContracto
  */
 function WorkerDetailModal({ worker, companyId, contractorInductions, setContractorInductions, contractorCerts, setContractorCerts, dbSaveContractorInductions, dbSaveContractorCerts, onClose, T, font }) {
   const isMobile = useWindowWidth() <= 1024;
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayISO();
   const [tab, setTab] = React.useState("induction");
   const [certUploading, setCertUploading] = React.useState(null);
   const wid = `${companyId}_${worker.id}`;

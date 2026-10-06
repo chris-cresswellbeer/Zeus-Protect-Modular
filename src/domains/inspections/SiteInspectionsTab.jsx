@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ask } from "../../shared/Feedback";
 import { useFormGuard, DraftBanner, confirmLeave } from "../../lib/unsaved";
 import { useWindowWidth } from "../../shared/hooks";
@@ -8,7 +8,9 @@ import { ACCEPT_IMAGES } from "../../lib/constants";
 import { INSP_TYPES, INSP_SECTIONS } from "../../data/seedInspections";
 import { embedFiles } from "../../lib/fileAccess";
 import { useRemembered } from "../../lib/remembered";
+import { latestByKey, supersededBy, overdueInspections } from "./inspectionDue";
 
+import { todayISO } from "../../lib/dates";
 /**
  * SiteInspectionsTab — admin workplace inspections (checklists + non-conformances).
  *
@@ -32,16 +34,22 @@ import { useRemembered } from "../../lib/remembered";
  * "Flag as NC", which jumps to the NC section with the finding pre-filled and then
  * returns to the originating section on save/cancel (ncReturnSection).
  */
-function SiteInspectionsTab({ inspections, setInspections, staff, Z, font }) {
+function SiteInspectionsTab({ inspections, setInspections, staff, userName = "", preset, clearPreset, Z, font }) {
   const isMobile = useWindowWidth() <= 1024;
   const [view, setView] = useState("list"); // "list"|"new"|"detail"|"report"
   const [activeId, setActiveId] = useState(null);
+  // opened from elsewhere with one inspection to show (e.g. Fire Safety → Drill Log → Checklist)
+  useEffect(() => {
+    if (!preset || !preset.openId) return;
+    if (inspections.some(i => i.id === preset.openId)) { setActiveId(preset.openId); setView("detail"); window.scrollTo({ top: 0 }); }
+    clearPreset && clearPreset();
+  }, [preset]); // eslint-disable-line react-hooks/exhaustive-deps
   const [filterType, setFilterType] = useRemembered("inspections.type", "all");
   const [filterStatus, setFilterStatus] = useRemembered("inspections.status", "all");
   const [photoError, setPhotoError] = useState("");
 
   // New inspection form state
-  const BLANK_FORM = { type:"annual_hs", date:new Date().toISOString().slice(0,10), inspector:"", location:"", summary:"", sections:{}, nonConformances:[] };
+  const BLANK_FORM = { type:"annual_hs", date:todayISO(), inspector:userName, location:"", summary:"", sections:{}, nonConformances:[] };
   const [form, setForm] = useState(BLANK_FORM);
   const [formSection, setFormSection] = useState(0);
   const [ncForm, setNcForm] = useState(null); // { section, finding, severity, photos, actionOwner, actionDue }
@@ -52,7 +60,7 @@ function SiteInspectionsTab({ inspections, setInspections, staff, Z, font }) {
   // unsaved-changes warning + draft on this device for a new inspection (lib/unsaved.jsx)
   const inspGuard = useFormGuard({ key: "inspection.new", label: "your new inspection", active: view === "new", value: form, onRestore: v => setForm(v) });
 
-  const today = new Date().toISOString().slice(0,10);
+  const today = (()=>{ const t=new Date(); return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,"0")}-${String(t.getDate()).padStart(2,"0")}`; })();   // local date
   const selInsp = inspections.find(i=>i.id===activeId);
   const typeInfo = id => INSP_TYPES.find(t=>t.id===id)||INSP_TYPES[0];
   const scoreColor = pct => pct>=90?"#10b981":pct>=75?"#f59e0b":pct>=60?"#fb923c":"#ef4444";
@@ -248,6 +256,10 @@ function SiteInspectionsTab({ inspections, setInspections, staff, Z, font }) {
             style={{background:`linear-gradient(135deg,#6366f1,#4f46e5)`,color:"#fff",border:"none",borderRadius:10,padding:"9px 20px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:13,boxShadow:"0 4px 14px rgba(99,102,241,0.35)"}}>
             📄 Download Action Report
           </button>
+          <button type="button" onClick={async()=>{ if(await ask({ title: "Delete this inspection?", message: `${ti.label} at ${selInsp.location||"—"} on ${selInsp.date}, with its findings and photos. This can't be undone.`, ok: "Delete inspection", danger: true })){ setInspections(p=>p.filter(x=>x.id!==selInsp.id)); setView("list"); setActiveId(null); } }}
+            style={{background:"rgba(239,68,68,0.08)",color:"#f87171",border:"1px solid rgba(239,68,68,0.25)",borderRadius:10,padding:"9px 16px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:13}}>
+            🗑 Delete
+          </button>
         </div>
 
         {/* Score banner */}
@@ -268,14 +280,19 @@ function SiteInspectionsTab({ inspections, setInspections, staff, Z, font }) {
               {openNCs.length>0 && <span style={{fontSize:11,background:"rgba(239,68,68,0.1)",color:"#f87171",padding:"2px 10px",borderRadius:99,fontWeight:700}}>{openNCs.length} open action{openNCs.length!==1?"s":""}</span>}
             </div>
           </div>
-          {selInsp.nextDue && (
+          {selInsp.nextDue && (() => { const newer = supersededBy(selInsp, latestByKey(inspections)); return (
             <div style={{textAlign:"center",padding:"12px 20px",background:Z.overlay,borderRadius:12,border:`1px solid ${Z.border}`}}>
-              <div style={{fontSize:11,color:Z.muted,marginBottom:2}}>NEXT DUE</div>
-              <div style={{fontSize:15,fontWeight:800,color:selInsp.nextDue<today?"#f87171":Z.white}}>{selInsp.nextDue}</div>
+              <div style={{fontSize:11,color:Z.muted,marginBottom:2}}>{newer?"RE-INSPECTED":"NEXT DUE"}</div>
+              <div style={{fontSize:15,fontWeight:800,color:!newer&&selInsp.nextDue<today?"#f87171":Z.white}}>{newer?newer.date:selInsp.nextDue}</div>
             </div>
-          )}
+          ); })()}
         </div>
 
+        {(selInsp.type==="fire_drill"||selInsp.type==="fire_risk") && (
+          <div role="note" style={{fontSize:12.5,color:Z.muted,margin:"-6px 0 16px"}}>
+            {selInsp.type==="fire_drill"?"This drill also shows in Fire Safety → Drill Log and counts as the last drill.":"This assessment also shows in Fire Safety → FRA Reviews, and its next due date is used for the next FRA review."}
+          </div>
+        )}
         {/* Summary */}
         {selInsp.summary && (
           <div style={{background:`linear-gradient(135deg,${Z.navyMd},${Z.navy})`,borderRadius:14,padding:"14px 18px",marginBottom:20,border:`1px solid ${Z.border}`}}>
@@ -441,11 +458,14 @@ function SiteInspectionsTab({ inspections, setInspections, staff, Z, font }) {
             </div>
             <div>
               <label style={lbl}>Inspector Name *</label>
-              <input value={form.inspector} onChange={e=>setForm(p=>({...p,inspector:e.target.value}))} placeholder="e.g. Linda Osei" style={inp}/>
+              <input value={form.inspector} onChange={e=>setForm(p=>({...p,inspector:e.target.value}))} placeholder="e.g. Linda Osei" list="insp-staff" aria-label="Inspector name" style={inp}/>
+              <datalist id="insp-staff">{(staff||[]).filter(u=>u.status!=="leaver").map(u=><option key={u.id} value={u.name}/>)}</datalist>
             </div>
             <div>
               <label style={lbl}>Location / Area *</label>
-              <input value={form.location} onChange={e=>setForm(p=>({...p,location:e.target.value}))} placeholder="e.g. Zeus HQ — Full Site" style={inp}/>
+              <input value={form.location} onChange={e=>setForm(p=>({...p,location:e.target.value}))} placeholder="e.g. Zeus HQ — Full Site" list="insp-places" aria-label="Location / Area" style={inp}/>
+              {/* places used before for this type first: the same name each time keeps "overdue re-inspections" right */}
+              <datalist id="insp-places">{[...new Set([...inspections.filter(i=>i.type===form.type).map(i=>i.location), ...inspections.map(i=>i.location)].filter(Boolean))].map(l=><option key={l} value={l}/>)}</datalist>
             </div>
           </div>
         </div>
@@ -645,7 +665,9 @@ function SiteInspectionsTab({ inspections, setInspections, staff, Z, font }) {
 
   // ── LIST view ────────────────────────────────────────────────────────────────
   const filtered = inspections.filter(i=>(filterType==="all"||i.type===filterType)&&(filterStatus==="all"||i.status===filterStatus));
-  const overdue = inspections.filter(i=>i.nextDue&&i.nextDue<today);
+  // only the latest inspection of each type at each location counts (inspectionDue.js)
+  const latestInsp = latestByKey(inspections);
+  const overdue = overdueInspections(inspections, today);
   const openCount = inspections.filter(i=>i.status==="open").length;
   const avgScore = inspections.length ? Math.round(inspections.reduce((s,i)=>s+(i.maxScore>0?i.overallScore/i.maxScore*100:0),0)/inspections.length) : 0;
 
@@ -688,7 +710,7 @@ function SiteInspectionsTab({ inspections, setInspections, staff, Z, font }) {
               const ti=typeInfo(i.type);
               return (
                 <button key={i.id} onClick={()=>{setActiveId(i.id);setView("detail");window.scrollTo({top:0,behavior:"smooth"});}} style={{background:"rgba(239,68,68,0.1)",color:"#fca5a5",border:"1px solid rgba(239,68,68,0.25)",borderRadius:8,padding:"6px 14px",cursor:"pointer",fontFamily:font,fontSize:12,fontWeight:600}}>
-                  {ti.icon} {ti.label} — due {i.nextDue}
+                  {ti.icon} {ti.label} · {i.location} — due {i.nextDue}
                 </button>
               );
             })}
@@ -722,7 +744,8 @@ function SiteInspectionsTab({ inspections, setInspections, staff, Z, font }) {
           const pct=ins.maxScore>0?Math.round(ins.overallScore/ins.maxScore*100):0;
           const sc=scoreColor(pct);
           const openNCs=ins.nonConformances.filter(n=>n.actionStatus!=="complete").length;
-          const overduNC=ins.nextDue&&ins.nextDue<today;
+          const newer=supersededBy(ins,latestInsp);
+          const overduNC=!newer&&ins.nextDue&&ins.nextDue<today;
           const isEditing=editingInspId===ins.id;
           return (
             <div key={ins.id} style={{background:`linear-gradient(135deg,${Z.navyMd},${Z.navy})`,borderRadius:14,border:`1px solid ${isEditing?Z.accent:ins.status==="open"?"rgba(245,158,11,0.3)":Z.border}`,overflow:"hidden",transition:"border-color .2s"}}>
@@ -742,7 +765,8 @@ function SiteInspectionsTab({ inspections, setInspections, staff, Z, font }) {
                     {openNCs>0 && <span style={{fontSize:11,color:"#f87171",fontWeight:600}}>{openNCs} open action{openNCs!==1?"s":""}</span>}
                     {ins.nonConformances.length>0 && <span style={{fontSize:11,color:Z.muted}}>{ins.nonConformances.length} finding{ins.nonConformances.length!==1?"s":""}</span>}
                     {ins.inspector && <span style={{fontSize:11,color:Z.muted}}>Inspector: {ins.inspector}</span>}
-                    {ins.nextDue && <span style={{fontSize:11,color:overduNC?"#f87171":Z.muted,fontWeight:overduNC?700:400}}>{overduNC?"🚨 Overdue — ":"Next: "}{ins.nextDue}</span>}
+                    {newer ? <span style={{fontSize:11,color:Z.muted}}>✓ Re-inspected {newer.date}</span>
+                      : ins.nextDue && <span style={{fontSize:11,color:overduNC?"#f87171":Z.muted,fontWeight:overduNC?700:400}}>{overduNC?"🚨 Overdue — ":"Next: "}{ins.nextDue}</span>}
                   </div>
                 </div>
                 <div style={{textAlign:"center",flexShrink:0}}>
@@ -752,8 +776,7 @@ function SiteInspectionsTab({ inspections, setInspections, staff, Z, font }) {
                 <div style={{display:"flex",gap:6,flexShrink:0}} onClick={e=>e.stopPropagation()}>
                   <button onClick={()=>{setEditingInspId(ins.id);setEditInspForm({date:ins.date,location:ins.location,inspector:ins.inspector,summary:ins.summary||"",nextDue:ins.nextDue||"",status:ins.status});}}
                     style={{background:"rgba(37,99,235,0.1)",color:Z.accentLt,border:"1px solid rgba(37,99,235,0.25)",borderRadius:9,padding:"8px 14px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:12,whiteSpace:"nowrap"}}>✏ Edit</button>
-                  <button onClick={async()=>{if(await ask({ title: "Delete this inspection?", message: "This can't be undone.", ok: "Delete", danger: true })){setInspections(p=>p.filter(x=>x.id!==ins.id));}}}
-                    style={{background:"rgba(239,68,68,0.1)",color:"#f87171",border:"1px solid rgba(239,68,68,0.2)",borderRadius:9,padding:"8px 12px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:12}}>🗑</button>
+{/* Delete is on the inspection itself (View →) */}
                   <button onClick={()=>{setActiveId(ins.id);setView("detail");window.scrollTo({top:0,behavior:"smooth"});}}
                     style={{background:`linear-gradient(135deg,${Z.accent},${Z.blue})`,color:"#fff",border:"none",borderRadius:9,padding:"8px 16px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:12,whiteSpace:"nowrap",boxShadow:`0 4px 12px ${Z.accent}33`}}>View →</button>
                 </div>

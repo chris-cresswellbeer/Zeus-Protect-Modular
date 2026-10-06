@@ -63,20 +63,11 @@ import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from 
 import { SortableContext, rectSortingStrategy, arrayMove, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 // ── Seed / reference data (src/data). Used as defaults until Supabase has rows. ──
-import { INIT_DSE_REPORTS } from "./data/dseReports";
-import { HS_DOCS, INIT_ASSIGN, INIT_COMPLETE } from "./data/seedDocs";
-import { INIT_EQUIPMENT } from "./data/seedEquipment";
 import { EXT_CERT_TYPES } from "./data/seedExtCerts";
-import { INIT_FIRE_WARDENS, INIT_FIRE_DRILLS, INIT_ALARM_TESTS, INIT_EXTINGUISHERS, INIT_EMERG_LIGHTING, INIT_FRA_REVIEWS } from "./data/seedFireSafety";
-import { FA_ZONES } from "./data/seedFirstAid";
-import { INIT_INCIDENTS } from "./data/seedIncidents";
-import { INIT_SITE_INSPECTIONS, INSP_TYPES } from "./data/seedInspections";
+import { INSP_TYPES } from "./data/seedInspections";
 import { PERMIT_TYPES } from "./data/seedPermits";
-import { INIT_INVESTIGATIONS } from "./data/seedInvestigations";
-import { isWarehouseWorker, INIT_MACHINE_COMPS, MACHINERY_TYPES } from "./data/seedMachinery";
-import { INIT_RAS } from "./data/seedRiskAssessments";
+import { isWarehouseWorker, MACHINERY_TYPES, machineState, compsFor } from "./data/seedMachinery";
 import { TRAINING_MODULES } from "./data/seedTraining";
-import { USERS } from "./data/seedUsers";
 // ── Domain tabs. `React.lazy` = the tab's code is only downloaded the first time it is
 // opened (code-splitting). Each lazy tab must be rendered inside <React.Suspense>.
 // The `.then(m => ({ default: m.X }))` adapts a NAMED export to what React.lazy expects.
@@ -113,6 +104,7 @@ const LazyInvestigationTab = React.lazy(() => import("./domains/incidents/Invest
 import { QuickReportModal } from "./domains/incidents/QuickReportModal";
 import { isIncompleteQuickReport, myIncompleteQuickReports, isQuickReportOverdue, quickReportDueLabel } from "./domains/incidents/quickReportStatus";
 const LazySiteInspectionsTab = React.lazy(() => import("./domains/inspections/SiteInspectionsTab").then(m => ({ default: m.SiteInspectionsTab })));
+const LazySiteSettingsTab = React.lazy(() => import("./domains/settings/SiteSettingsTab").then(m => ({ default: m.SiteSettingsTab })));
 const LazyAdminMachineryTab = React.lazy(() => import("./domains/machinery/AdminMachineryTab").then(m => ({ default: m.AdminMachineryTab })));
 const LazyMachineryCompetenceTab = React.lazy(() => import("./domains/machinery/MachineryCompetenceTab").then(m => ({ default: m.MachineryCompetenceTab })));
 const LazyPermitsTab = React.lazy(() => import("./domains/permits/PermitsTab").then(m => ({ default: m.PermitsTab })));
@@ -129,7 +121,7 @@ import { isHtmlContent, ensureRteStyles } from "./domains/training/slideTextUtil
 import { HotspotActivity } from "./domains/training/HotspotActivity";
 // ── Core libraries, shared UI and theme ──
 import { sanitizeHtml } from "./lib/sanitizeHtml";
-import { getExpiryStatus, EXPIRY_WARNING_DAYS } from "./lib/dates";
+import { EXPIRY_WARNING_DAYS, getExpiryStatus, localISO, todayISO, localDateTime } from "./lib/dates";
 import { EmojiCtx, E, syncEmojiMode } from "./lib/emoji";
 import { startPlainSymbols, stopPlainSymbols } from "./lib/plainSymbols";
 import { sb, hashPassword, DEFAULT_HASH, dbWrite } from "./lib/supabase";
@@ -153,8 +145,11 @@ import { QuickSearch } from "./shared/QuickSearch";
 import { NavMenu } from "./shared/NavMenu";
 import { useSort, sortRows, SortButton } from "./shared/Sortable";
 import { getProgress, saveProgress, clearProgress, resumeLabel } from "./lib/moduleProgress";
-import { mapDueRows, dueInfo, dueText, formatDue, addDays, DUE_CHOICES, overdueByPerson, today as todayISO } from "./lib/dueDates";
+import { mapDueRows, dueInfo, dueText, formatDue, addDays, DUE_CHOICES, overdueByPerson } from "./lib/dueDates";
 import { startSession, stopSession, setSessionTheme } from "./shared/SessionTimeout";
+import { fireSummary, todayLocal as fireToday } from "./domains/fireSafety/fireLogic";
+import { riddorDue, riddorDueText, riddorUrgent } from "./domains/incidents/riddor";
+import { loadSiteLists, getSiteLists, coverShifts, isAllShift } from "./lib/siteLists";
 import { loadWelcomeVideo, showWelcome, hideWelcome, WelcomeReplay, WelcomeVideoSettings } from "./shared/WelcomeVideo";
 import { useRemembered, clearRemembered } from "./lib/remembered";
 import { setAuditUser, primeAudit, primeAuditList, primeAuditMap, auditRecord, auditList, auditDelete, auditEvent } from "./lib/audit";
@@ -284,10 +279,9 @@ const INCIDENT_CORE_KEYS = new Set([
   "quickReport","urgency",
 ]);
 
-// Demo / seed data (INIT_*) fills screens on a brand-new install in the old sign-in
-// mode. With Supabase sign-in the database decides what each person may see, so an
-// empty result must stay empty — never replaced by demo records.
-const USE_SEED = AUTH_MODE !== "supabase";
+// No demo data is built into the portal any more (it used to fill empty screens in the
+// old sign-in mode, and the bundle carried a real staff list). Every screen shows only
+// what is in the database. The demo data now lives in demo/ for the test scripts.
 
 export default function App() {
   const [darkMode, setDarkMode] = useState(true); // kept for backward compat
@@ -297,12 +291,12 @@ export default function App() {
   useEffect(() => { applyLightThemeFix(isLightTheme(theme)); }, [theme]);
   const [user,    setUser]    = useState(null);
   const [view,    setViewRaw] = useState("login");
-  const [allUsers,setAllUsers]= useState([]); // loaded from Supabase users table; USERS constant is seed-only
+  const [allUsers,setAllUsers]= useState([]); // loaded from the Supabase users table
   // ── Auth & users ──
   const [passwords, setPasswords] = useState({}); // userId -> password (overrides default)
   // ── Training: assigns = { [userId]: [moduleId,...] }, comps = { [userId]: { [moduleId]: {score,date,certId,answers} } } ──
-  const [assigns, setAssigns] = useState(USE_SEED ? INIT_ASSIGN : {});
-  const [comps,   setComps]   = useState(USE_SEED ? INIT_COMPLETE : {});
+  const [assigns, setAssigns] = useState({});
+  const [comps,   setComps]   = useState({});
   const [email,   setEmail]   = useState("");
   const [pass,    setPass]    = useState("");
   const [err,     setErr]     = useState("");
@@ -335,7 +329,7 @@ export default function App() {
   const [quickEditId, setQuickEditId] = useState(null); // quick report to open in the full form (reminder deep link)
   const [cert,    setCert]    = useState(null);
   const [target,  setTarget]  = useState("1");
-  const [docs,    setDocs]    = useState(HS_DOCS);
+  const [docs,    setDocs]    = useState([]);
   const [docName, setDocName] = useState("");
   const [previewDoc, setPreviewDoc] = useState(null);
   const [docAssignments, setDocAssignments] = useState({}); // { docId: [userId, ...] }
@@ -353,19 +347,19 @@ export default function App() {
   const [dseComments, setDseComments] = useState({});
   const [dseSection, setDseSection] = useState(0);
   const [dseSubmitted, setDseSubmitted] = useState(false);
-  const [dseReports, setDseReports] = useState(USE_SEED ? INIT_DSE_REPORTS : {});
+  const [dseReports, setDseReports] = useState({});
   const [adminResponses, setAdminResponses] = useState({}); // { userId: { reportIdx_issueIdx: { comment, resolved } } }
   // ── Incidents, investigations and other H&S registers ──
-  const [incidents, setIncidents] = useState(USE_SEED ? INIT_INCIDENTS : []);
-  const [investigations, setInvestigations] = useState(USE_SEED ? INIT_INVESTIGATIONS : {});   // { incidentId: { ... } }
+  const [incidents, setIncidents] = useState([]);
+  const [investigations, setInvestigations] = useState({});   // { incidentId: { ... } }
   const [investigationView, setInvestigationView] = useState(null); // incidentId to open
   const [lastLoginMap, setLastLoginMap] = useState({}); // userId -> ISO date string
-  const [equipment, setEquipment] = useState(USE_SEED ? INIT_EQUIPMENT : []);
-  const [machineComps, setMachineComps] = useState(USE_SEED ? INIT_MACHINE_COMPS : {});
-  const [siteInspections, setSiteInspections] = useState(USE_SEED ? INIT_SITE_INSPECTIONS : []);
+  const [equipment, setEquipment] = useState([]);
+  const [machineComps, setMachineComps] = useState({});
+  const [siteInspections, setSiteInspections] = useState([]);
   const [customModules, setCustomModules] = useState([]); // admin-created training modules
   const [customMachineTypes, setCustomMachineTypes] = useState([]); // admin-created machinery types
-  const [ras, setRas] = useState(INIT_RAS);
+  const [ras, setRas] = useState([]);
   const [permits, setPermits] = useState([]);
   const [contractors, setContractors] = useState([]);
   const [contractorInductions, setContractorInductions] = useState({});
@@ -392,7 +386,7 @@ export default function App() {
   }, [emojiMode]);
   useEffect(() => { ensureRteStyles(); }, []);
   // Fire safety is ONE state object holding six lists; each list maps to its own Supabase table (see dbSaveFireSafety).
-  const [fireSafety, setFireSafety] = useState(USE_SEED ? { wardens:INIT_FIRE_WARDENS, drills:INIT_FIRE_DRILLS, alarmTests:INIT_ALARM_TESTS, extinguishers:INIT_EXTINGUISHERS, emergLighting:INIT_EMERG_LIGHTING, fraReviews:INIT_FRA_REVIEWS } : { wardens:[], drills:[], alarmTests:[], extinguishers:[], emergLighting:[], fraReviews:[] });
+  const [fireSafety, setFireSafety] = useState({ wardens:[], drills:[], alarmTests:[], extinguishers:[], emergLighting:[], fraReviews:[] });
   const [firstAidData, setFirstAidData] = useState({ aiders:[], kits:[], assessment:{} });
   // ── Module merge model ─────────────────────────────────────────────────────
   // Built-in modules live in data/seedTraining.js (TRAINING_MODULES, read-only code).
@@ -426,6 +420,7 @@ export default function App() {
   const newAssignDue = () => assignDueChoice === "date" ? (assignDueDate || null) : assignDueChoice ? addDays(Number(assignDueChoice)) : null;
   const [showBulkReset, setShowBulkReset] = useState(false);
   const [docFolder, setDocFolder] = useRemembered("docs.folder", "all"); // active folder filter
+  const [docSearch, setDocSearch] = useState("");    // H&S Documents search (not remembered, like other search boxes)
   const [showBulkDocAssign, setShowBulkDocAssign] = useState(false);
   const [bulkDocTarget, setBulkDocTarget] = useState("all"); // all | team | individual
   const [bulkDocManager, setBulkDocManager] = useState("");
@@ -574,7 +569,7 @@ export default function App() {
   // Runs ONCE on first render. Each table is fetched in parallel, then converted
   // from database shape (snake_case columns, one row per record) into the
   // in-memory shape the UI uses (camelCase, often maps keyed by userId).
-  // If a table returns no rows, the matching seed data (INIT_*) is kept.
+  // If a table returns no rows, that screen is simply empty.
   // ADDING A NEW TABLE: add the query to the array below, add a matching
   // variable name (same position!) in the destructuring list, add it to the
   // error-logging list, then add a block that converts rows → state.
@@ -585,6 +580,7 @@ export default function App() {
   const loadAllRef = useRef(null);
   useEffect(() => {
     async function loadAll() {
+      loadSiteLists();          // site-specific lists (Site Settings)
       try {
         // Fire all 35 independent reads concurrently instead of one at a
         // time. None of these queries depends on another's result, so
@@ -653,17 +649,14 @@ export default function App() {
         [aRes,cRes,iRes,invRes,ackRes,daRes,docRes,dseRes,resRes,llRes,pwRes,upRes,ecRes,qfRes,conRes,conIndRes,conCertRes,conVisitRes,permitRes,raRes,cmRes,mcRes,eqRes,siRes,msdsRes,ccRes,fwRes,fdRes,fatRes,fexRes,felRes,ffrRes,faRes,cmtRes,dlRes,caRes,dahRes,chRes,mvRes,bdRes]
           .forEach(r => { if (r.status === "rejected") console.error("Supabase load error:", r.reason); });
 
-        // Pattern used below: rows(x) → null/[] means "nothing stored" → keep seed data.
+        // Pattern used below: rows(x) → null/[] means "nothing stored".
         // Training assigns
         const aRows = rows(aRes);
         if (aRows && aRows.length) {
           setAssigns(mapAssignRows(aRows));
           setDueDates(mapDueRows(aRows));
         } else {
-          // Normalise INIT_ASSIGN keys to strings
-          const normalised = {};
-          if (USE_SEED) Object.entries(INIT_ASSIGN).forEach(([k,v]) => { normalised[String(k)] = v; });
-          setAssigns(normalised);
+          setAssigns({});
         }
 
         // Training completions
@@ -753,18 +746,10 @@ export default function App() {
         }
 
         // The users table stores the whole user object in a JSON `data` column.
-        // Users — DB is source of truth; seed with USERS constant on first run
+        // Users — the database is the only source (a new site starts with new_site_first_admin.sql)
         const usersRows = rows(usersRes);
         if (usersRows && usersRows.length) {
           setAllUsers(usersRows.map(r => r.data));
-        } else if (USE_SEED) {
-          // First run — seed the users table from the hardcoded USERS constant
-          setAllUsers(USERS);
-          try {
-            await dbWrite(sb.from("users").insert(USERS.map(u => ({ id: String(u.id), data: u }))), "seed users");
-          } catch(seedErr) {
-            console.warn("User seed error (may already exist):", seedErr);
-          }
         }
 
         // Stored on `window` (a global) rather than state so login() and dbSaveTheme()
@@ -806,7 +791,7 @@ export default function App() {
         if (permitRows?.length) setPermits(permitRows.map(r=>r.data));
 
         // Same override idea as modules: DB rows are merged ON TOP of seed RAs with the same id.
-        // Risk assessments (custom/edited ones override INIT_RAS)
+        // Risk assessments (all from the database)
         const raRows = rows(raRes);
         if (raRows && raRows.length) {
           setRas(prev => {
@@ -848,7 +833,7 @@ export default function App() {
         const mcRows = rows(mcRes);
         if (mcRows && mcRows.length) {
           const map = {};
-          mcRows.forEach(r => { const mcuid=String(r.user_id); map[mcuid] = map[mcuid] || {}; map[mcuid][r.machine_id] = r.data; });
+          mcRows.forEach(r => { const mcuid=String(r.user_id); map[mcuid] = map[mcuid] || {}; map[mcuid][r.machine_id] = { ...(r.data || {}), id: (r.data && r.data.id) || r.machine_id }; });
           setMachineComps(map);
         }
 
@@ -902,14 +887,14 @@ export default function App() {
         const ffrRows = rows(ffrRes);
         // Only override each sub-array if the DB returned rows for it.
         // If none of the tables have any rows yet (fresh install), keep seed data.
-        const anyFireData = !USE_SEED || [fwRows,fdRows,fatRows,fexRows,felRows,ffrRows].some(r=>r&&r.length>0);
+        
         setFireSafety({
-          wardens:      fwRows  && fwRows.length  ? fwRows.map(r=>r.data)  : (anyFireData ? [] : INIT_FIRE_WARDENS),
-          drills:       fdRows  && fdRows.length  ? fdRows.map(r=>r.data)  : (anyFireData ? [] : INIT_FIRE_DRILLS),
-          alarmTests:   fatRows && fatRows.length ? fatRows.map(r=>r.data) : (anyFireData ? [] : INIT_ALARM_TESTS),
-          extinguishers:fexRows && fexRows.length ? fexRows.map(r=>r.data) : (anyFireData ? [] : INIT_EXTINGUISHERS),
-          emergLighting:felRows && felRows.length ? felRows.map(r=>r.data) : (anyFireData ? [] : INIT_EMERG_LIGHTING),
-          fraReviews:   ffrRows && ffrRows.length ? ffrRows.map(r=>r.data) : (anyFireData ? [] : INIT_FRA_REVIEWS),
+          wardens:      fwRows  && fwRows.length  ? fwRows.map(r=>r.data)  : [],
+          drills:       fdRows  && fdRows.length  ? fdRows.map(r=>r.data)  : [],
+          alarmTests:   fatRows && fatRows.length ? fatRows.map(r=>r.data) : [],
+          extinguishers:fexRows && fexRows.length ? fexRows.map(r=>r.data) : [],
+          emergLighting:felRows && felRows.length ? felRows.map(r=>r.data) : [],
+          fraReviews:   ffrRows && ffrRows.length ? ffrRows.map(r=>r.data) : [],
         });
 
         // The first aid register is a single JSON document stored in one row with id "singleton".
@@ -1045,7 +1030,7 @@ export default function App() {
       // Training completions, assignments and document confirmations made elsewhere
       // (a member of staff finishing a module, a manager assigning one) appear here
       // without a reload. With the old sign-in an empty table means "use the demo data".
-      const okRows = r => !r.error && Array.isArray(r.data) && (r.data.length > 0 || !USE_SEED);
+      const okRows = r => !r.error && Array.isArray(r.data);
       const recent = recentWriteRef.current;
       if (okRows(cRes)) setComps(cur => mergeNested(cur, mapCompRows(cRes.data), recent, "c"));
       if (okRows(ackRes)) setDocAcknowledgements(cur => mergeNested(cur, mapAckRows(ackRes.data), recent, "k"));
@@ -1167,8 +1152,19 @@ export default function App() {
     dbSaveSiteInspections(siteInspections);
   }, [siteInspections]); // eslint-disable-line
 
+  // One fire safety save at a time: a change made while a save is running (e.g. Undo
+  // straight after a remove) waits and is saved next, so the prune of the earlier save
+  // can't delete a row the later change put back.
+  const fireSaveRef = useRef({ running: false, next: null });
   useEffect(() => { if (!_ready.current || !writesAll()) return;
-    dbSaveFireSafety(fireSafety);
+    const q = fireSaveRef.current;
+    q.next = fireSafety;
+    if (q.running) return;
+    (async () => {
+      q.running = true;
+      try { while (q.next) { const fs = q.next; q.next = null; await dbSaveFireSafety(fs); } }
+      finally { q.running = false; }
+    })();
   }, [fireSafety]); // eslint-disable-line
 
   useEffect(() => { if (!_ready.current || !writesAll()) return;
@@ -1487,7 +1483,7 @@ export default function App() {
       ...inv,
       actions: (inv.actions || []).map(a =>
         a.id === actionId
-          ? { ...a, status: "complete", completedDate: new Date().toISOString().slice(0,10), completedBy: completedBy || "" }
+          ? { ...a, status: "complete", completedDate: todayISO(), completedBy: completedBy || "" }
           : a
       ),
     };
@@ -1819,7 +1815,7 @@ export default function App() {
       const next = {
         ...inc,
         riddorReported: true,
-        riddorReportedDate: new Date().toISOString().slice(0, 10),
+        riddorReportedDate: todayISO(),
         riddorReportedBy: user?.name || "",
       };
       setIncidents(list => list.map(i => i.id === next.id ? next : i));
@@ -1834,7 +1830,7 @@ export default function App() {
       const next = {
         ...inv,
         actions: (inv.actions || []).map(x => x.id === a.id
-          ? { ...x, chasedOn: new Date().toISOString().slice(0, 10), chasedBy: user?.name || "" }
+          ? { ...x, chasedOn: todayISO(), chasedBy: user?.name || "" }
           : x),
       };
       setInvestigations(p => ({ ...p, [a.investigationId]: next }));
@@ -1927,12 +1923,13 @@ export default function App() {
     await dbWrite(sb.from("quiz_failures").insert({ data: record }), "quiz failure record");
   }
 
+  // both resolve to true when the database accepted the change
   async function dbSaveExtCert(userId, certType, data) {
-    await dbWrite(sb.from("ext_certs").upsert({ user_id: String(userId), cert_type: certType, data }, { onConflict: "user_id,cert_type" }), "external certificate", { alertOnError: true });
+    return dbWrite(sb.from("ext_certs").upsert({ user_id: String(userId), cert_type: certType, data }, { onConflict: "user_id,cert_type" }), "external certificate", { alertOnError: true });
   }
 
   async function dbDeleteExtCert(userId, certType) {
-    await dbWrite(sb.from("ext_certs").delete().match({ user_id: userId, cert_type: certType }), "external certificate delete");
+    return dbWrite(sb.from("ext_certs").delete().match({ user_id: userId, cert_type: certType }), "external certificate delete");
   }
 
   async function dbSaveCustomModule(mod) {
@@ -1951,7 +1948,7 @@ export default function App() {
     cloned.title = `${m.title} (Copy)`;
     cloned._custom = true;
     delete cloned._override; // a duplicate is always a brand new, independent module — never an override
-    cloned.version = 1; delete cloned.versionNote; delete cloned.versionChange; cloned.versionDate = new Date().toISOString().slice(0,10);
+    cloned.version = 1; delete cloned.versionNote; delete cloned.versionChange; cloned.versionDate = todayISO();
     setCustomModules(prev=>[...prev, cloned]);
     dbSaveCustomModule(cloned);
     // Jump straight into the editor so the admin can rename/adjust the new version
@@ -1996,7 +1993,7 @@ export default function App() {
   }
   // Manager signs off one DSE issue as resolved (stored on the admin response record).
   function managerSignOffDse(member, ri, ii, issue, note) {
-    const uid = String(member.id), key = `${ri}_${ii}`, today = new Date().toISOString().slice(0,10);
+    const uid = String(member.id), key = `${ri}_${ii}`, today = todayISO();
     const cur = (adminResponses[uid] || adminResponses[member.id] || {})[key] || { comment: "", resolved: false };
     const rec = { ...cur, resolved: true, signedOffBy: user.name, signedOffAt: today,
       comment: note ? (cur.comment ? `${cur.comment}\n${note}` : note) : cur.comment };
@@ -2009,7 +2006,7 @@ export default function App() {
   // Manager signs off a corrective action (marks it complete first if it isn't already).
   function managerSignOffAction(incidentId, action, member, note) {
     const inv = investigations[incidentId]; if (!inv) return;
-    const today = new Date().toISOString().slice(0,10);
+    const today = todayISO();
     const done = action.status === "complete" || action.status === "closed";
     const next = { ...inv, actions: (inv.actions || []).map(a => a.id !== action.id ? a : {
       ...a,
@@ -2031,7 +2028,7 @@ export default function App() {
   //  • change "minor" keeps completions (each records the version it was for)
   function saveModuleVersion(change, note) {
     const { m, prev } = pendingModuleSave;
-    const prevVer = prev.version || 1, newVer = prevVer + 1, today = new Date().toISOString().slice(0,10);
+    const prevVer = prev.version || 1, newVer = prevVer + 1, today = todayISO();
     const snap = { id: `${prev.id}_v${prevVer}`, module_id: String(prev.id), version: prevVer, data: prev,
       saved_at: new Date().toISOString(), saved_by: user ? user.name : "", change, note: note || null };
     setModuleVersions(p => [...p.filter(x => x.id !== snap.id), snap]);
@@ -2079,11 +2076,11 @@ export default function App() {
   }
 
   async function dbSaveMachineComp(userId, machineId, data) {
-    await dbWrite(sb.from("machine_completions").upsert({ user_id: String(userId), machine_id: String(machineId), data }, { onConflict: "user_id,machine_id" }), "machine competence record", { alertOnError: true });
+    return dbWrite(sb.from("machine_completions").upsert({ user_id: String(userId), machine_id: String(machineId), data }, { onConflict: "user_id,machine_id" }), "machine competence record", { alertOnError: true });
   }
 
   async function dbDeleteMachineComp(userId, machineId) {
-    await dbWrite(sb.from("machine_completions").delete().match({ user_id: String(userId), machine_id: String(machineId) }), "machine competence delete", { alertOnError: true });
+    return dbWrite(sb.from("machine_completions").delete().match({ user_id: String(userId), machine_id: String(machineId) }), "machine competence delete", { alertOnError: true });
   }
 
   // UPSERT-AND-PRUNE (the preferred pattern): upsert everything in state, then read the ids
@@ -2292,7 +2289,7 @@ export default function App() {
     const emailKey = String(u.email||"").toLowerCase().trim();
     // Success — clear attempts
     setLoginAttempts(p => { const n={...p}; delete n[emailKey]; delete n[email.toLowerCase().trim()]; return n; });
-    const ts = new Date().toISOString().slice(0,16).replace("T"," ");
+    const ts = localDateTime().replace("T"," ");   // UK time, as shown under Last Active
     setLastLoginMap(p=>({...p, [u.id]: ts}));
     // First ever sign-in? (no login recorded for them yet) → welcome video. Checked BEFORE
     // this login is recorded; if the check fails, no video (never shown to someone by mistake).
@@ -2359,10 +2356,16 @@ export default function App() {
     if (isAdmin) {
       const ADMIN_PAGES = [["dashboard", "Admin dashboard", ""], ["users", "Staff", "staff accounts people users"], ["assign", "Assign Training", "training"], ["modules", "Training Library", "modules training"],
         ["create", "Create Module", "new module training"], ["reports", "Reports", "training matrix report excel"], ["documents", "H&S Documents", "documents bundles policies"], ["coshh", "COSHH Register", "chemicals"],
-        ["audit", "Audit Trail", "log history"], ["incidents", "Incidents", "accidents near miss riddor"], ["inspections", "Inspections", "site inspection"], ["ra", "Risk Assessments", "risk"],
+        ["audit", "Audit Trail", "log history"], ["settings", "Site Settings", "locations first aid zones shifts report locations"], ["incidents", "Incidents", "accidents near miss riddor"], ["inspections", "Inspections", "site inspection"], ["ra", "Risk Assessments", "risk"],
         ["firesafety", "Fire Safety", "wardens extinguishers drills"], ["firstaid", "First Aid", "first aiders"], ["contractors", "Contractors", ""], ["permits", "Permits", "permit to work"],
         ["machinery", "Machinery Competence", "forklift"], ["equipment", "Equipment Register", "equipment"], ["account", "My Account", "password"]];
       ADMIN_PAGES.forEach(([t, l, w]) => items.push({ id: `p:a:${t}`, group: "Pages", icon: "🧭", label: l, sub: "Admin page", words: w, run: () => toAdmin(t) }));
+      // pages inside other pages
+      items.push({ id: "p:a:investigations", group: "Pages", icon: "🔍", label: "Investigations", sub: "Incidents → Investigations", words: "investigation root cause corrective actions", run: () => toAdmin("investigation", () => setInvestigationView(null)) });
+      items.push({ id: "p:a:accidentbook", group: "Pages", icon: "📖", label: "Accident Book", sub: "Incidents → Accident Book", words: "accident book bi510 print", run: () => toAdmin("incidents", () => setPagePreset({ tab: "incidents", accidentBook: true })) });
+      [["matrix", "Training Matrix", "matrix excel"], ["monthly", "Monthly management report", "monthly report board"], ["dse", "DSE Reports", "dse display screen workstation assessments"],
+       ["expiry", "Expiring training", "expiry expired renewals"], ["failures", "Quiz Failures", "quiz failed"], ["documents", "Document Read Status", "read confirmations acknowledgements"]]
+        .forEach(([v, l, w]) => items.push({ id: `p:a:rep:${v}`, group: "Pages", icon: "📊", label: l, sub: "Reports", words: w, run: () => toAdmin("reports", () => setAdminReportView(v)) }));
       items.push({ id: "p:a:welcome", group: "Pages", icon: "🎬", label: "Welcome video", sub: "Staff → the video new staff see when they first sign in", words: "first sign in login new starter induction tour", run: () => toAdmin("users", () => setShowWelcomeSettings(true)) });
       // people
       allUsers.forEach(u => {
@@ -2472,7 +2475,7 @@ export default function App() {
     if (pct>=mark) {
       clearProgress(user.id, mod);   // passed: no place to carry on from (lib/moduleProgress.js)
       setShowCelebration(true);
-      const rec = {score:pct, date:new Date().toISOString().slice(0,10), answers:{...qans}, certId, moduleVersion: mod.version||1};
+      const rec = {score:pct, date:todayISO(), answers:{...qans}, certId, moduleVersion: mod.version||1};
       setComps(p=>({...p,[user.id]:{...p[user.id],[mod.id]:rec}}));
       dbSaveCompletion(user.id, mod.id, rec);
     }
@@ -2485,7 +2488,7 @@ export default function App() {
         moduleId: mod.id,
         moduleTitle: mod.title,
         score: pct,
-        date: new Date().toISOString().slice(0,10),
+        date: todayISO(),
         acknowledged: false,
         passMark: mark,
       };
@@ -2745,7 +2748,7 @@ export default function App() {
                 <div style={{display:"flex",gap:10,justifyContent:"center"}}>
                   <button onClick={()=>{
                     setShowCelebration(false);
-                    setCert({module:mod,score:qPct,date:(comps[user.id]||{})[mod.id]?.date||new Date().toISOString().slice(0,10),certId:(comps[user.id]||{})[mod.id]?.certId||null});
+                    setCert({module:mod,score:qPct,date:(comps[user.id]||{})[mod.id]?.date||todayISO(),certId:(comps[user.id]||{})[mod.id]?.certId||null});
                   }} style={{background:"linear-gradient(135deg,#f59e0b,#d97706)",color:"#0d1f5c",border:"none",borderRadius:10,padding:"10px 22px",fontWeight:800,cursor:"pointer",fontFamily:font,fontSize:13}}>
                     🎓 View Certificate
                   </button>
@@ -2914,7 +2917,7 @@ export default function App() {
                 {!passed && <p style={{color:T.amber,marginTop:6}}>You need {passMarkOf(mod)}% to pass. Review the slides and try again.</p>}
                 <div style={{display:"flex",gap:12,justifyContent:"center",marginTop:28,flexWrap:"wrap"}}>
                   {passed && (
-                    <button onClick={()=>setCert({module:mod,score:qPct,date:(comps[user.id]||{})[mod.id]?.date||new Date().toISOString().slice(0,10),certId:(comps[user.id]||{})[mod.id]?.certId||null})}
+                    <button onClick={()=>setCert({module:mod,score:qPct,date:(comps[user.id]||{})[mod.id]?.date||todayISO(),certId:(comps[user.id]||{})[mod.id]?.certId||null})}
                       style={{background:`linear-gradient(135deg,${T.gold},#d97706)`,color:T.navyDk,border:"none",borderRadius:12,padding:"12px 28px",fontWeight:800,cursor:"pointer",fontFamily:font}}>
                       🎓 View Certificate
                     </button>
@@ -3070,6 +3073,13 @@ export default function App() {
     const healthLabel = healthPct===100?"Fully Compliant":healthPct>=70?"Mostly Compliant":"Needs Attention";
     const totalActionNeeded = actionNeeded.length + (dseNeedsAction?1:0);
 
+    // Staff menu bar widths: the tabs must never be hidden behind the bell. Wider than
+    // 1700px everything is shown in full; narrower, the search shrinks to 🔍; below 1400
+    // the first name goes, the labels drop "My" and the tabs tighten up. At 1024px and
+    // below the ☰ menu takes over (CSS below).
+    const sTight = winW < 1700, sTiny = winW < 1400;
+    const STAFF_TAB_LABEL = {dashboard:"Dashboard",training:"My Training",history:"History",documents:"Documents",incidents:"Report Incident",dse:"My DSE",machinery:"My Machinery",actions:"My Actions",team:"My Team"};
+    const STAFF_TAB_SHORT = {dashboard:"Dashboard",training:"Training",history:"History",documents:"Documents",incidents:"Report",dse:"DSE",machinery:"Machinery",actions:"Actions",team:"Team"};
     return (
       <EmojiCtx.Provider value={emojiMode}>
       <div style={{minHeight:"100vh",background:T.bg,fontFamily:font,color:T.white}}>
@@ -3078,13 +3088,13 @@ export default function App() {
         {/* ▲/▼ top-of-page / bottom-of-page buttons on long screens (shared/ScrollNav.jsx) */}
         <ScrollNav bottom={isMobile && stab!=="dashboard" ? 92 : 24} Z={T} font={font}/>
         {/* Nav */}
-        <div style={{background:`linear-gradient(90deg,${T.navyDk},${T.navyMd})`,borderBottom:`1px solid ${T.border}`,padding:"0 24px",display:"flex",alignItems:"center",position:"relative"}}>
-          <div style={{marginRight:20,padding:"10px 0",flexShrink:0}}><ZeusLogo darkMode={darkMode}/></div>
-          <div style={{display:"flex",alignItems:"center",gap:2,flex:1,overflowX:"auto"}} className="staff-nav-tabs">
+        <div style={{background:`linear-gradient(90deg,${T.navyDk},${T.navyMd})`,borderBottom:`1px solid ${T.border}`,padding:sTiny?"0 14px":"0 24px",display:"flex",alignItems:"center",position:"relative"}}>
+          <div style={{marginRight:sTiny?10:20,padding:"10px 0",flexShrink:0}}><ZeusLogo darkMode={darkMode}/></div>
+          <div style={{display:"flex",alignItems:"center",gap:sTiny?0:2,flex:1,minWidth:0,overflowX:"auto"}} className="staff-nav-tabs" data-testid="staff-tabs">
             {["dashboard","training","history","documents","incidents","dse",...(isWarehouseWorker(user)?["machinery"]:[]),"actions",...(user.role==="manager"?["team"]:[])].map(t=>(
-              <button key={t} onClick={()=>setStab(t)}
-                style={{background:"none",border:"none",borderBottom:stab===t?`2px solid ${T.accent}`:"2px solid transparent",color:stab===t?T.white:T.muted,fontWeight:stab===t?700:400,fontSize:13,cursor:"pointer",padding:"14px 14px 12px",fontFamily:font,whiteSpace:"nowrap",letterSpacing:.3,transition:"color .15s"}}>
-                {{dashboard:"Dashboard",training:"My Training",history:"History",documents:"Documents",incidents:"Report Incident",dse:"My DSE",machinery:"My Machinery",actions:"My Actions",team:"My Team"}[t]}
+              <button key={t} onClick={()=>setStab(t)} title={STAFF_TAB_LABEL[t]}
+                style={{background:"none",border:"none",borderBottom:stab===t?`2px solid ${T.accent}`:"2px solid transparent",color:stab===t?T.white:T.muted,fontWeight:stab===t?700:400,fontSize:13,cursor:"pointer",padding:sTiny?"14px 8px 12px":sTight?"14px 10px 12px":"14px 14px 12px",fontFamily:font,whiteSpace:"nowrap",letterSpacing:.3,transition:"color .15s"}}>
+                {(sTiny?STAFF_TAB_SHORT:STAFF_TAB_LABEL)[t]}
               </button>
             ))}
           </div>
@@ -3092,7 +3102,7 @@ export default function App() {
             onClick={()=>setMobileMenuOpen(m=>!m)}>
             {mobileMenuOpen?"✕":"☰"}
           </button>
-          <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:isMobile?6:10}}>
+          <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:isMobile?6:sTiny?6:10,flexShrink:0,paddingLeft:8}}>
             {/* Staff notification list — rebuilt every render from current state. `nav.tab` is a staff tab key. */}
             {(()=>{
               const notifications = [];
@@ -3104,6 +3114,12 @@ export default function App() {
               const pending = allModules.filter(m=>myIds.includes(m.id)&&!myC[m.id]);
               pending.forEach(m=>{ const d=dueInfo(dueDates,user.id,m.id,false);
                 notifications.push({type:"module",urgent:m.level==="Mandatory"||!!(d&&(d.overdue||d.soon)),title:`Complete: ${m.title}`,detail:d?`${dueText(d)}${m.level==="Mandatory"?" · Mandatory":""}`:m.level==="Mandatory"?"Mandatory module — action required":m.duration,nav:{tab:"training"}}); });
+              // My machinery competences needing renewal (warehouse roles)
+              if (isWarehouseWorker(user)) compsFor(machineComps, user.id).forEach(c=>{
+                const st = machineState(c, allMachineTypes); const t = allMachineTypes.find(x=>x.id===c.machineId);
+                if (!t || !st || (st.key!=="expired" && st.key!=="expiring")) return;
+                notifications.push({type:"module",urgent:st.key==="expired",title:`${st.key==="expired"?"Renewal required":"Renew soon"}: ${t.label}`,detail:st.ex?`${st.key==="expired"?"Expired":"Renew by"} ${st.ex.expiryDate.split("-").reverse().join("/")} (${st.ex.why}). Speak to your manager to book a reassessment.`:"Speak to your manager to book a reassessment.",nav:{tab:"machinery"}});
+              });
               // Expired or expiring modules
               allModules.filter(m=>myIds.includes(m.id)&&myC[m.id]&&m.renewalMonths).forEach(m=>{
                 const ex = getExpiryStatus(myC[m.id].date, m.renewalMonths);
@@ -3127,7 +3143,7 @@ export default function App() {
               const myActions = Object.values(investigations).flatMap(inv=>
                 (inv.actions||[]).filter(a=>a.owner===user.name&&a.status!=="complete"&&a.status!=="closed")
               );
-              const overdueActions = myActions.filter(a=>a.dueDate&&a.dueDate<new Date().toISOString().slice(0,10));
+              const overdueActions = myActions.filter(a=>a.dueDate&&a.dueDate<todayISO());
               // Line managers: team items waiting for their sign-off
               if (user.role==="manager") {
                 const team = teamOf(user, allUsers);
@@ -3142,7 +3158,7 @@ export default function App() {
               else if(myActions.length) notifications.push({type:"report",urgent:false,title:`${myActions.length} open corrective action${myActions.length!==1?"s":""}`,detail:`You have been assigned action${myActions.length!==1?"s":""} from an investigation`,nav:{tab:"actions"}});
               return <NotificationBell notifications={notifications} onNavigate={n=>{ setStab(n.tab); if(n.editId) setQuickEditId(n.editId); }} Z={T} font={font}/>;
             })()}
-            <QuickSearch getItems={quickItems} Z={T} font={font} compact={isMobile}/>
+            <QuickSearch getItems={quickItems} Z={T} font={font} compact={isMobile||sTight}/>
             <div style={{width:1,height:20,background:T.headerBgMd,margin:"0 4px"}}/>
             <button title={`Theme: ${theme} — click to cycle`} onClick={()=>{
               const order=["dark","light","slate","forest","graphite","arctic","sand","rose"];
@@ -3157,19 +3173,20 @@ export default function App() {
               <button onClick={()=>setView("admin")}
                 title="Back to the admin panel"
                 style={{background:T.overlay,border:`1px solid ${T.borderMd}`,borderRadius:8,padding:"5px 12px",color:T.muted,cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font,display:"flex",alignItems:"center",gap:5,transition:"all .15s"}}>
-                {E("🛠 ","")}Back to Admin
+                {E("🛠 ","")}{sTight?"Admin":"Back to Admin"}
               </button>
               <div style={{width:1,height:20,background:T.headerBgMd,margin:"0 4px"}}/>
             </>)}
-            <div onClick={()=>setStab("account")}
+            <div onClick={()=>setStab("account")} role="button" tabIndex={0} aria-label={`My Account (${user.name})`}
+              onKeyDown={e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); setStab("account"); } }}
               title="My Account"
               style={{display:"flex",alignItems:"center",gap:7,cursor:"pointer",padding:"4px 8px 4px 4px",borderRadius:10,transition:"background .15s",background:stab==="account"?T.overlay:"transparent",border:stab==="account"?`1px solid ${T.borderMd}`:"1px solid transparent"}}
               onMouseEnter={e=>{ if(stab!=="account") e.currentTarget.style.background=T.overlay; }}
               onMouseLeave={e=>{ e.currentTarget.style.background=stab==="account"?T.overlay:"transparent"; }}>
               <Avatar name={user.name} size={32}/>
-              <span style={{fontSize:13,color:stab==="account"?T.white:T.muted,fontWeight:600}}>{user.name.split(" ")[0]}</span>
+              {!sTiny && <span style={{fontSize:13,color:stab==="account"?T.white:T.muted,fontWeight:600}}>{user.name.split(" ")[0]}</span>}
             </div>
-            <button onClick={logout} style={{background:"none",border:"none",color:T.muted,cursor:"pointer",fontSize:11,fontFamily:font}}>Sign Out</button>
+            <button onClick={logout} style={{background:"none",border:"none",color:T.muted,cursor:"pointer",fontSize:11,fontFamily:font,whiteSpace:"nowrap"}}>Sign Out</button>
           </div>
         </div>
 
@@ -3655,7 +3672,7 @@ export default function App() {
                                           ✓ Read & Confirmed
                                         </div>
                                       : <button
-                                          onClick={()=>{const dt=new Date().toISOString().slice(0,10);setDocAcknowledgements(p=>({...p,[user.id]:{...(p[user.id]||{}),[d.id]:{date:dt,version:d.version||1}}}));dbAcknowledgeDoc(user.id,d.id,dt);}}
+                                          onClick={()=>{const dt=todayISO();setDocAcknowledgements(p=>({...p,[user.id]:{...(p[user.id]||{}),[d.id]:{date:dt,version:d.version||1}}}));dbAcknowledgeDoc(user.id,d.id,dt);}}
                                           style={{background:`linear-gradient(135deg,${T.green},#059669)`,color:"#fff",border:"none",borderRadius:8,padding:"7px 16px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font,whiteSpace:"nowrap",boxShadow:"0 2px 10px rgba(16,185,129,0.4)"}}>
                                           ✓ Confirm I Have Read This
                                         </button>
@@ -4114,8 +4131,8 @@ export default function App() {
               {(()=>{ const CON_TABS=["contractors","permits"]; const conActive=CON_TABS.includes(atab); return (
                 <NavMenu label="Contractors" active={conActive} items={[["contractors","Contractors"],["permits","Permits"]]} current={atab} onPick={setAtab} btnStyle={{...navBtn(conActive,T.gold),maxWidth:"none",whiteSpace:"nowrap"}} Z={T} font={font}/>
               ); })()}
-              {(()=>{ const DOC_TABS=["documents","coshh","audit"]; const docActive=DOC_TABS.includes(atab); return (
-                <NavMenu label="Documents" active={docActive} items={[["documents","H&S Documents"],["coshh","COSHH Register"],["audit","Audit Trail"]]} current={atab} onPick={setAtab} btnStyle={{...navBtn(docActive,T.gold),maxWidth:"none",whiteSpace:"nowrap"}} Z={T} font={font}/>
+              {(()=>{ const DOC_TABS=["documents","coshh","audit","settings"]; const docActive=DOC_TABS.includes(atab); return (
+                <NavMenu label="Documents" active={docActive} items={[["documents","H&S Documents"],["coshh","COSHH Register"],["audit","Audit Trail"],["settings","Site Settings"]]} current={atab} onPick={setAtab} btnStyle={{...navBtn(docActive,T.gold),maxWidth:"none",whiteSpace:"nowrap"}} Z={T} font={font}/>
               ); })()}
               <NavMenu label="Machinery & Equipment" active={meActive} items={[["machinery","Machinery Competence"],["equipment","Equipment Register"]]} current={atab} onPick={setAtab} btnStyle={{...navBtn(meActive,T.gold),maxWidth:navTight?124:"none"}} Z={T} font={font}/>
             </>);
@@ -4141,6 +4158,13 @@ export default function App() {
               const pastDuePeople = staff.filter(u=>(u.status||"active")!=="leaver" && pastDueBy[String(u.id)]);
               if(pastDuePeople.length) { const n = pastDuePeople.reduce((t,u)=>t+pastDueBy[String(u.id)],0);
                 notifications.push({type:"module",urgent:true,title:`${n} training assignment${n!==1?"s":""} past the due date`,detail:`${pastDuePeople.length} ${pastDuePeople.length!==1?"people":"person"}: ${pastDuePeople.map(u=>u.name.split(" ")[0]).slice(0,4).join(", ")}${pastDuePeople.length>4?` +${pastDuePeople.length-4} more`:""}`,nav:{tab:"users",staffProgress:"pastdue"}}); }
+              // Machinery competences expired / expiring (data/seedMachinery.js machineState)
+              { let ex = 0, soon = 0; const who = new Set();
+                staff.filter(u=>(u.status||"active")!=="leaver"&&u.role!=="admin"&&isWarehouseWorker(u)).forEach(u=>compsFor(machineComps,u.id).forEach(c=>{
+                  if (!allMachineTypes.some(t=>t.id===c.machineId)) return;
+                  const k = machineState(c, allMachineTypes).key; if (k==="expired") { ex++; who.add(u.name.split(" ")[0]); } else if (k==="expiring") { soon++; who.add(u.name.split(" ")[0]); } }));
+                if (ex || soon) notifications.push({type:"report",urgent:ex>0,title:ex?`${ex} machinery competence${ex!==1?"s":""} need${ex===1?"s":""} renewing${soon?` (+${soon} due within 60 days)`:""}`:`${soon} machinery competence${soon!==1?"s":""} due for renewal within 60 days`,
+                  detail:[...who].slice(0,4).join(", ")+(who.size>4?` +${who.size-4} more`:""),nav:{tab:"machinery",preset:{tab:"machinery",show:"attention"}}}); }
               // Unread required documents
               const unreadDoc = staff.filter(u=>docs.some(d=>(docAssignments[String(d.id)]||[]).includes(String(u.id))&&!(docAcknowledgements[u.id]||{})[d.id]));
               if(unreadDoc.length) notifications.push({type:"document",urgent:false,title:`${unreadDoc.length} staff with unread required documents`,detail:"Check Documents tab for details",nav:{tab:"reports"}});
@@ -4180,43 +4204,44 @@ export default function App() {
               const pendingQuick = incidents.filter(isIncompleteQuickReport);
               if(pendingQuick.length){ const lateQuick = pendingQuick.filter(i=>isQuickReportOverdue(i)).length;
                 notifications.push({type:"report",urgent:lateQuick>0,title:`${pendingQuick.length} quick hazard report${pendingQuick.length!==1?"s":""} awaiting full details`,detail:lateQuick?`${lateQuick} overdue — reporters are reminded until complete`:"Reporters are reminded until they complete the full form",nav:{tab:"incidents"}}); }
-              if(riddorIncidents.length) notifications.push({type:"report",urgent:true,title:`${riddorIncidents.length} open RIDDOR reportable incident${riddorIncidents.length!==1?"s":""}`,detail:"Check Incidents tab — HSE reporting may be required",nav:{tab:"incidents"}});
-              else if(openIncidents.length) notifications.push({type:"report",urgent:false,title:`${openIncidents.length} open incident${openIncidents.length!==1?"s":""}`,detail:"Check Incidents tab to review and close",nav:{tab:"incidents"}});
+              // RIDDOR reports still to be made, with their deadlines (domains/incidents/riddor.js)
+              const riddorToReport = riddorIncidents.concat(incidents.filter(i=>i.riddor&&i.closed)).map(i=>({i,d:riddorDue(i)})).filter(x=>x.d)
+                .sort((a,b)=>(a.d.dueDate||"0").localeCompare(b.d.dueDate||"0"));
+              if(riddorToReport.length){ const late=riddorToReport.filter(x=>x.d.state==="overdue").length, now=riddorToReport.filter(x=>riddorUrgent(x.d)).length;
+                notifications.push({type:"report",urgent:now>0,title:`${riddorToReport.length} RIDDOR report${riddorToReport.length!==1?"s":""} to make to HSE${late?` (${late} overdue)`:""}`,
+                  detail:riddorToReport.slice(0,3).map(x=>`${x.i.location||"Incident"}: ${riddorDueText(x.d)}`).join(" · "),nav:{tab:"incidents",preset:{tab:"incidents",riddor:true}}}); }
+              if(riddorIncidents.length && !riddorToReport.length) notifications.push({type:"report",urgent:false,title:`${riddorIncidents.length} open RIDDOR incident${riddorIncidents.length!==1?"s":""} (reported to HSE)`,detail:"Close them once the investigation is done",nav:{tab:"incidents"}});
+              else if(!riddorIncidents.length && openIncidents.length) notifications.push({type:"report",urgent:false,title:`${openIncidents.length} open incident${openIncidents.length!==1?"s":""}`,detail:"Check Incidents tab to review and close",nav:{tab:"incidents"}});
               // Quiz failures in last 7 days
-              const recentFailures = quizFailures.filter(f=>!f.acknowledged && f.date >= new Date(Date.now()-7*86400000).toISOString().slice(0,10));
+              const recentFailures = quizFailures.filter(f=>!f.acknowledged && f.date >= localISO(new Date(Date.now()-7*86400000)));
               if(recentFailures.length) notifications.push({type:"module",urgent:false,title:`${recentFailures.length} quiz failure${recentFailures.length!==1?"s":""} in last 7 days`,detail:"Check Training → Reports to review",nav:{tab:"reports"}});
               // RA review dates
-              const today2 = new Date().toISOString().slice(0,10);
+              const today2 = todayISO();
               const overdueRAs = ras.filter(ra2=>ra2.reviewDate&&ra2.reviewDate<today2);
               const soonRAs = ras.filter(ra2=>ra2.reviewDate&&ra2.reviewDate>=today2&&Math.ceil((new Date(ra2.reviewDate)-new Date())/86400000)<=30);
               if(overdueRAs.length) notifications.push({type:"report",urgent:true,title:`${overdueRAs.length} risk assessment${overdueRAs.length!==1?"s":""} overdue for review`,detail:overdueRAs.map(r=>r.title).join(", "),nav:{tab:"ra"}});
               else if(soonRAs.length) notifications.push({type:"report",urgent:false,title:`${soonRAs.length} risk assessment${soonRAs.length!==1?"s":""} due for review soon`,detail:soonRAs.map(r=>r.title).join(", "),nav:{tab:"ra"}});
 
               // Contractor alerts
-              const today3=new Date().toISOString().slice(0,10);
+              const today3=todayISO();
               const expiredConCerts=(contractors||[]).filter(c=>Object.values(contractorCerts[c.id]||{}).some(cert=>cert.expiryDate&&cert.expiryDate<today3));
               if(expiredConCerts.length) notifications.push({type:"document",urgent:true,title:`${expiredConCerts.length} contractor${expiredConCerts.length!==1?"s":""} with expired certificates`,detail:"Check Contractors tab",nav:{tab:"contractors"}});
 
-              // Fire safety alerts
-              const fs2 = fireSafety||{};
-              const expiredFW = (fs2.wardens||[]).filter(w=>{ const exp=new Date(w.qualDate); exp.setMonth(exp.getMonth()+(w.renewalMonths||36)); return exp.toISOString().slice(0,10)<today2; });
-              const expiringFW = (fs2.wardens||[]).filter(w=>{ const exp=new Date(w.qualDate); exp.setMonth(exp.getMonth()+(w.renewalMonths||36)); const d=Math.ceil((exp-new Date())/86400000); return d>=0&&d<=EXPIRY_WARNING_DAYS; });
-              if(expiredFW.length) notifications.push({type:"report",urgent:true,title:`${expiredFW.length} fire warden cert${expiredFW.length!==1?"s":""} expired`,detail:"Check Fire Safety → Wardens",nav:{tab:"firesafety"}});
-              else if(expiringFW.length) notifications.push({type:"report",urgent:false,title:`${expiringFW.length} fire warden cert${expiringFW.length!==1?"s":""} expiring`,detail:"Check Fire Safety → Wardens",nav:{tab:"firesafety"}});
-              const overdueExtsN = (fs2.extinguishers||[]).filter(e=>e.nextServiceDue&&e.nextServiceDue<today2);
-              if(overdueExtsN.length) notifications.push({type:"report",urgent:true,title:`${overdueExtsN.length} fire extinguisher${overdueExtsN.length!==1?"s":""} overdue for service`,detail:"Check Fire Safety → Extinguishers",nav:{tab:"firesafety"}});
-              const lastDrillN = (fs2.drills||[]).length?(fs2.drills||[]).slice().sort((a,b)=>b.date.localeCompare(a.date))[0]:null;
-              const daysDrillN = lastDrillN?Math.floor((new Date()-new Date(lastDrillN.date))/86400000):null;
-              if(daysDrillN!==null&&daysDrillN>365) notifications.push({type:"report",urgent:true,title:"Fire drill overdue — last drill was "+daysDrillN+" days ago",detail:"Schedule a full evacuation drill",nav:{tab:"firesafety"}});
-              const lastFraN = (fs2.fraReviews||[]).length?(fs2.fraReviews||[]).slice().sort((a,b)=>b.date.localeCompare(a.date))[0]:null;
-              if(lastFraN?.nextReviewDue&&lastFraN.nextReviewDue<today2) notifications.push({type:"report",urgent:true,title:"Fire Risk Assessment review overdue",detail:`Review was due ${lastFraN.nextReviewDue}`,nav:{tab:"firesafety"}});
+              // Fire safety alerts — same rules as the Fire Safety screen (domains/fireSafety/fireLogic.js)
+              const fsum = fireSummary({ fireSafety: fireSafety||{}, extCerts: extCerts||{}, staff, inspections: siteInspections||[], today: fireToday() });
+              if(fsum.expiredWardens.length) notifications.push({type:"report",urgent:true,title:`${fsum.expiredWardens.length} fire warden cert${fsum.expiredWardens.length!==1?"s":""} expired`,detail:fsum.expiredWardens.map(w=>w.name).join(", "),nav:{tab:"firesafety"}});
+              else if(fsum.expiringWardens.length) notifications.push({type:"report",urgent:false,title:`${fsum.expiringWardens.length} fire warden cert${fsum.expiringWardens.length!==1?"s":""} expiring`,detail:fsum.expiringWardens.map(w=>`${w.name} (${w.expiry})`).join(", "),nav:{tab:"firesafety"}});
+              if(fsum.undatedWardens.length) notifications.push({type:"report",urgent:false,title:`${fsum.undatedWardens.length} fire warden certificate${fsum.undatedWardens.length!==1?"s have":" has"} no expiry date`,detail:fsum.undatedWardens.map(w=>w.name).join(", "),nav:{tab:"firesafety"}});
+              if(fsum.overdueExtinguishers.length) notifications.push({type:"report",urgent:true,title:`${fsum.overdueExtinguishers.length} fire extinguisher${fsum.overdueExtinguishers.length!==1?"s":""} overdue for service`,detail:"Check Fire Safety → Extinguishers",nav:{tab:"firesafety"}});
+              if(fsum.drillOverdue) notifications.push({type:"report",urgent:true,title:"Fire drill overdue — last drill was "+fsum.daysSinceDrill+" days ago",detail:"Schedule a full evacuation drill",nav:{tab:"firesafety"}});
+              if(fsum.fraOverdue) notifications.push({type:"report",urgent:true,title:"Fire Risk Assessment review overdue",detail:`Review was due ${fsum.fraNext}`,nav:{tab:"firesafety"}});
 
               // Document review dates
               const overdueReviews = docs.filter(d=>d.reviewDate&&d.reviewDate<today2);
               const soonReviews = docs.filter(d=>d.reviewDate&&d.reviewDate>=today2&&Math.ceil((new Date(d.reviewDate)-new Date())/86400000)<=30);
               if(overdueReviews.length) notifications.push({type:"document",urgent:true,title:`${overdueReviews.length} document${overdueReviews.length!==1?"s":""} overdue for review`,detail:overdueReviews.map(d=>d.title).join(", "),nav:{tab:"documents"}});
               else if(soonReviews.length) notifications.push({type:"document",urgent:false,title:`${soonReviews.length} document${soonReviews.length!==1?"s":""} due for review soon`,detail:soonReviews.map(d=>d.title).join(", "),nav:{tab:"documents"}});
-              return <NotificationBell notifications={notifications} onNavigate={n=>{ if(n.staffProgress){ setStaffFilterSearch(""); setStaffFilterManager("all"); setStaffStatusFilter("all"); setStaffFilterProgress(n.staffProgress); } setAtab(n.tab);if(n.view)setAdminReportView(n.view);}} Z={T} font={font}/>;
+              return <NotificationBell notifications={notifications} onNavigate={n=>{ if(n.preset) setPagePreset(n.preset); if(n.staffProgress){ setStaffFilterSearch(""); setStaffFilterManager("all"); setStaffStatusFilter("all"); setStaffFilterProgress(n.staffProgress); } setAtab(n.tab);if(n.view)setAdminReportView(n.view);}} Z={T} font={font}/>;
             })()}
             <QuickSearch getItems={quickItems} Z={T} font={font} compact={winW<2200}/>
             {!navCompact && <div style={{width:1,height:20,background:T.headerBgMd,margin:"0 4px"}}/>}
@@ -4278,6 +4303,7 @@ export default function App() {
               ["documents","📄 H&S Documents"],
               ["coshh","🧪 COSHH Register"],
               ["audit", E("🕘 ","")+"Audit Trail"],
+              ["settings", E("⚙ ","")+"Site Settings"],
               ["machinery","🔧 Machinery Competence"],
               ["equipment","📦 Equipment Register"],
               ["account","👤 My Account"],
@@ -4294,7 +4320,7 @@ export default function App() {
 
           {/* ── ADMIN DASHBOARD: KPI cards (drag-reorderable, saved per admin in dashboard_layout) + summary lists ── */}
           {atab==="dashboard" && (() => {
-            const today = new Date().toISOString().slice(0,10);
+            const today = todayISO();
 
             // ── Training stats ────────────────────────────────────────────────
             const staffList = staff;
@@ -4316,7 +4342,7 @@ export default function App() {
             // ── Incident stats ────────────────────────────────────────────────
             const openIncidents2 = incidents.filter(i=>!i.closed);
             const riddorOpen2 = incidents.filter(i=>i.riddor&&!i.closed&&!i.riddorReported);
-            const last30Inc = incidents.filter(i=>i.date>=new Date(Date.now()-30*86400000).toISOString().slice(0,10));
+            const last30Inc = incidents.filter(i=>i.date>=localISO(new Date(Date.now()-30*86400000)));
 
             // ── Document stats ────────────────────────────────────────────────
             const assignedDocs = docs.filter(d=>Object.keys(docAssignments[d.id]||{}).length>0||(docAssignments[d.id]||[]).length>0);
@@ -4412,9 +4438,14 @@ export default function App() {
                         const people = staffList.filter(u=>(u.status||"active")!=="leaver" && by[String(u.id)]); const n = people.reduce((t,u)=>t+by[String(u.id)],0);
                         return card(E("⏰",""),"Training Past Due",people.length,n?`${n} assignment${n!==1?"s":""} late`:"none late",null,people.length>0,()=>showStaff("pastdue")); })() },
                     { id:"expiringExpired", node: card(E("🔄",""),"Expiring/Expired",expiringTraining.length,"training renewals",expiringTraining.length>0,false,()=>{setAtab("reports");setAdminReportView("expiry");}) },
-                    { id:"openIncidents", node: card(E("⚠️",""),"Open Incidents",openIncidents2.length,`${riddorOpen2.length} RIDDOR unreported`,null,riddorOpen2.length>0,showOpenIncidents) },
+                    { id:"openIncidents", node: card(E("⚠️",""),"Open Incidents",openIncidents2.length,(()=>{ const un=incidents.filter(i=>riddorDue(i)); const late=un.filter(i=>riddorDue(i).state==="overdue").length; return `${un.length} RIDDOR unreported${late?` · ${late} overdue`:""}`; })(),null,incidents.some(i=>riddorDue(i)),showOpenIncidents) },
                     { id:"unreadDocuments", node: card(E("📄",""),"Unread Documents",unreadDocs.length,"assigned but unacknowledged",unreadDocs.length>0,false,()=>{setAtab("reports");setAdminReportView("documents");}) },
-                    { id:"equipmentOverdue", node: card(E("🔧",""),"Equipment Overdue",overdueEquipment.length,"inspection overdue",null,overdueEquipment.length>0,()=>setAtab("equipment")) },
+                    { id:"equipmentOverdue", node: card(E("🔧",""),"Equipment Overdue",overdueEquipment.length,"service overdue",null,overdueEquipment.length>0,()=>{setPagePreset({tab:"equipment",show:"overdue"});setAtab("equipment");}) },
+                    { id:"machineryRenewals", node: (()=>{ let ex=0, soon=0;
+                        staffList.filter(u=>(u.status||"active")!=="leaver"&&u.role!=="admin"&&isWarehouseWorker(u)).forEach(u=>compsFor(machineComps,u.id).forEach(c=>{
+                          if (!allMachineTypes.some(t=>t.id===c.machineId)) return;
+                          const k=machineState(c,allMachineTypes).key; if(k==="expired")ex++; else if(k==="expiring")soon++; }));
+                        return card(E("🏗",""),"Machinery Renewals",ex+soon,ex?`${ex} overdue · ${soon} due in 60 days`:soon?`${soon} due in 60 days`:"all in date",soon>0&&!ex,ex>0,()=>{setPagePreset({tab:"machinery",show:"attention"});setAtab("machinery");}); })() },
                     { id:"outOfService", node: card(E("📋",""),"Out of Service",outOfService.length,"equipment items",null,false,()=>{setPagePreset({tab:"equipment",status:"inactive"});setAtab("equipment");}) },
                     { id:"quizFailures", node: card(E("❌",""),"Quiz Failures",unreviewedFailures.length,"unreviewed",unreviewedFailures.length>0,false,()=>{setAtab("reports");setAdminReportView("failures");}) },
                     { id:"reviewsOverdue", node: card(E("📅",""),"Reviews Overdue",overdueDocReviews.length+overdueRAReviews.length,"docs & RAs",overdueDocReviews.length+overdueRAReviews.length>0,false,()=>setAtab(overdueDocReviews.length||!overdueRAReviews.length?"documents":"ra")) },
@@ -4431,26 +4462,16 @@ export default function App() {
                       return card(E("🪪",""),"On Site Now",uniqueOnSite.length,uniqueOnSite.length>0?uniqueOnSite.slice(0,2).join(", ")+(uniqueOnSite.length>2?` +${uniqueOnSite.length-2} more`:""):"No contractors today",null,false,()=>setAtab("contractors"));
                     })() },
                     { id:"fireSafety", node: (()=>{
-                      const fs = fireSafety||{};
-                      const wardens2 = fs.wardens||[];
-                      const drills2 = fs.drills||[];
-                      const extinguishers2 = fs.extinguishers||[];
-                      const fraReviews2 = fs.fraReviews||[];
-                      const lastDrill2 = drills2.length?drills2.slice().sort((a,b)=>b.date.localeCompare(a.date))[0]:null;
-                      const daysSinceDrill2 = lastDrill2?Math.floor((new Date()-new Date(lastDrill2.date))/86400000):null;
-                      const expiredWardens2 = wardens2.filter(w=>{ const exp=new Date(w.qualDate); exp.setMonth(exp.getMonth()+(w.renewalMonths||36)); return exp.toISOString().slice(0,10)<today; });
-                      const overdueExts2 = extinguishers2.filter(e=>e.nextServiceDue&&e.nextServiceDue<today);
-                      const lastFra2 = fraReviews2.length?fraReviews2.slice().sort((a,b)=>b.date.localeCompare(a.date))[0]:null;
-                      const fraOverdue2 = lastFra2?.nextReviewDue&&lastFra2.nextReviewDue<today;
-                      const issues = expiredWardens2.length+overdueExts2.length+(fraOverdue2?1:0)+(daysSinceDrill2!==null&&daysSinceDrill2>365?1:0);
-                      const sub = issues>0?`${issues} item${issues!==1?"s":""} need attention`:(daysSinceDrill2!==null?`Last drill ${daysSinceDrill2}d ago`:"");
-                      return card(E("🔥",""),"Fire Safety",wardens2.length,sub,null,issues>0,()=>setAtab("firesafety"));
+                      // same rules as the Fire Safety screen (domains/fireSafety/fireLogic.js)
+                      const f = fireSummary({ fireSafety: fireSafety||{}, extCerts: extCerts||{}, staff: staffList, inspections: siteInspections||[], today: fireToday() });
+                      const sub = f.issues>0?`${f.issues} item${f.issues!==1?"s":""} need attention`:(f.daysSinceDrill!==null?`Last drill ${f.daysSinceDrill}d ago`:"No drills recorded");
+                      return card(E("🔥",""),"Fire Safety",f.wardens.length,sub,null,f.issues>0,()=>setAtab("firesafety"));
                     })() },
                     { id:"firstAid", node: (()=>{
                       const fa = firstAidData||{};
                       const faAiders = fa.aiders||[];
                       const faCustomZones = fa.customZones||[];
-                      const faAllZones = [...FA_ZONES, ...faCustomZones];
+                      const faAllZones = [...new Set([...getSiteLists().firstAidZones, ...faCustomZones])];
                       const minPerShift = fa.assessment?.minPerShift||1;
                       // Build combined aider list (manual + cert-detected), same logic as FirstAidRegisterTab
                       const faCertAiders = [];
@@ -4464,12 +4485,12 @@ export default function App() {
                       // A "gap" = a zone/shift combination with fewer valid first aiders than minPerShift.
                       // Keep in step with the equivalent logic in FirstAidRegisterTab.jsx.
                       // Count coverage gaps
-                      const SHIFTS3 = ["Day Shift (08:30–16:00)","Late Shift (16:00–02:00)","Office Hours (08:30–17:30)"];
+                      const SHIFTS3 = coverShifts(getSiteLists().firstAidShifts);   // this site's shifts (Site Settings)
                       let gapCount = 0;
                       faAllZones.forEach(zone=>{
                         SHIFTS3.forEach(shift=>{
                           const count = validAiders.filter(a=>{
-                            const shiftsOk = !a.shifts?.length || a.shifts.includes("All Shifts") || a.shifts.includes(shift);
+                            const shiftsOk = !a.shifts?.length || a.shifts.some(isAllShift) || a.shifts.includes(shift);
                             const zonesOk  = !a.zones?.length  || a.zones.includes(zone);
                             return shiftsOk && zonesOk;
                           }).length;
@@ -4547,8 +4568,8 @@ export default function App() {
                   )}
 
                   {/* Equipment overdue */}
-                  {section("Equipment inspection overdue",
-                    listCard([...overdueEquipment,...soonEquipment].slice(0,5),"All equipment inspections up to date",e=>{
+                  {section("Equipment service due",
+                    listCard([...overdueEquipment,...soonEquipment].slice(0,5),"All equipment servicing up to date",e=>{
                       const overdue = e.nextService<today;
                       const days = Math.ceil((new Date(e.nextService)-new Date())/86400000);
                       return (<>
@@ -5373,7 +5394,7 @@ export default function App() {
                 // Editing an existing module = a new VERSION: ask minor/major first
                 // (NewVersionModal → saveModuleVersion). A brand-new module is version 1.
                 if (editingModule) { setPendingModuleSave({ m, prev: editingModule }); return; }
-                setCustomModules(prev=>[...prev,{...m, version:1, versionDate:new Date().toISOString().slice(0,10)}]);
+                setCustomModules(prev=>[...prev,{...m, version:1, versionDate:todayISO()}]);
                 setEditingModule(null);
                 setAtab("modules");
               }}
@@ -5580,10 +5601,10 @@ export default function App() {
 
               {/* Folder tabs */}
               <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:16}}>
-                {(["all",...Array.from(new Set(docs.map(d=>d.type||"Document"))).sort()]).map(f=>(
+                {(["all",...Array.from(new Set([...docs.map(d=>d.type||"Document"),...(docFolder!=="all"?[docFolder]:[])])).sort()]).map(f=>(
                   <button key={f} onClick={()=>setDocFolder(f)}
                     style={{padding:"6px 14px",borderRadius:20,border:`1px solid ${docFolder===f?T.accent:T.borderMd}`,background:docFolder===f?`linear-gradient(135deg,${T.accent},${T.blue})`:T.overlay,color:docFolder===f?"#fff":T.muted,fontWeight:docFolder===f?700:400,cursor:"pointer",fontFamily:font,fontSize:12}}>
-                    {f==="all"?`📁 All (${docs.length})`:`${f==="Policy"?"📋":f==="Procedure"?"📝":f==="Guidance"?"📖":f==="Risk Assessment"?"⚠️":f==="COSHH"?"🧪":"📄"} ${f} (${docs.filter(d=>(d.type||"Document")===f).length})`}
+                    {f==="all"?`📁 All (${docs.length})`:`${f==="Policy"?"📋":f==="Procedure"?"📝":f==="Guidance"?"📖":f==="Risk Assessment"?"⚠️":f==="COSHH"?"🧪":f==="User Manual"?"📘":"📄"} ${f} (${docs.filter(d=>(d.type||"Document")===f).length})`}
                   </button>
                 ))}
               </div>
@@ -5596,7 +5617,7 @@ export default function App() {
                     <span style={{fontSize:11,color:T.muted}}>Category:</span>
                     <select value={docFolder==="all"?"Document":docFolder} onChange={e=>setDocFolder(e.target.value)}
                       style={{background:T.overlay,border:`1px solid ${T.borderMd}`,borderRadius:8,padding:"5px 10px",color:T.white,fontSize:12,outline:"none",fontFamily:font,cursor:"pointer"}}>
-                      {["Policy","Procedure","Guidance","Risk Assessment","COSHH","Report","Presentation","Document"].map(t=><option key={t} value={t}>{t}</option>)}
+                      {["Policy","Procedure","Guidance","User Manual","Risk Assessment","COSHH","Report","Presentation","Document"].map(t=><option key={t} value={t}>{t}</option>)}
                     </select>
                   </div>
                 </div>
@@ -5612,7 +5633,7 @@ export default function App() {
                       const typeMap={PDF:"Policy",DOCX:"Guidance",DOC:"Guidance",XLSX:"Report",XLS:"Report",PPTX:"Presentation",PPT:"Presentation"};
                       const id="d"+Date.now()+Math.random();
                       const docType = docFolder!=="all"?docFolder:typeMap[ext]||"Document";
-                      const newDoc={id,title:file.name.substring(0,file.name.lastIndexOf(".")>0?file.name.lastIndexOf("."):file.name.length),date:new Date().toISOString().slice(0,10),size:`${(file.size/1024).toFixed(0)} KB`,type:docType,fileUrl:null,fileData:null,fileName:file.name,ext,version:1};
+                      const newDoc={id,title:file.name.substring(0,file.name.lastIndexOf(".")>0?file.name.lastIndexOf("."):file.name.length),date:todayISO(),size:`${(file.size/1024).toFixed(0)} KB`,type:docType,fileUrl:null,fileData:null,fileName:file.name,ext,version:1};
                       setDocs(p=>[...p,newDoc]);
                       await dbSaveDoc(newDoc,file);
                       setDocs(p=>p.map(d=>d.id===id?{...d,fileUrl:newDoc.fileUrl,fileData:newDoc.fileUrl}:d));
@@ -5626,7 +5647,7 @@ export default function App() {
                         const typeMap={PDF:"Policy",DOCX:"Guidance",DOC:"Guidance",XLSX:"Report",XLS:"Report",PPTX:"Presentation",PPT:"Presentation"};
                         const id="d"+Date.now()+Math.random();
                         const docType = docFolder!=="all"?docFolder:typeMap[ext]||"Document";
-                        const newDoc={id,title:file.name.substring(0,file.name.lastIndexOf(".")>0?file.name.lastIndexOf("."):file.name.length),date:new Date().toISOString().slice(0,10),size:`${(file.size/1024).toFixed(0)} KB`,type:docType,fileUrl:null,fileData:null,fileName:file.name,ext,version:1};
+                        const newDoc={id,title:file.name.substring(0,file.name.lastIndexOf(".")>0?file.name.lastIndexOf("."):file.name.length),date:todayISO(),size:`${(file.size/1024).toFixed(0)} KB`,type:docType,fileUrl:null,fileData:null,fileName:file.name,ext,version:1};
                         setDocs(p=>[...p,newDoc]);
                         await dbSaveDoc(newDoc,file);
                         setDocs(p=>p.map(d=>d.id===id?{...d,fileUrl:newDoc.fileUrl,fileData:newDoc.fileUrl}:d));
@@ -5639,12 +5660,21 @@ export default function App() {
                 </label>
               </div>
 
-              {/* Document list */}
-              {docs.length===0
+              {/* Document list: folder + search */}
+              {(()=>{ const q=String(docSearch||"").trim().toLowerCase(); const inFolder=docs.filter(d=>docFolder==="all"||(d.type||"Document")===docFolder);
+                const shownDocs=q?inFolder.filter(d=>[d.title,d.description,d.fileName,d.type].some(v=>String(v||"").toLowerCase().includes(q))):inFolder;
+                return docs.length===0
                 ? <div style={{textAlign:"center",padding:40,color:T.muted,fontSize:14}}>No documents uploaded yet.</div>
                 : (
                   <div style={{display:"grid",gap:14}}>
-                    {docs.filter(d=>docFolder==="all"||(d.type||"Document")===docFolder).map(d=>{
+                    <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+                      <input aria-label="Search documents" value={docSearch} onChange={e=>setDocSearch(e.target.value)} placeholder="🔍 Search documents by title, description or file name…"
+                        style={{flex:1,minWidth:240,background:T.overlay,border:`1px solid ${T.borderMd}`,borderRadius:10,padding:"9px 14px",color:T.white,fontSize:13,outline:"none",fontFamily:font}}/>
+                      <span style={{fontSize:12,color:T.muted,whiteSpace:"nowrap"}}>{shownDocs.length} of {docs.length}</span>
+                      {q && <button type="button" onClick={()=>setDocSearch("")} style={{background:"none",border:"none",color:T.accentLt,cursor:"pointer",fontFamily:font,fontSize:12,fontWeight:700}}>Clear</button>}
+                    </div>
+                    {shownDocs.length===0 && <div style={{textAlign:"center",padding:24,color:T.muted,fontSize:13}}>No documents match.</div>}
+                    {shownDocs.map(d=>{
                       const extIcons={PDF:"📕",DOCX:"📘",DOC:"📘",XLSX:"📗",XLS:"📗",PPTX:"📙",PPT:"📙",PNG:"🖼️",JPG:"🖼️",JPEG:"🖼️",TXT:"📄",CSV:"📊"};
                       const icon=extIcons[d.ext]||"📄";
                       const assignedIds = docAssignments[String(d.id)] || [];
@@ -5657,8 +5687,7 @@ export default function App() {
                       );
                     })}
                   </div>
-                )
-              }
+                ); })()}
               </>}
             </div>
           )}
@@ -5667,6 +5696,12 @@ export default function App() {
           {atab==="coshh" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
             <LazyCoshhTab Z={T} font={font} msdsFiles={msdsFiles} setMsdsFiles={setMsdsFiles} customChemicals={customChemicals} setCustomChemicals={setCustomChemicals} assessments={coshhAssessments} setAssessments={setCoshhAssessments}/>
+            </React.Suspense>
+          )}
+
+          {atab==="settings" && (
+            <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
+            <LazySiteSettingsTab Z={T} font={font}/>
             </React.Suspense>
           )}
 
@@ -5688,7 +5723,7 @@ export default function App() {
 
           {atab==="incidents" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
-            <LazyAdminIncidentTab incidents={incidents} setIncidents={setIncidents} dbDeleteIncident={dbDeleteIncident} staff={staff} focusIncidentId={focusIncidentId} setFocusIncidentId={setFocusIncidentId} preset={pagePreset&&pagePreset.tab==="incidents"?pagePreset:null} clearPreset={()=>setPagePreset(null)} showAdminReportForm={showAdminReportForm} setShowAdminReportForm={setShowAdminReportForm}
+            <LazyAdminIncidentTab user={user} incidents={incidents} setIncidents={setIncidents} dbDeleteIncident={dbDeleteIncident} staff={staff} focusIncidentId={focusIncidentId} setFocusIncidentId={setFocusIncidentId} preset={pagePreset&&pagePreset.tab==="incidents"?pagePreset:null} clearPreset={()=>setPagePreset(null)} showAdminReportForm={showAdminReportForm} setShowAdminReportForm={setShowAdminReportForm}
               investigations={investigations} setInvestigations={setInvestigations}
               onOpenInvestigation={id=>{ setInvestigationView(id); setAtab("investigation"); }}
               equipment={equipment} setEquipment={setEquipment}
@@ -5715,13 +5750,14 @@ export default function App() {
 
           {atab==="machinery" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
-            <LazyAdminMachineryTab allStaff={staff} machineComps={machineComps} setMachineComps={setMachineComps} allMachineTypes={allMachineTypes} allMachineCategories={allMachineCategories} setCustomMachineTypes={setCustomMachineTypes} dbDeleteCustomMachineType={dbDeleteCustomMachineType} dbSaveMachineComp={dbSaveMachineComp} dbDeleteMachineComp={dbDeleteMachineComp} Z={T} font={font}/>
+            <LazyAdminMachineryTab allStaff={staff} machineComps={machineComps} setMachineComps={setMachineComps} allMachineTypes={allMachineTypes} allMachineCategories={allMachineCategories} customMachineTypes={customMachineTypes} preset={pagePreset&&pagePreset.tab==="machinery"?pagePreset:null} clearPreset={()=>setPagePreset(null)} onOpenStaff={()=>setAtab("users")} setCustomMachineTypes={setCustomMachineTypes} dbDeleteCustomMachineType={dbDeleteCustomMachineType} dbSaveMachineComp={dbSaveMachineComp} dbDeleteMachineComp={dbDeleteMachineComp} Z={T} font={font}/>
             </React.Suspense>
           )}
 
           {atab==="equipment" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
-            <LazyEquipmentTrackerTab equipment={equipment} setEquipment={setEquipment} preset={pagePreset&&pagePreset.tab==="equipment"?pagePreset:null} clearPreset={()=>setPagePreset(null)} staff={staff} Z={T} font={font}/>
+            <LazyEquipmentTrackerTab equipment={equipment} setEquipment={setEquipment} preset={pagePreset&&pagePreset.tab==="equipment"?pagePreset:null} clearPreset={()=>setPagePreset(null)} staff={staff}
+              extinguishers={(fireSafety&&fireSafety.extinguishers)||[]} onOpenFireSafety={()=>{ setPagePreset({tab:"firesafety",sub:"extinguishers"}); setAtab("firesafety"); }} Z={T} font={font}/>
             </React.Suspense>
           )}
 
@@ -5749,13 +5785,17 @@ export default function App() {
 
           {atab==="inspections" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
-            <LazySiteInspectionsTab inspections={siteInspections} setInspections={setSiteInspections} staff={staff} Z={T} font={font}/>
+            <LazySiteInspectionsTab inspections={siteInspections} setInspections={setSiteInspections} staff={staff} userName={user&&user.name} preset={pagePreset&&pagePreset.tab==="inspections"?pagePreset:null} clearPreset={()=>setPagePreset(null)} Z={T} font={font}/>
             </React.Suspense>
           )}
 
           {atab==="firesafety" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
-            <LazyFireSafetyTab fireSafety={fireSafety} setFireSafety={setFireSafety} staff={staff} onUploadFraDoc={dbUploadFraDocument} onDeleteFraDoc={dbDeleteFraDocument} Z={T} font={font}/>
+            <LazyFireSafetyTab fireSafety={fireSafety} setFireSafety={setFireSafety} staff={staff} onUploadFraDoc={dbUploadFraDocument} onDeleteFraDoc={dbDeleteFraDocument}
+              extCerts={extCerts} setExtCerts={setExtCerts} onSaveCert={dbSaveExtCert} onDeleteCert={dbDeleteExtCert} userName={user&&user.name}
+              preset={pagePreset&&pagePreset.tab==="firesafety"?pagePreset:null} clearPreset={()=>setPagePreset(null)}
+              inspections={siteInspections} onOpenInspection={id=>{ setPagePreset({tab:"inspections",openId:id}); setAtab("inspections"); }}
+              Z={T} font={font}/>
             </React.Suspense>
           )}
           {atab==="account" && (

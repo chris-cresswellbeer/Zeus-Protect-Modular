@@ -4,7 +4,9 @@ import { Avatar } from "../../shared/primitives";
 import { ContractorDetail } from "./ContractorDetail";
 import { CompanyForm } from "./CompanyForm";
 import { useRemembered } from "../../lib/remembered";
+import { HelpTip } from "../../shared/HelpTip";
 
+import { localISO, todayISO } from "../../lib/dates";
 /**
  * ContractorsTab — admin contractor management: company list with status filter and
  * search, an "on site now" panel (today's visits), upcoming scheduled visits, and
@@ -33,7 +35,7 @@ function ContractorsTab({ contractors, setContractors, contractorInductions, set
     setSelected(focusContractorId); setView("detail");
     setFocusContractorId && setFocusContractorId(null);
   }, [focusContractorId]); // eslint-disable-line react-hooks/exhaustive-deps
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayISO();
 
   const selCon = contractors.find(c=>c.id===selected);
   const filtered = contractors.filter(c=>{
@@ -113,7 +115,7 @@ function ContractorsTab({ contractors, setContractors, contractorInductions, set
           {/* Upcoming today / this week */}
           {(()=>{
             const upcomingAll=[];
-            const soon=new Date(Date.now()+7*86400000).toISOString().slice(0,10);
+            const soon=localISO(new Date(Date.now()+7*86400000));
             contractors.forEach(c=>{
               (contractorVisits[c.id]||[]).filter(v=>v.date>today&&v.date<=soon).forEach(v=>{
                 const daysUntil=Math.ceil((new Date(v.date)-new Date())/86400000);
@@ -143,7 +145,7 @@ function ContractorsTab({ contractors, setContractors, contractorInductions, set
 
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20,flexWrap:"wrap",gap:12}}>
         <div>
-          <h2 style={{fontSize:22,fontWeight:900,letterSpacing:-.5,margin:"0 0 4px"}}>Contractor Register</h2>
+          <h2 style={{fontSize:22,fontWeight:900,letterSpacing:-.5,margin:"0 0 4px"}}>Contractor Register <HelpTip dark={false} text="One entry per company that works on site. Open a company to record its insurance and accreditation certificates (with expiry dates), its workers and their site inductions, and each visit. Expired certificates show in the bell, and today's visits make up 'On Site Now' on the dashboard. Permits to work are under Contractors ▼ → Permits."/></h2>
           <p style={{color:T.muted,fontSize:13,margin:0}}>{contractors.filter(c=>c.status==="active").length} active companies · {contractors.reduce((s,c)=>(s+(c.workers||[]).length),0)} workers total</p>
         </div>
         <button onClick={()=>setShowForm(v=>!v)} style={{background:showForm?"rgba(239,68,68,0.1)":`linear-gradient(135deg,${T.accent},${T.blue})`,color:showForm?"#f87171":"#fff",border:showForm?"1px solid rgba(239,68,68,0.2)":"none",borderRadius:10,padding:"10px 20px",cursor:"pointer",fontFamily:font,fontWeight:700,fontSize:13}}>
@@ -170,7 +172,9 @@ function ContractorsTab({ contractors, setContractors, contractorInductions, set
             <span>Company</span><span>Type</span><span>Status</span><span>Workers</span><span>Visits</span><span></span>
           </div>
         )}
-        {filtered.length===0 && <div style={{padding:"32px 20px",textAlign:"center",color:T.muted,fontSize:14}}>No companies found.</div>}
+        {filtered.length===0 && (contractors.length===0
+          ? <div style={{padding:"32px 20px",textAlign:"center",color:T.muted,fontSize:14,lineHeight:1.6}}>No contractor companies yet.<br/>Click <strong>+ Add Company</strong>, then open the company to add its certificates, workers and inductions, and to log visits.</div>
+          : <div style={{padding:"32px 20px",textAlign:"center",color:T.muted,fontSize:14}}>No companies match the search or filter.</div>)}
         {filtered.map((c,i)=>{
           const cv=contractorVisits[c.id]||[];
           const lastVisit=cv.slice().sort((a,b)=>b.date.localeCompare(a.date))[0]?.date;

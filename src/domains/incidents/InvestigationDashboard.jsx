@@ -1,5 +1,6 @@
 import { E } from "../../lib/emoji";
 
+import { todayISO } from "../../lib/dates";
 /**
  * InvestigationDashboard — summary panel at the top of the Investigations tab:
  *   • overdue corrective actions (not complete, due date in the past)
@@ -10,7 +11,7 @@ import { E } from "../../lib/emoji";
  * onOpen(incidentId) opens that incident's investigation.
  */
 function InvestigationDashboard({ incidents, investigations, onOpen, Z, font }) {
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayISO();
 
   // Flatten all actions across all investigations
   const allActions = [];

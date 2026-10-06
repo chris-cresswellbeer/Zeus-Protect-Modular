@@ -9,6 +9,7 @@ import { Screen, SectionLabel, Row, StatusChip, PrimaryButton } from "../ui";
 import { promptInstall, isStandalone } from "../registerSW";
 import { WelcomeReplay } from "../../shared/WelcomeVideo";
 
+import { todayISO } from "../../lib/dates";
 // ─── More ────────────────────────────────────────────────────────────────────
 
 function More({
@@ -114,9 +115,16 @@ function More({
 
 // ─── Certificates ────────────────────────────────────────────────────────────
 
-function Certificates({ certificates, Z, font }) {
+// Tapping an in-date certificate shows it full screen, large and clear, to hold up to
+// an auditor (no sign-in or signal needed for them to read it).
+function Certificates({ certificates, holder, Z, font }) {
   const valid = certificates.filter((c) => !c.lapsed);
   const lapsed = certificates.filter((c) => c.lapsed);
+  const [shown, setShownRaw] = React.useState(null);
+  const lastBtn = React.useRef(null);
+  // closing puts the focus back on the certificate that was opened
+  const setShown = (v) => { setShownRaw(v); if (!v && lastBtn.current) setTimeout(() => lastBtn.current && lastBtn.current.focus(), 0); };
+  const fmt = (d) => (d && /^\d{4}-\d{2}-\d{2}/.test(d) ? d.slice(0, 10).split("-").reverse().join("/") : d || "—");
 
   return (
     <Screen Z={Z}>
@@ -137,7 +145,7 @@ function Certificates({ certificates, Z, font }) {
             {valid.length} certificate{valid.length !== 1 ? "s" : ""}, all yours
           </div>
           <div style={{ fontSize: 12, color: Z.muted, marginTop: 2, lineHeight: 1.4 }}>
-            Tap any one to show a code an auditor can scan — works offline.
+            Tap any one to show it full screen to an auditor.
           </div>
         </div>
       </div>
@@ -145,20 +153,20 @@ function Certificates({ certificates, Z, font }) {
       {valid.length > 0 && <SectionLabel Z={Z}>In date</SectionLabel>}
       <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
         {valid.map((c) => (
-          <div key={c.certId || c.moduleId} style={{
+          <button type="button" key={c.certId || c.moduleId} onClick={(e) => { lastBtn.current = e.currentTarget; setShown(c); }} aria-label={`Show ${c.title} certificate full screen`} style={{
             background: "linear-gradient(160deg,#0d1f5c,#091548)",
-            border: "1px solid rgba(245,158,11,0.35)", borderRadius: 16,
+            border: "1px solid rgba(245,158,11,0.35)", borderRadius: 16, width: "100%", textAlign: "left", cursor: "pointer", fontFamily: font,
             padding: 15, display: "flex", alignItems: "center", gap: 13, minHeight: 64,
           }}>
             <span style={{ fontSize: 26 }}>{c.icon}</span>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 14, fontWeight: 800, color: Z.white }}>{c.title}</div>
-              <div style={{ fontSize: 11, color: Z.muted, marginTop: 2 }}>
+              <div style={{ fontSize: 14, fontWeight: 800, color: "#ffffff" }}>{c.title}</div>
+              <div style={{ fontSize: 11, color: "#cbd5e1", marginTop: 2 }}>
                 {c.certId} · {c.score}%{c.validUntil ? ` · valid to ${c.validUntil}` : ""}
               </div>
             </div>
-            <span style={{ fontSize: 22, color: Z.gold }} title="Show scannable code">⌗</span>
-          </div>
+            <span style={{ fontSize: 13, fontWeight: 800, color: Z.gold, whiteSpace: "nowrap" }}>Show ›</span>
+          </button>
         ))}
       </div>
 
@@ -190,6 +198,28 @@ function Certificates({ certificates, Z, font }) {
           No certificates yet — finish a module and one appears here.
         </div>
       )}
+      {shown && (
+        <div role="dialog" aria-modal="true" aria-label="Certificate" onClick={() => setShown(null)}
+          onKeyDown={(e) => { if (e.key === "Escape") setShown(null); }}
+          style={{ position: "fixed", inset: 0, zIndex: 9000, overflowY: "auto", background: "linear-gradient(160deg,#0d1f5c,#060d2e)", color: "#fff", fontFamily: font,
+            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "28px 22px", textAlign: "center" }}>
+          <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: 3, color: "#f59e0b", textTransform: "uppercase" }}>Certificate of Completion</div>
+          <div style={{ fontSize: 54, margin: "14px 0 6px" }}>{shown.icon}</div>
+          <div style={{ fontSize: 26, fontWeight: 900, lineHeight: 1.2 }}>{holder || ""}</div>
+          <div style={{ fontSize: 14, color: "#cbd5e1", margin: "8px 0 4px" }}>has completed</div>
+          <div style={{ fontSize: 21, fontWeight: 800, color: "#fbbf24", lineHeight: 1.25, maxWidth: 420 }}>{shown.title}</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 26, width: "100%", maxWidth: 420, textAlign: "left" }}>
+            {[["Certificate no.", shown.certId || "—"], ["Score", `${shown.score}%`], ["Completed", fmt(shown.completed)], ["Valid until", shown.validUntil ? fmt(shown.validUntil) : "No expiry"]].map(([k, v]) => (
+              <div key={k} style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 12, padding: "10px 12px" }}>
+                <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 1, color: "#94a3b8", textTransform: "uppercase" }}>{k}</div>
+                <div style={{ fontSize: 17, fontWeight: 800, marginTop: 3, wordBreak: "break-word" }}>{v}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ fontSize: 12.5, color: "#cbd5e1", marginTop: 22 }}>Zeus Protect · checked {fmt(todayISO())}</div>
+          <button type="button" onClick={() => setShown(null)} ref={(el) => { if (el && !el.dataset.f) { el.dataset.f = "1"; el.focus(); } }} style={{ marginTop: 22, minHeight: 48, padding: "0 30px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.1)", color: "#fff", fontSize: 15, fontWeight: 800, fontFamily: font }}>Close</button>
+        </div>
+      )}
     </Screen>
   );
 }
@@ -206,7 +236,7 @@ function CorrectiveActions({ open, closed, onComplete, onAddProof, Z, font }) {
       </SectionLabel>
       <div style={{ display: "flex", flexDirection: "column", gap: 11, marginBottom: 20 }}>
         {open.map((a) => {
-          const overdue = a.dueDate && a.dueDate < new Date().toISOString().slice(0, 10);
+          const overdue = a.dueDate && a.dueDate < todayISO();
           const days = a.dueDate ? daysUntil(a.dueDate) : null;
           return (
             <div key={a.id} style={{

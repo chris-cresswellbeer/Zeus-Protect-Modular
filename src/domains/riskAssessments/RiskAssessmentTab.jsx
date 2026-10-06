@@ -6,7 +6,9 @@ import { HelpTip } from "../../shared/HelpTip";
 import { EMPTY_HAZARD } from "../../data/seedRiskAssessments";
 import { generateRAHtml } from "./generateRAHtml";
 import { ask } from "../../shared/Feedback";
+import { useRemembered } from "../../lib/remembered";
 
+import { localISO, todayISO } from "../../lib/dates";
 /**
  * RiskAssessmentTab — admin risk assessments (Management of Health and Safety at Work
  * Regulations 1999, reg. 3).
@@ -22,7 +24,7 @@ import { ask } from "../../shared/Feedback";
  *   (EMPTY_HAZARD in data/seedRiskAssessments.js is the template for a new hazard row)
  * Scores use the 5×5 matrix (shared/RiskMatrix.jsx).
  *
- * Saved via dbSaveRA → risk_assessments (JSON per RA). Seed RAs (INIT_RAS) are merged
+ * Saved via dbSaveRA → risk_assessments (JSON per RA). All RAs come from the database (formerly merged with built-in INIT_RAS)d
  * with DB rows on load in App.jsx.
  */
 function RiskAssessmentTab({ docs, setDocs, setAtab, ras, setRas, dbSaveRA, Z, font }) {
@@ -34,6 +36,9 @@ function RiskAssessmentTab({ docs, setDocs, setAtab, ras, setRas, dbSaveRA, Z, f
   const [form, setForm]     = useState(null);
   const [step, setStep]     = useState(0); // 0=details, 1=hazards, 2=review
   const [saved, setSaved]   = useState(false);
+  // list search and filter (remembered while signed in, like other lists)
+  const [raSearch, setRaSearch] = useRemembered("ra.search", "");
+  const [raShow, setRaShow]     = useRemembered("ra.show", "all");   // all | overdue | soon | high | actions
 
   // RA seeding moved to App component on mount
 
@@ -41,7 +46,7 @@ function RiskAssessmentTab({ docs, setDocs, setAtab, ras, setRas, dbSaveRA, Z, f
   function newRA() {
     setForm({
       id:"ra"+Date.now(), title:"", location:"", activity:"", department:"",
-      assessor:"", reference:"", reviewDate:"", date:new Date().toISOString().slice(0,10),
+      assessor:"", reference:"", reviewDate:"", date:todayISO(),
       hazards:[ EMPTY_HAZARD() ],
     });
     setStep(0); setSaved(false); setView("new");
@@ -84,7 +89,7 @@ function RiskAssessmentTab({ docs, setDocs, setAtab, ras, setRas, dbSaveRA, Z, f
   // Tracker status for one hazard's further-control action.
   function trackerStatusOf(h) {
     if (h.actionComplete) return "complete";
-    if (h.targetDate && h.targetDate < new Date().toISOString().slice(0,10)) return "overdue";
+    if (h.targetDate && h.targetDate < todayISO()) return "overdue";
     return "pending";
   }
 
@@ -142,6 +147,24 @@ function RiskAssessmentTab({ docs, setDocs, setAtab, ras, setRas, dbSaveRA, Z, f
   const inputStyle = {...selStyle,cursor:"text"};
   const labelStyle = {color:Z.muted,fontSize:11,fontWeight:700,letterSpacing:.5,display:"block",marginBottom:6};
 
+  // ── List view: search + filter ──
+  const highCount = ra => (ra.hazards||[]).filter(h=>{
+    if (!h.residualRisk||!h.residualRisk.likelihood||!h.residualRisk.severity) return false;
+    const lbl = riskLevel(h.residualRisk.likelihood,h.residualRisk.severity).label;
+    return lbl==="Very High"||lbl==="High";
+  }).length;
+  const reviewDays = ra => ra.reviewDate ? Math.ceil((new Date(ra.reviewDate)-new Date())/86400000) : null;
+  const raQ = String(raSearch||"").trim().toLowerCase();
+  const shownRas = (ras||[]).filter(ra => {
+    if (raQ && ![ra.title, ra.location, ra.activity, ra.reference, ra.assessor].some(v=>String(v||"").toLowerCase().includes(raQ))) return false;
+    const d = reviewDays(ra);
+    if (raShow==="overdue") return d!==null && d<0;
+    if (raShow==="soon") return d!==null && d>=0 && d<=30;
+    if (raShow==="high") return highCount(ra)>0;
+    if (raShow==="actions") return (ra.hazards||[]).some(h=>!h.actionComplete);
+    return true;
+  });
+
   // ── List view ──────────────────────────────────────────────────────────────
   if (view==="list") return (
     <div>
@@ -174,7 +197,21 @@ function RiskAssessmentTab({ docs, setDocs, setAtab, ras, setRas, dbSaveRA, Z, f
         </div>
       ) : (
         <div style={{display:"grid",gap:12}}>
-          {ras.map(ra=>{
+          <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}} data-testid="ra-filters">
+            <input aria-label="Search risk assessments" value={raSearch} onChange={e=>setRaSearch(e.target.value)} placeholder="🔍 Search title, location, activity, reference…"
+              style={{flex:1,minWidth:220,background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:10,padding:"9px 14px",color:Z.white,fontSize:13,outline:"none",fontFamily:font}}/>
+            <select aria-label="Show" value={raShow} onChange={e=>setRaShow(e.target.value)} style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:10,padding:"9px 12px",color:Z.white,fontSize:13,outline:"none",fontFamily:font,cursor:"pointer"}}>
+              <option value="all">All risk assessments</option>
+              <option value="overdue">Review overdue</option>
+              <option value="soon">Review due in 30 days</option>
+              <option value="high">High residual risk</option>
+              <option value="actions">Actions still open</option>
+            </select>
+            <span style={{fontSize:12,color:Z.muted,whiteSpace:"nowrap"}}>{shownRas.length} of {ras.length}</span>
+            {(raQ||raShow!=="all") && <button type="button" onClick={()=>{setRaSearch("");setRaShow("all");}} style={{background:"none",border:"none",color:Z.accentLt,cursor:"pointer",fontFamily:font,fontSize:12,fontWeight:700}}>Clear filters</button>}
+          </div>
+          {shownRas.length===0 && <div style={{textAlign:"center",padding:30,color:Z.muted,fontSize:13}}>No risk assessments match.</div>}
+          {shownRas.map(ra=>{
             const high = ra.hazards.filter(h=>{
               if (!h.residualRisk.likelihood||!h.residualRisk.severity) return false;
               const lbl = riskLevel(h.residualRisk.likelihood,h.residualRisk.severity).label;
@@ -211,7 +248,7 @@ function RiskAssessmentTab({ docs, setDocs, setAtab, ras, setRas, dbSaveRA, Z, f
                   </button>
                   <button onClick={async()=>{
                     const v = await ask({ title: "Next review date", message: `When should "${ra.title}" next be reviewed?`, ok: "Save date",
-                      fields: [{ id: "date", label: "Review date", type: "date", required: true, value: ra.reviewDate || new Date(new Date().setFullYear(new Date().getFullYear()+1)).toISOString().slice(0,10) }] });
+                      fields: [{ id: "date", label: "Review date", type: "date", required: true, value: ra.reviewDate || localISO(new Date(new Date().setFullYear(new Date().getFullYear()+1))) }] });
                     if (!v) return;
                     const updated = {...ra, reviewDate:v.date};
                     setRas(p=>p.map(r=>r.id===ra.id?updated:r));

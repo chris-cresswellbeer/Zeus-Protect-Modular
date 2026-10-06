@@ -31,17 +31,42 @@ import { INCIDENT_TYPES, ACCIDENT_CODES, NUMBER_CODES } from "../../data/seedInc
 import { isIncompleteQuickReport } from "./quickReportStatus";
 import { AuditHistoryModal } from "../audit/AuditTrailTab";
 import { useRemembered } from "../../lib/remembered";
+import { riddorDue, riddorDueText, riddorBadge, riddorUrgent, RIDDOR_CATEGORIES } from "./riddor";
+import { sb } from "../../lib/supabase";
+import { openFile } from "../../lib/fileAccess";
+import { checkMachineFiles } from "../machinery/machineEvidence";
+
+import { localISO, todayISO } from "../../lib/dates";
+// The HSE's RIDDOR notification for an incident (PDF or photo) goes in the private
+// "incident-photos" bucket as riddor_<incident id>_… — a name only admins can open
+// (db_rules.sql can_read_file has no rule for "riddor_", so only admins and the uploader).
+// Stored on the incident as hseNotice: { name, type, url, path, at, by } (the jsonb
+// "details" column — no database change needed).
+const RIDDOR_ACCEPT = ".pdf,.jpg,.jpeg,.png,.webp,.heic,.heif,.doc,.docx,.msg,.eml,application/pdf,image/*";
+async function uploadHseNotice(file, incId, by) {
+  const bad = checkMachineFiles([file]);
+  if (bad && !/\.(msg|eml)$/i.test(file.name || "")) return { error: bad };
+  const safe = String(file.name || "notice").replace(/[^a-zA-Z0-9._-]/g, "_").slice(-80);
+  const path = `riddor_${String(incId).replace(/[^a-zA-Z0-9_-]/g, "_")}_${Date.now()}_${safe}`;
+  const { error } = await sb.storage.upload("incident-photos", path, file);
+  if (error) return { error: `"${file.name}" couldn't be uploaded: ${error}` };
+  return { notice: { name: file.name, type: file.type || "", url: sb.storage.getPublicUrl("incident-photos", path), path, at: new Date().toISOString(), ...(by ? { by } : {}) } };
+}
+const removeHseNoticeFile = path => { if (path) sb.storage.remove("incident-photos", [path]).catch(() => {}); };
 
 // Urgency chosen on a quick hazard report (QuickReportModal / mobile ReportHazard).
 const QUICK_URGENCY_LABEL = { low:"Safe to leave", medium:"Needs attention", high:"STOP WORK" };
 
-function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, investigations, setInvestigations, onOpenInvestigation, equipment, setEquipment, focusIncidentId, setFocusIncidentId, preset, clearPreset, showAdminReportForm, setShowAdminReportForm, Z, font }) {
+function AdminIncidentTab({ user, incidents, setIncidents, dbDeleteIncident, staff, investigations, setInvestigations, onOpenInvestigation, equipment, setEquipment, focusIncidentId, setFocusIncidentId, preset, clearPreset, showAdminReportForm, setShowAdminReportForm, Z, font }) {
   const isMobile = useWindowWidth() <= 1024;
   const [filterType, setFilterType]     = useRemembered("incidents.type", "all");
   const [filterStatus, setFilterStatus] = useRemembered("incidents.status", "all");
   const [filterRiddor, setFilterRiddor] = useRemembered("incidents.riddor", false);
   const [search, setSearch]             = useState("");
   const [expandedId, setExpandedId] = useState(focusIncidentId||null);
+  // The list shows PAGE incidents at a time ("Show more"), newest first
+  const PAGE = 25;
+  const [shown, setShown] = useState(PAGE);
   // Deep-link: expand the requested incident and scroll it into view (retried a few
   // times because the lazy tab may still be rendering), then clear the focus id.
   // Handle focus from dashboard — runs on mount AND on prop change
@@ -63,6 +88,7 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
   // Dashboard figure → open the list already filtered (e.g. open incidents), then clear the request
   React.useEffect(()=>{
     if(!preset) return;
+    if (preset.accidentBook) { setShowAccidentBook(true); clearPreset&&clearPreset(); return; }   // quick search → Accident Book (filters untouched)
     setFilterType(preset.type||"all"); setFilterStatus(preset.status||"all"); setFilterRiddor(!!preset.riddor); setSearch("");
     clearPreset&&clearPreset();
   },[preset]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -73,8 +99,8 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [historyForId, setHistoryForId] = useState(null); // incident whose audit history pop-up is open
   const [showAccidentBook, setShowAccidentBook] = useState(false);
-  const [abDateFrom, setAbDateFrom] = useState(() => { const d = new Date(); d.setFullYear(d.getFullYear()-1); return d.toISOString().slice(0,10); });
-  const [abDateTo, setAbDateTo] = useState(new Date().toISOString().slice(0,10));
+  const [abDateFrom, setAbDateFrom] = useState(() => { const d = new Date(); d.setFullYear(d.getFullYear()-1); return localISO(d); });
+  const [abDateTo, setAbDateTo] = useState(todayISO());
   const showReportForm = showAdminReportForm;
   const setShowReportForm = setShowAdminReportForm;
 
@@ -109,7 +135,7 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
   // Same behaviour as IncidentTracker.applyEquipmentSideEffects — keep the two copies in step.
   function applyEquipmentSideEffects(f) {
     if (!f.equipmentInvolved || !f.equipmentId) return;
-    const today = new Date().toISOString().slice(0,10);
+    const today = todayISO();
     setEquipment(prev => prev.map(eq => {
       if (eq.id !== f.equipmentId) return eq;
       let updated = {...eq};
@@ -146,7 +172,7 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
   // access to that CDN; if it's blocked nothing happens (no onerror handler).
   // Installing the `xlsx` npm package and importing it would remove that dependency.
   function exportIncidentReport() {
-    const today = new Date().toISOString().slice(0,10);
+    const today = todayISO();
 
     // Load SheetJS dynamically then generate workbook
     const script = document.createElement("script");
@@ -158,7 +184,7 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
       // ── Sheet 1: Incident Log ──
       const headers = [
         "Incident ID","Date","Time","Type","Location","Description",
-        "Injury Type","RIDDOR","Reported to HSE","HSE Report Date","HSE Reference","Reported By","Accident Code","Number Code","Status",
+        "Injury Type","RIDDOR","Reported to HSE","HSE Report Date","HSE Reference","Reported By","HSE Notice Attached","RIDDOR Type","HSE Report Due By","Accident Code","Number Code","Status",
         "Reported By",
         "Equipment Involved","Equipment Asset No","Equipment Name","Equipment Damaged","Damage Description","Damage Severity","Taken Out of Service",
         "Person Involved","Date of Birth","Address","Postcode",
@@ -186,6 +212,9 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
             inc.riddorReportedDate||"",
             inc.hseReference||"",
             inc.riddorReportedBy||"",
+            inc.hseNotice&&inc.hseNotice.name?"Yes":"No",
+            inc.riddor ? ((RIDDOR_CATEGORIES.find(c=>c.id===inc.riddorCategory)||{}).label||"Not chosen") : "",
+            (()=>{ const d = riddorDue(inc); return d && d.dueDate ? d.dueDate : ""; })(),
             inc.accidentCode||"",
             inc.numberCode||"",
             inc.closed?"Closed":"Open",
@@ -398,6 +427,13 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
     }
     return true;
   }).sort((a,b)=>b.date.localeCompare(a.date));
+  // a filter change starts the list from the top again; an incident opened from elsewhere is always shown
+  const filterSig = `${filterType}|${filterStatus}|${filterRiddor}|${search}`;
+  const [lastSig, setLastSig] = useState(filterSig);
+  if (lastSig !== filterSig) { setLastSig(filterSig); setShown(PAGE); }
+  const expandedAt = expandedId ? filtered.findIndex(i=>i.id===expandedId) : -1;
+  const limit = Math.max(shown, expandedAt + 1);
+  const visible = filtered.slice(0, limit);
 
   const selStyle = {background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:10,padding:"8px 14px",color:Z.white,fontSize:13,outline:"none",fontFamily:font,cursor:"pointer"};
 
@@ -409,12 +445,14 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
             <span style={{fontWeight:700,fontSize:15,color:Z.white}}>Report New Incident</span>
             <button onClick={()=>setShowReportForm(false)} style={{background:"rgba(239,68,68,0.1)",color:"#f87171",border:"1px solid rgba(239,68,68,0.2)",borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font}}>✕ Cancel</button>
           </div>
+          {/* the form straight away, reported by the admin who is signed in */}
           <IncidentTracker
-            user={staff[0]||{id:1,name:"Admin",role:"admin"}}
+            user={user||{id:1,name:"Admin",role:"admin"}}
             incidents={incidents}
-            setIncidents={(fn)=>{ setIncidents(fn); setShowReportForm(false); }}
+            setIncidents={setIncidents}
             equipment={equipment}
             setEquipment={setEquipment}
+            formOnly onClose={()=>setShowReportForm(false)}
             Z={Z} font={font}/>
         </div>
       )}
@@ -434,11 +472,11 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
           </div>
           <div style={{background:"rgba(239,68,68,0.08)",borderRadius:10,padding:"10px 16px",textAlign:"center",minWidth:70,border:"1px dashed rgba(239,68,68,0.3)"}}>
             <div style={{fontSize:20,fontWeight:900,color:"#f87171"}}>{incidents.filter(i=>i.riddor).length}</div>
-            <div style={{fontSize:10,color:Z.muted,marginTop:1}}>RIDDOR</div>
+            <div style={{fontSize:10,color:Z.muted,marginTop:1}}>RIDDOR (all time)</div>
           </div>
           <div style={{background:"rgba(16,185,129,0.1)",borderRadius:10,padding:"10px 16px",textAlign:"center",minWidth:70}}>
             <div style={{fontSize:20,fontWeight:900,color:"#10b981"}}>{incidents.length}</div>
-            <div style={{fontSize:10,color:Z.muted,marginTop:1}}>Total</div>
+            <div style={{fontSize:10,color:Z.muted,marginTop:1}}>All time</div>
           </div>
           <div style={{width:1,height:36,background:Z.border,margin:"0 2px"}}/>
           <button onClick={()=>onOpenInvestigation(null)}
@@ -595,7 +633,7 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
         </div>
       ) : (
         <div style={{display:"grid",gap:10}}>
-          {filtered.map(inc=>{
+          {visible.map(inc=>{
             const ti = typeInfo(inc.type);
             const ac = ACCIDENT_CODES.find(c=>c.code===inc.accidentCode);
             const nc = NUMBER_CODES.find(c=>c.num===inc.numberCode);
@@ -613,6 +651,10 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
                     <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:4,flexWrap:"wrap"}}>
                       <span style={{fontSize:12,fontWeight:800,color:ti.color,background:ti.bg,padding:"2px 9px",borderRadius:99}}>{ti.label}</span>
                       {inc.riddor && <span style={{fontSize:10,fontWeight:700,color:"#f87171",background:"rgba(239,68,68,0.12)",padding:"2px 8px",borderRadius:6,border:"1px solid rgba(239,68,68,0.3)"}}>RIDDOR</span>}
+                      {(()=>{ const due = riddorDue(inc); if (!due) return null; const col = riddorUrgent(due) ? Z.red : Z.amber; return (
+                        <span data-testid="riddor-due-badge" style={{fontSize:10,fontWeight:800,color:col,background:`${col}1f`,padding:"2px 8px",borderRadius:6,border:`1px solid ${col}55`}}>
+                          {riddorBadge(due)}
+                        </span>); })()}
                       {inc.quickReport && (() => { const qc = inc.urgency==="high" ? Z.red : Z.amber; return (
                         <span style={{fontSize:10,fontWeight:700,color:qc,background:`${qc}1f`,padding:"2px 8px",borderRadius:6,border:`1px solid ${qc}55`}}>
                           ⚡ Quick{QUICK_URGENCY_LABEL[inc.urgency] ? ` · ${QUICK_URGENCY_LABEL[inc.urgency]}` : ""}{isIncompleteQuickReport(inc) ? " · awaiting full report" : ""}
@@ -631,10 +673,7 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
                       style={{background:"rgba(37,99,235,0.12)",color:Z.accentLt,border:`1px solid ${Z.accent}33`,borderRadius:8,padding:"4px 12px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font}}>
                       ✏ Edit
                     </button>
-                    <button onClick={e=>{ e.stopPropagation(); setConfirmDeleteId(confirmDeleteId===inc.id?null:inc.id); }}
-                      style={{background:confirmDeleteId===inc.id?"rgba(239,68,68,0.2)":"rgba(239,68,68,0.08)",color:"#f87171",border:`1px solid ${confirmDeleteId===inc.id?"rgba(239,68,68,0.5)":"rgba(239,68,68,0.2)"}`,borderRadius:8,padding:"4px 12px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font}}>
-                      🗑
-                    </button>
+{/* Delete is inside the incident (click the row), next to Mark as Closed */}
                     <span style={{color:Z.muted,fontSize:16,transition:"transform .2s",display:"inline-block",transform:isOpen?"rotate(90deg)":"rotate(0deg)"}}>›</span>
                   </div>
                 </div>
@@ -784,10 +823,54 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
                             <div style={{fontSize:13,fontWeight:700,color:inc.riddorReported?"#10b981":"#f87171",marginBottom:3}}>
                               {inc.riddorReported ? "✓ Reported to HSE" : "⚠ RIDDOR Reportable — Action Required"}
                             </div>
-                            <div style={{fontSize:11,color:"rgba(255,255,255,0.5)"}}>
+                            <div style={{fontSize:12,color:Z.slate||Z.white,lineHeight:1.5}}>
                               {inc.riddorReported
                                 ? `Reported to HSE on ${inc.riddorReportedDate||"—"}${inc.riddorReportedBy?" by "+inc.riddorReportedBy:""}. Reference: ${inc.hseReference||"not recorded"}.`
-                                : "This incident must be reported to the HSE under RIDDOR 2013. Submit form F2508/F2508A at riddor.hse.gov.uk or call 0345 300 9923."}
+                                : "This incident must be reported to the HSE under RIDDOR 2013. Report online at riddor.hse.gov.uk (fatal and specified injuries can also be phoned in on 0345 300 9923)."}
+                            </div>
+                            {!inc.riddorReported && (()=>{ const due = riddorDue(inc); const col = riddorUrgent(due) ? Z.red : Z.amber; return (
+                              <div data-testid="riddor-deadline" style={{marginTop:8,display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+                                {due && <span style={{fontSize:13,fontWeight:800,color:col}}>⏱ {riddorDueText(due)}</span>}
+                                <label style={{fontSize:12,color:Z.slate||Z.white,display:"flex",gap:6,alignItems:"center"}}>
+                                  Type:
+                                  <select aria-label="RIDDOR type" value={inc.riddorCategory||""} onChange={e=>{ const v=e.target.value||null; setIncidents(p=>p.map(i=>i.id===inc.id?{...i,riddorCategory:v}:i)); }}
+                                    style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:8,padding:"4px 8px",color:Z.white,fontSize:12,fontFamily:font}}>
+                                    <option value="">Not chosen (10 days is used)</option>
+                                    {RIDDOR_CATEGORIES.map(c=><option key={c.id} value={c.id}>{c.label}{c.days?` — ${c.days} days`:" — when diagnosed"}</option>)}
+                                  </select>
+                                </label>
+                              </div>); })()}
+                            {/* the HSE notification: open, attach, replace or remove */}
+                            <div data-testid="hse-notice" style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginTop:8}}>
+                              {inc.hseNotice && inc.hseNotice.url ? (<>
+                                <button type="button" onClick={()=>{ if(!openFile(inc.hseNotice.url)) notify("Your browser blocked the new tab. Allow pop-ups for this site.", { kind:"error" }); }}
+                                  style={{background:"rgba(16,185,129,0.1)",border:"1px solid rgba(16,185,129,0.35)",borderRadius:8,padding:"5px 12px",color:"#10b981",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font,maxWidth:"100%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                                  📄 HSE notification: {inc.hseNotice.name}
+                                </button>
+                                <label style={{fontSize:12,color:Z.slate||Z.white,cursor:"pointer",textDecoration:"underline"}}>
+                                  Replace
+                                  <input type="file" accept={RIDDOR_ACCEPT} style={{display:"none"}} aria-label="Replace the HSE notification" onChange={async e=>{
+                                    const f=e.target.files&&e.target.files[0]; e.target.value=""; if(!f) return;
+                                    const up=await uploadHseNotice(f, inc.id, user?.name); if(up.error){ notify(up.error,{kind:"error"}); return; }
+                                    const old=inc.hseNotice; setIncidents(p=>p.map(i=>i.id===inc.id?{...i,hseNotice:up.notice}:i)); removeHseNoticeFile(old&&old.path);
+                                    notify("HSE notification replaced.");
+                                  }}/>
+                                </label>
+                                <button type="button" onClick={async()=>{
+                                  if(!(await ask({ title:"Remove the HSE notification?", message:`${inc.hseNotice.name} will be deleted from this incident. The RIDDOR report details are kept.`, ok:"Remove", danger:true }))) return;
+                                  const old=inc.hseNotice; setIncidents(p=>p.map(i=>i.id===inc.id?{...i,hseNotice:null}:i)); removeHseNoticeFile(old&&old.path);
+                                }} style={{background:"none",border:"none",color:Z.slate||Z.white,cursor:"pointer",fontSize:12,fontFamily:font,textDecoration:"underline",padding:0}}>Remove</button>
+                              </>) : inc.riddorReported && (
+                                <label style={{display:"inline-flex",alignItems:"center",gap:6,background:Z.overlay,border:`1px dashed ${Z.borderMd}`,borderRadius:8,padding:"5px 12px",color:Z.white,cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font}}>
+                                  📎 Attach HSE notification
+                                  <input type="file" accept={RIDDOR_ACCEPT} style={{display:"none"}} aria-label="Attach the HSE notification" onChange={async e=>{
+                                    const f=e.target.files&&e.target.files[0]; e.target.value=""; if(!f) return;
+                                    const up=await uploadHseNotice(f, inc.id, user?.name); if(up.error){ notify(up.error,{kind:"error"}); return; }
+                                    setIncidents(p=>p.map(i=>i.id===inc.id?{...i,hseNotice:up.notice}:i));
+                                    notify("HSE notification attached.");
+                                  }}/>
+                                </label>
+                              )}
                             </div>
                             {!inc.riddorReported && (
                               <a href="https://www.hse.gov.uk/riddor/report.htm" target="_blank" rel="noreferrer"
@@ -799,12 +882,21 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
                           {!inc.riddorReported ? (
                             <button onClick={async()=>{
                               const v = await ask({ title: "Mark as reported to HSE", message: "Record when this RIDDOR report was made.", ok: "Mark as reported",
-                                fields: [{ id: "date", label: "Date reported to HSE", type: "date", required: true, value: new Date().toISOString().slice(0,10) },
+                                fields: [{ id: "date", label: "Date reported to HSE", type: "date", required: true, value: todayISO() },
                                          { id: "ref", label: "HSE reference number (optional)" },
-                                         { id: "by", label: "Reported by (name)" }] });
+                                         { id: "by", label: "Reported by (name)", value: user?.name || "" },
+                                         { id: "notice", label: "HSE notification (optional)", type: "file", accept: RIDDOR_ACCEPT,
+                                           help: "The confirmation HSE sends after the report (PDF, or a photo or screenshot). You can attach it later too." }] });
                               if (!v) return;
-                              const date = v.date, ref = v.ref.trim(), by = v.by.trim();
-                              setIncidents(p=>p.map(i=>i.id===inc.id?{...i,riddorReported:true,riddorReportedDate:date,hseReference:ref,riddorReportedBy:by}:i));
+                              const date = v.date, ref = String(v.ref||"").trim(), by = String(v.by||"").trim();
+                              let hseNotice = inc.hseNotice || null, warn = "";
+                              if (v.notice && typeof v.notice === "object") {
+                                const up = await uploadHseNotice(v.notice, inc.id, user?.name);
+                                if (up.error) warn = ` The HSE notification wasn't attached: ${up.error} Use "Attach HSE notification" to try again.`;
+                                else { if (hseNotice && hseNotice.path) removeHseNoticeFile(hseNotice.path); hseNotice = up.notice; }
+                              }
+                              setIncidents(p=>p.map(i=>i.id===inc.id?{...i,riddorReported:true,riddorReportedDate:date,hseReference:ref,riddorReportedBy:by,hseNotice}:i));
+                              notify(`Marked as reported to HSE${hseNotice&&!warn?", with the HSE notification attached":""}.${warn}`, warn ? { kind:"error" } : {});
                             }} style={{background:"linear-gradient(135deg,#ef4444,#b91c1c)",color:"#fff",border:"none",borderRadius:8,padding:"8px 16px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font,flexShrink:0,whiteSpace:"nowrap"}}>
                               ✓ Mark as Reported to HSE
                             </button>
@@ -814,7 +906,7 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
                               const was = { riddorReported:inc.riddorReported, riddorReportedDate:inc.riddorReportedDate, hseReference:inc.hseReference, riddorReportedBy:inc.riddorReportedBy };
                               setIncidents(p=>p.map(i=>i.id===inc.id?{...i,riddorReported:false,riddorReportedDate:null,hseReference:null,riddorReportedBy:null}:i));
                               notify("RIDDOR 'reported to HSE' removed from this incident.", { undo: () => setIncidents(p=>p.map(i=>i.id===inc.id?{...i,...was}:i)) });
-                            }} style={{background:"rgba(255,255,255,0.06)",color:"rgba(255,255,255,0.4)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:11,fontFamily:font,flexShrink:0,whiteSpace:"nowrap"}}>
+                            }} style={{background:Z.overlay,color:Z.muted,border:`1px solid ${Z.borderMd}`,borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:11,fontFamily:font,flexShrink:0,whiteSpace:"nowrap"}}>
                               Undo
                             </button>
                           )}
@@ -855,6 +947,13 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
               </div>
             );
           })}
+          {filtered.length > limit && (
+            <div data-testid="incident-more" style={{display:"flex",gap:10,justifyContent:"center",alignItems:"center",padding:"8px 0",flexWrap:"wrap"}}>
+              <span style={{fontSize:12,color:Z.muted}}>Showing {limit} of {filtered.length}</span>
+              <button type="button" onClick={()=>setShown(limit+PAGE)} style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:10,padding:"8px 18px",color:Z.white,cursor:"pointer",fontFamily:font,fontSize:13,fontWeight:700}}>Show {Math.min(PAGE, filtered.length-limit)} more</button>
+              <button type="button" onClick={()=>setShown(filtered.length)} style={{background:"none",border:"none",color:Z.muted,cursor:"pointer",fontFamily:font,fontSize:12,fontWeight:700,textDecoration:"underline"}}>Show all</button>
+            </div>
+          )}
         </div>
       )}
     </div>

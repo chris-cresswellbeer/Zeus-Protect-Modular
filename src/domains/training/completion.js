@@ -9,6 +9,7 @@
  * Recorded completions count as complete (and expire from their date like any
  * other), but have no score, no answers and no portal certificate.
  */
+import { localISO } from "../../lib/dates";
 
 export const PASS_MARK = 70;   // the default; each module can set its own (passMark, 50–100)
 
@@ -29,7 +30,8 @@ export const scoreText = c => !c ? "—" : c.recorded ? "Recorded" : `${c.score}
 /** One-line description of who recorded it, for tooltips and detail lines. */
 export const recordedText = c => {
   const r = c && c.recorded; if (!r) return "";
-  return `Recorded by ${r.by || "an administrator"}${r.at ? ` on ${String(r.at).slice(0, 10)}` : ""}${r.note ? ` — ${r.note}` : ""}`;
+  const on = r.at ? (isNaN(new Date(r.at)) ? String(r.at).slice(0, 10) : localISO(new Date(r.at))) : "";   // UK date
+  return `Recorded by ${r.by || "an administrator"}${on ? ` on ${on}` : ""}${r.note ? ` — ${r.note}` : ""}`;
 };
 
 /**

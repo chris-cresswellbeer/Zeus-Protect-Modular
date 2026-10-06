@@ -31,6 +31,26 @@ import { INCIDENT_TYPES, ACCIDENT_CODES, NUMBER_CODES } from "../../data/seedInc
 import { isIncompleteQuickReport } from "./quickReportStatus";
 import { AuditHistoryModal } from "../audit/AuditTrailTab";
 import { useRemembered } from "../../lib/remembered";
+import { sb } from "../../lib/supabase";
+import { openFile } from "../../lib/fileAccess";
+import { checkMachineFiles } from "../machinery/machineEvidence";
+
+// The HSE's RIDDOR notification for an incident (PDF or photo) goes in the private
+// "incident-photos" bucket as riddor_<incident id>_… — a name only admins can open
+// (db_rules.sql can_read_file has no rule for "riddor_", so only admins and the uploader).
+// Stored on the incident as hseNotice: { name, type, url, path, at, by } (the jsonb
+// "details" column — no database change needed).
+const RIDDOR_ACCEPT = ".pdf,.jpg,.jpeg,.png,.webp,.heic,.heif,.doc,.docx,.msg,.eml,application/pdf,image/*";
+async function uploadHseNotice(file, incId, by) {
+  const bad = checkMachineFiles([file]);
+  if (bad && !/\.(msg|eml)$/i.test(file.name || "")) return { error: bad };
+  const safe = String(file.name || "notice").replace(/[^a-zA-Z0-9._-]/g, "_").slice(-80);
+  const path = `riddor_${String(incId).replace(/[^a-zA-Z0-9_-]/g, "_")}_${Date.now()}_${safe}`;
+  const { error } = await sb.storage.upload("incident-photos", path, file);
+  if (error) return { error: `"${file.name}" couldn't be uploaded: ${error}` };
+  return { notice: { name: file.name, type: file.type || "", url: sb.storage.getPublicUrl("incident-photos", path), path, at: new Date().toISOString(), ...(by ? { by } : {}) } };
+}
+const removeHseNoticeFile = path => { if (path) sb.storage.remove("incident-photos", [path]).catch(() => {}); };
 
 // Urgency chosen on a quick hazard report (QuickReportModal / mobile ReportHazard).
 const QUICK_URGENCY_LABEL = { low:"Safe to leave", medium:"Needs attention", high:"STOP WORK" };
@@ -161,7 +181,7 @@ function AdminIncidentTab({ user, incidents, setIncidents, dbDeleteIncident, sta
       // ── Sheet 1: Incident Log ──
       const headers = [
         "Incident ID","Date","Time","Type","Location","Description",
-        "Injury Type","RIDDOR","Reported to HSE","HSE Report Date","HSE Reference","Reported By","Accident Code","Number Code","Status",
+        "Injury Type","RIDDOR","Reported to HSE","HSE Report Date","HSE Reference","Reported By","HSE Notice Attached","Accident Code","Number Code","Status",
         "Reported By",
         "Equipment Involved","Equipment Asset No","Equipment Name","Equipment Damaged","Damage Description","Damage Severity","Taken Out of Service",
         "Person Involved","Date of Birth","Address","Postcode",
@@ -189,6 +209,7 @@ function AdminIncidentTab({ user, incidents, setIncidents, dbDeleteIncident, sta
             inc.riddorReportedDate||"",
             inc.hseReference||"",
             inc.riddorReportedBy||"",
+            inc.hseNotice&&inc.hseNotice.name?"Yes":"No",
             inc.accidentCode||"",
             inc.numberCode||"",
             inc.closed?"Closed":"Open",
@@ -798,6 +819,38 @@ function AdminIncidentTab({ user, incidents, setIncidents, dbDeleteIncident, sta
                                 ? `Reported to HSE on ${inc.riddorReportedDate||"—"}${inc.riddorReportedBy?" by "+inc.riddorReportedBy:""}. Reference: ${inc.hseReference||"not recorded"}.`
                                 : "This incident must be reported to the HSE under RIDDOR 2013. Submit form F2508/F2508A at riddor.hse.gov.uk or call 0345 300 9923."}
                             </div>
+                            {/* the HSE notification: open, attach, replace or remove */}
+                            <div data-testid="hse-notice" style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginTop:8}}>
+                              {inc.hseNotice && inc.hseNotice.url ? (<>
+                                <button type="button" onClick={()=>{ if(!openFile(inc.hseNotice.url)) notify("Your browser blocked the new tab. Allow pop-ups for this site.", { kind:"error" }); }}
+                                  style={{background:"rgba(16,185,129,0.1)",border:"1px solid rgba(16,185,129,0.35)",borderRadius:8,padding:"5px 12px",color:"#10b981",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font,maxWidth:"100%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                                  📄 HSE notification: {inc.hseNotice.name}
+                                </button>
+                                <label style={{fontSize:11,color:Z.muted,cursor:"pointer",textDecoration:"underline"}}>
+                                  Replace
+                                  <input type="file" accept={RIDDOR_ACCEPT} style={{display:"none"}} aria-label="Replace the HSE notification" onChange={async e=>{
+                                    const f=e.target.files&&e.target.files[0]; e.target.value=""; if(!f) return;
+                                    const up=await uploadHseNotice(f, inc.id, user?.name); if(up.error){ notify(up.error,{kind:"error"}); return; }
+                                    const old=inc.hseNotice; setIncidents(p=>p.map(i=>i.id===inc.id?{...i,hseNotice:up.notice}:i)); removeHseNoticeFile(old&&old.path);
+                                    notify("HSE notification replaced.");
+                                  }}/>
+                                </label>
+                                <button type="button" onClick={async()=>{
+                                  if(!(await ask({ title:"Remove the HSE notification?", message:`${inc.hseNotice.name} will be deleted from this incident. The RIDDOR report details are kept.`, ok:"Remove", danger:true }))) return;
+                                  const old=inc.hseNotice; setIncidents(p=>p.map(i=>i.id===inc.id?{...i,hseNotice:null}:i)); removeHseNoticeFile(old&&old.path);
+                                }} style={{background:"none",border:"none",color:Z.muted,cursor:"pointer",fontSize:11,fontFamily:font,textDecoration:"underline",padding:0}}>Remove</button>
+                              </>) : inc.riddorReported && (
+                                <label style={{display:"inline-flex",alignItems:"center",gap:6,background:Z.overlay,border:`1px dashed ${Z.borderMd}`,borderRadius:8,padding:"5px 12px",color:Z.white,cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font}}>
+                                  📎 Attach HSE notification
+                                  <input type="file" accept={RIDDOR_ACCEPT} style={{display:"none"}} aria-label="Attach the HSE notification" onChange={async e=>{
+                                    const f=e.target.files&&e.target.files[0]; e.target.value=""; if(!f) return;
+                                    const up=await uploadHseNotice(f, inc.id, user?.name); if(up.error){ notify(up.error,{kind:"error"}); return; }
+                                    setIncidents(p=>p.map(i=>i.id===inc.id?{...i,hseNotice:up.notice}:i));
+                                    notify("HSE notification attached.");
+                                  }}/>
+                                </label>
+                              )}
+                            </div>
                             {!inc.riddorReported && (
                               <a href="https://www.hse.gov.uk/riddor/report.htm" target="_blank" rel="noreferrer"
                                 style={{fontSize:11,color:"#93c5fd",marginTop:4,display:"inline-block"}}>
@@ -810,10 +863,19 @@ function AdminIncidentTab({ user, incidents, setIncidents, dbDeleteIncident, sta
                               const v = await ask({ title: "Mark as reported to HSE", message: "Record when this RIDDOR report was made.", ok: "Mark as reported",
                                 fields: [{ id: "date", label: "Date reported to HSE", type: "date", required: true, value: new Date().toISOString().slice(0,10) },
                                          { id: "ref", label: "HSE reference number (optional)" },
-                                         { id: "by", label: "Reported by (name)" }] });
+                                         { id: "by", label: "Reported by (name)", value: user?.name || "" },
+                                         { id: "notice", label: "HSE notification (optional)", type: "file", accept: RIDDOR_ACCEPT,
+                                           help: "The confirmation HSE sends after the report (PDF, or a photo or screenshot). You can attach it later too." }] });
                               if (!v) return;
-                              const date = v.date, ref = v.ref.trim(), by = v.by.trim();
-                              setIncidents(p=>p.map(i=>i.id===inc.id?{...i,riddorReported:true,riddorReportedDate:date,hseReference:ref,riddorReportedBy:by}:i));
+                              const date = v.date, ref = String(v.ref||"").trim(), by = String(v.by||"").trim();
+                              let hseNotice = inc.hseNotice || null, warn = "";
+                              if (v.notice && typeof v.notice === "object") {
+                                const up = await uploadHseNotice(v.notice, inc.id, user?.name);
+                                if (up.error) warn = ` The HSE notification wasn't attached: ${up.error} Use "Attach HSE notification" to try again.`;
+                                else { if (hseNotice && hseNotice.path) removeHseNoticeFile(hseNotice.path); hseNotice = up.notice; }
+                              }
+                              setIncidents(p=>p.map(i=>i.id===inc.id?{...i,riddorReported:true,riddorReportedDate:date,hseReference:ref,riddorReportedBy:by,hseNotice}:i));
+                              notify(`Marked as reported to HSE${hseNotice&&!warn?", with the HSE notification attached":""}.${warn}`, warn ? { kind:"error" } : {});
                             }} style={{background:"linear-gradient(135deg,#ef4444,#b91c1c)",color:"#fff",border:"none",borderRadius:8,padding:"8px 16px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font,flexShrink:0,whiteSpace:"nowrap"}}>
                               ✓ Mark as Reported to HSE
                             </button>

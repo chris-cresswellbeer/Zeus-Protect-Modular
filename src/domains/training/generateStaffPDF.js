@@ -3,13 +3,19 @@ import { getExpiryStatus, todayISO } from "../../lib/dates";
 import { EXT_CERT_TYPES } from "../../data/seedExtCerts";
 import { MACHINERY_TYPES, machineState, compsFor } from "../../data/seedMachinery";
 import { E } from "../../lib/emoji";
+import { notify } from "../../shared/Feedback";
+import { collectCertFiles, renderCertFiles, appendixHtml } from "./certAppendix";
 
 /**
  * Opens a printable A4 "Compliance Report" for ONE staff member in a new window
  * and triggers the browser print dialog (user picks "Save as PDF").
  *
  * Sections: training (score/date/expiry/cert id), required documents
- * (acknowledged or not), external certificates, machinery competences.
+ * (acknowledged or not), external certificates, machinery competences, then an
+ * APPENDIX with a copy of each certificate file on the person's record (First Aid,
+ * Fire Warden, machinery licences / evidence) — certAppendix.js. The window opens
+ * straight away (so pop-up blockers allow it) with a "preparing" message while the
+ * files are fetched; the print dialog opens when the report is ready.
  *
  * Parameters are the global state maps from App.jsx, passed through by ReportsTab.
  * `Z` is accepted but unused (the report is always light/print-styled).
@@ -18,11 +24,17 @@ import { E } from "../../lib/emoji";
  *  • Pass mark: isPassed() in completion.js (a recorded completion always counts).
  *  • Values are inserted into the HTML without escaping. Names/titles containing
  *    "<" or "&" could break the layout; escape them if free-text fields are added.
- *  • If a pop-up blocker stops window.open, `win` is null and this throws —
- *    users need to allow pop-ups for the portal.
+ *  • If a pop-up blocker stops window.open, the person is told to allow pop-ups.
  */
-function generateStaffPDF(u, allModules, assigns, comps, docs, docAssignments, docAcknowledgements, extCerts, machineComps, lastLoginMap, Z, allMachineTypes) {
+async function generateStaffPDF(u, allModules, assigns, comps, docs, docAssignments, docAcknowledgements, extCerts, machineComps, lastLoginMap, Z, allMachineTypes) {
   const machineTypes = allMachineTypes || MACHINERY_TYPES;
+  // open now, while the click still counts as the person's action (pop-up blockers)
+  const win = window.open("","_blank","width=900,height=700");
+  if (!win) { notify("Your browser blocked the report window. Allow pop-ups for this site, then try again.", { kind:"error" }); return; }
+  const files = collectCertFiles(u, extCerts||{}, machineComps||{}, machineTypes);
+  const appendixNo = Object.fromEntries(files.map((f, i) => [f.key, i + 1]));
+  const seeApx = key => appendixNo[key] ? `<div style="font-size:10.5px;color:#64748b;margin-top:2px">Copy: Appendix ${appendixNo[key]}</div>` : "";
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Compliance Report — ${u.name}</title></head><body style="font-family:Segoe UI,Arial,sans-serif;padding:40px;color:#0d1f5c"><h2>Preparing ${u.name}'s compliance report…</h2><p id="p" style="color:#64748b">${files.length ? `Attaching ${files.length} certificate${files.length!==1?"s":""}…` : ""}</p></body></html>`);
   const today = new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"long",year:"numeric"});
   const assignedIds = assigns[u.id]||[];
   const userComps = comps[u.id]||{};
@@ -81,7 +93,7 @@ function generateStaffPDF(u, allModules, assigns, comps, docs, docAssignments, d
     if (!cert) return `<tr style="background:#fff2f2"><td>${ct.icon} ${ct.label}</td><td style="color:#dc2626;font-weight:600">Not uploaded</td><td>—</td><td>—</td></tr>`;
     const expired = cert.expiryDate && cert.expiryDate < todayISO();
     return `<tr style="background:${expired?"#fff8f0":"#f0fff4"}">
-      <td>${ct.icon} ${ct.label}</td>
+      <td>${ct.icon} ${ct.label}${seeApx(`ext_${ct.id}`)}</td>
       <td style="color:${expired?"#b45309":"#15803d"};font-weight:600">${expired?"⚠ Expired":"✓ Valid"}</td>
       <td>${cert.issuedDate||"—"}</td>
       <td>${cert.expiryDate||"—"}</td>
@@ -96,7 +108,7 @@ function generateStaffPDF(u, allModules, assigns, comps, docs, docAssignments, d
     const expired = st.key === "expired";
     const d = v => v ? String(v).slice(0,10).split("-").reverse().join("/") : "—";
     return `<tr style="background:${expired?"#fff8f0":"#fff"}">
-      <td>${mType.icon||"🔧"} ${mType.label||mc.machineId}</td>
+      <td>${mType.icon||"🔧"} ${mType.label||mc.machineId}${(()=>{ const n = files.filter(f=>f.key.startsWith(`mc_${mc.id}_`)).map(f=>appendixNo[f.key]); return n.length ? `<div style="font-size:10.5px;color:#64748b;margin-top:2px">Copy: Appendix ${n.join(", ")}</div>` : ""; })()}</td>
       <td style="color:${{competent:"#15803d",expiring:"#b45309",expired:"#dc2626",provisional:"#1d4ed8"}[st.key]||"#475569"};font-weight:600">${st.label}</td>
       <td>${d(mc.assessmentDate)}</td>
       <td style="color:${expired?"#dc2626":"inherit"}">${st.ex?`${d(st.ex.expiryDate)} (${st.ex.why})`:"—"}</td>
@@ -127,6 +139,12 @@ function generateStaffPDF(u, allModules, assigns, comps, docs, docAssignments, d
   td { padding:8px 12px; border-bottom:1px solid #e2e8f0; }
   .footer { margin-top:32px; padding-top:12px; border-top:1px solid #e2e8f0; display:flex; justify-content:space-between; font-size:10px; color:#94a3b8; }
   .no-data { padding:12px 16px; color:#94a3b8; font-style:italic; background:#f8fafc; border-radius:6px; margin-bottom:4px; }
+  .apx { page-break-before:always; break-before:page; padding-top:4px; }
+  .apx-label { font-size:10px; font-weight:800; letter-spacing:1px; color:#94a3b8; text-transform:uppercase; }
+  .apx-sub { font-size:11px; color:#64748b; margin-bottom:8px; }
+  .apx-img { display:block; max-width:100%; max-height:245mm; margin:8px auto 0; border:1px solid #e2e8f0; }
+  .apx-index { margin-top:18px; font-size:12px; color:#475569; }
+  .apx-note { page-break-before:auto; break-before:auto; margin-top:22px; }
 </style>
 </head><body>
   <div class="header">
@@ -168,17 +186,33 @@ function generateStaffPDF(u, allModules, assigns, comps, docs, docAssignments, d
   <table><thead><tr><th>Machine</th><th>Status</th><th>Assessed</th><th>Renew by</th></tr></thead><tbody>${machineRows}</tbody></table>
   `:""}
 
+  ${files.length ? `<div class="apx-index"><b>Appendices</b> — copies of the certificates on file: ${files.map((f,i)=>`${i+1}. ${f.title}`).join(" · ")}</div>` : ""}
+
   <div class="footer">
     <span>Zeus Protect Health & Safety Portal · Confidential</span>
     <span>${u.email}</span>
     <span>Generated ${today}</span>
   </div>
+  __APPENDIX__
 </body></html>`;
 
-  const win = window.open("","_blank","width=900,height=700");
-  win.document.write(html);
+  // fetch and render the certificate files, showing progress in the window
+  let appendix = "";
+  if (files.length) {
+    const rendered = await renderCertFiles(files, (done, total) => {
+      try { const el = win.document.getElementById("p"); if (el) el.textContent = `Attaching certificates… ${done} of ${total}`; } catch { /* window closed */ }
+    });
+    appendix = appendixHtml(rendered, u.name);
+  }
+  if (win.closed) return;
+  win.document.open();
+  win.document.write(html.replace("__APPENDIX__", () => appendix));   // (a function, so "$" in names is kept as typed)
   win.document.close();
-  win.onload = () => win.print();
+  // print once every picture has loaded
+  const imgs = Array.from(win.document.images || []);
+  await Promise.all(imgs.map(im => im.complete ? null : new Promise(res => { im.onload = im.onerror = res; })));
+  win.focus();
+  win.print();
 }
 
 

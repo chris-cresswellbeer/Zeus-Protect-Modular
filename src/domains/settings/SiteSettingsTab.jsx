@@ -11,7 +11,7 @@ import { useSiteLists, saveSiteLists, loadSiteLists, SITE_LIST_DEFAULTS } from "
  */
 const LISTS = [
   { key: "reportLocations", title: "Hazard report locations", help: "The \"Where was it?\" choices when someone makes a quick hazard report, on a phone or computer. They can always type somewhere else.", add: "e.g. Racking Aisle 4" },
-  { key: "firstAidZones", title: "First aid zones", help: "The areas first aid cover is planned for, in the First Aid register and on first aid certificates.", add: "e.g. Ground Floor — Offices" },
+  { key: "firstAidZones", title: "First aid zones", help: "The areas first aid cover is planned for, in the First Aid register and on first aid certificates. Fire wardens' areas are chosen from this list too.", add: "e.g. Ground Floor — Offices" },
   { key: "firstAidShifts", title: "First aid shifts", help: "The shifts first aid cover is planned for.", add: "e.g. Late Shift (16:00–02:00)" },
 ];
 

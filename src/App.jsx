@@ -147,6 +147,7 @@ import { useSort, sortRows, SortButton } from "./shared/Sortable";
 import { getProgress, saveProgress, clearProgress, resumeLabel } from "./lib/moduleProgress";
 import { mapDueRows, dueInfo, dueText, formatDue, addDays, DUE_CHOICES, overdueByPerson, today as todayISO } from "./lib/dueDates";
 import { startSession, stopSession, setSessionTheme } from "./shared/SessionTimeout";
+import { fireSummary, todayLocal as fireToday } from "./domains/fireSafety/fireLogic";
 import { loadSiteLists, getSiteLists, coverShifts, isAllShift } from "./lib/siteLists";
 import { loadWelcomeVideo, showWelcome, hideWelcome, WelcomeReplay, WelcomeVideoSettings } from "./shared/WelcomeVideo";
 import { useRemembered, clearRemembered } from "./lib/remembered";
@@ -1149,8 +1150,19 @@ export default function App() {
     dbSaveSiteInspections(siteInspections);
   }, [siteInspections]); // eslint-disable-line
 
+  // One fire safety save at a time: a change made while a save is running (e.g. Undo
+  // straight after a remove) waits and is saved next, so the prune of the earlier save
+  // can't delete a row the later change put back.
+  const fireSaveRef = useRef({ running: false, next: null });
   useEffect(() => { if (!_ready.current || !writesAll()) return;
-    dbSaveFireSafety(fireSafety);
+    const q = fireSaveRef.current;
+    q.next = fireSafety;
+    if (q.running) return;
+    (async () => {
+      q.running = true;
+      try { while (q.next) { const fs = q.next; q.next = null; await dbSaveFireSafety(fs); } }
+      finally { q.running = false; }
+    })();
   }, [fireSafety]); // eslint-disable-line
 
   useEffect(() => { if (!_ready.current || !writesAll()) return;
@@ -1909,12 +1921,13 @@ export default function App() {
     await dbWrite(sb.from("quiz_failures").insert({ data: record }), "quiz failure record");
   }
 
+  // both resolve to true when the database accepted the change
   async function dbSaveExtCert(userId, certType, data) {
-    await dbWrite(sb.from("ext_certs").upsert({ user_id: String(userId), cert_type: certType, data }, { onConflict: "user_id,cert_type" }), "external certificate", { alertOnError: true });
+    return dbWrite(sb.from("ext_certs").upsert({ user_id: String(userId), cert_type: certType, data }, { onConflict: "user_id,cert_type" }), "external certificate", { alertOnError: true });
   }
 
   async function dbDeleteExtCert(userId, certType) {
-    await dbWrite(sb.from("ext_certs").delete().match({ user_id: userId, cert_type: certType }), "external certificate delete");
+    return dbWrite(sb.from("ext_certs").delete().match({ user_id: userId, cert_type: certType }), "external certificate delete");
   }
 
   async function dbSaveCustomModule(mod) {
@@ -3052,6 +3065,13 @@ export default function App() {
     const healthLabel = healthPct===100?"Fully Compliant":healthPct>=70?"Mostly Compliant":"Needs Attention";
     const totalActionNeeded = actionNeeded.length + (dseNeedsAction?1:0);
 
+    // Staff menu bar widths: the tabs must never be hidden behind the bell. Wider than
+    // 1700px everything is shown in full; narrower, the search shrinks to 🔍; below 1400
+    // the first name goes, the labels drop "My" and the tabs tighten up. At 1024px and
+    // below the ☰ menu takes over (CSS below).
+    const sTight = winW < 1700, sTiny = winW < 1400;
+    const STAFF_TAB_LABEL = {dashboard:"Dashboard",training:"My Training",history:"History",documents:"Documents",incidents:"Report Incident",dse:"My DSE",machinery:"My Machinery",actions:"My Actions",team:"My Team"};
+    const STAFF_TAB_SHORT = {dashboard:"Dashboard",training:"Training",history:"History",documents:"Documents",incidents:"Report",dse:"DSE",machinery:"Machinery",actions:"Actions",team:"Team"};
     return (
       <EmojiCtx.Provider value={emojiMode}>
       <div style={{minHeight:"100vh",background:T.bg,fontFamily:font,color:T.white}}>
@@ -3060,13 +3080,13 @@ export default function App() {
         {/* ▲/▼ top-of-page / bottom-of-page buttons on long screens (shared/ScrollNav.jsx) */}
         <ScrollNav bottom={isMobile && stab!=="dashboard" ? 92 : 24} Z={T} font={font}/>
         {/* Nav */}
-        <div style={{background:`linear-gradient(90deg,${T.navyDk},${T.navyMd})`,borderBottom:`1px solid ${T.border}`,padding:"0 24px",display:"flex",alignItems:"center",position:"relative"}}>
-          <div style={{marginRight:20,padding:"10px 0",flexShrink:0}}><ZeusLogo darkMode={darkMode}/></div>
-          <div style={{display:"flex",alignItems:"center",gap:2,flex:1,overflowX:"auto"}} className="staff-nav-tabs">
+        <div style={{background:`linear-gradient(90deg,${T.navyDk},${T.navyMd})`,borderBottom:`1px solid ${T.border}`,padding:sTiny?"0 14px":"0 24px",display:"flex",alignItems:"center",position:"relative"}}>
+          <div style={{marginRight:sTiny?10:20,padding:"10px 0",flexShrink:0}}><ZeusLogo darkMode={darkMode}/></div>
+          <div style={{display:"flex",alignItems:"center",gap:sTiny?0:2,flex:1,minWidth:0,overflowX:"auto"}} className="staff-nav-tabs" data-testid="staff-tabs">
             {["dashboard","training","history","documents","incidents","dse",...(isWarehouseWorker(user)?["machinery"]:[]),"actions",...(user.role==="manager"?["team"]:[])].map(t=>(
-              <button key={t} onClick={()=>setStab(t)}
-                style={{background:"none",border:"none",borderBottom:stab===t?`2px solid ${T.accent}`:"2px solid transparent",color:stab===t?T.white:T.muted,fontWeight:stab===t?700:400,fontSize:13,cursor:"pointer",padding:"14px 14px 12px",fontFamily:font,whiteSpace:"nowrap",letterSpacing:.3,transition:"color .15s"}}>
-                {{dashboard:"Dashboard",training:"My Training",history:"History",documents:"Documents",incidents:"Report Incident",dse:"My DSE",machinery:"My Machinery",actions:"My Actions",team:"My Team"}[t]}
+              <button key={t} onClick={()=>setStab(t)} title={STAFF_TAB_LABEL[t]}
+                style={{background:"none",border:"none",borderBottom:stab===t?`2px solid ${T.accent}`:"2px solid transparent",color:stab===t?T.white:T.muted,fontWeight:stab===t?700:400,fontSize:13,cursor:"pointer",padding:sTiny?"14px 8px 12px":sTight?"14px 10px 12px":"14px 14px 12px",fontFamily:font,whiteSpace:"nowrap",letterSpacing:.3,transition:"color .15s"}}>
+                {(sTiny?STAFF_TAB_SHORT:STAFF_TAB_LABEL)[t]}
               </button>
             ))}
           </div>
@@ -3074,7 +3094,7 @@ export default function App() {
             onClick={()=>setMobileMenuOpen(m=>!m)}>
             {mobileMenuOpen?"✕":"☰"}
           </button>
-          <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:isMobile?6:10}}>
+          <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:isMobile?6:sTiny?6:10,flexShrink:0,paddingLeft:8}}>
             {/* Staff notification list — rebuilt every render from current state. `nav.tab` is a staff tab key. */}
             {(()=>{
               const notifications = [];
@@ -3130,7 +3150,7 @@ export default function App() {
               else if(myActions.length) notifications.push({type:"report",urgent:false,title:`${myActions.length} open corrective action${myActions.length!==1?"s":""}`,detail:`You have been assigned action${myActions.length!==1?"s":""} from an investigation`,nav:{tab:"actions"}});
               return <NotificationBell notifications={notifications} onNavigate={n=>{ setStab(n.tab); if(n.editId) setQuickEditId(n.editId); }} Z={T} font={font}/>;
             })()}
-            <QuickSearch getItems={quickItems} Z={T} font={font} compact={isMobile}/>
+            <QuickSearch getItems={quickItems} Z={T} font={font} compact={isMobile||sTight}/>
             <div style={{width:1,height:20,background:T.headerBgMd,margin:"0 4px"}}/>
             <button title={`Theme: ${theme} — click to cycle`} onClick={()=>{
               const order=["dark","light","slate","forest","graphite","arctic","sand","rose"];
@@ -3145,19 +3165,20 @@ export default function App() {
               <button onClick={()=>setView("admin")}
                 title="Back to the admin panel"
                 style={{background:T.overlay,border:`1px solid ${T.borderMd}`,borderRadius:8,padding:"5px 12px",color:T.muted,cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font,display:"flex",alignItems:"center",gap:5,transition:"all .15s"}}>
-                {E("🛠 ","")}Back to Admin
+                {E("🛠 ","")}{sTight?"Admin":"Back to Admin"}
               </button>
               <div style={{width:1,height:20,background:T.headerBgMd,margin:"0 4px"}}/>
             </>)}
-            <div onClick={()=>setStab("account")}
+            <div onClick={()=>setStab("account")} role="button" tabIndex={0} aria-label={`My Account (${user.name})`}
+              onKeyDown={e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); setStab("account"); } }}
               title="My Account"
               style={{display:"flex",alignItems:"center",gap:7,cursor:"pointer",padding:"4px 8px 4px 4px",borderRadius:10,transition:"background .15s",background:stab==="account"?T.overlay:"transparent",border:stab==="account"?`1px solid ${T.borderMd}`:"1px solid transparent"}}
               onMouseEnter={e=>{ if(stab!=="account") e.currentTarget.style.background=T.overlay; }}
               onMouseLeave={e=>{ e.currentTarget.style.background=stab==="account"?T.overlay:"transparent"; }}>
               <Avatar name={user.name} size={32}/>
-              <span style={{fontSize:13,color:stab==="account"?T.white:T.muted,fontWeight:600}}>{user.name.split(" ")[0]}</span>
+              {!sTiny && <span style={{fontSize:13,color:stab==="account"?T.white:T.muted,fontWeight:600}}>{user.name.split(" ")[0]}</span>}
             </div>
-            <button onClick={logout} style={{background:"none",border:"none",color:T.muted,cursor:"pointer",fontSize:11,fontFamily:font}}>Sign Out</button>
+            <button onClick={logout} style={{background:"none",border:"none",color:T.muted,cursor:"pointer",fontSize:11,fontFamily:font,whiteSpace:"nowrap"}}>Sign Out</button>
           </div>
         </div>
 
@@ -4192,19 +4213,14 @@ export default function App() {
               const expiredConCerts=(contractors||[]).filter(c=>Object.values(contractorCerts[c.id]||{}).some(cert=>cert.expiryDate&&cert.expiryDate<today3));
               if(expiredConCerts.length) notifications.push({type:"document",urgent:true,title:`${expiredConCerts.length} contractor${expiredConCerts.length!==1?"s":""} with expired certificates`,detail:"Check Contractors tab",nav:{tab:"contractors"}});
 
-              // Fire safety alerts
-              const fs2 = fireSafety||{};
-              const expiredFW = (fs2.wardens||[]).filter(w=>{ const exp=new Date(w.qualDate); exp.setMonth(exp.getMonth()+(w.renewalMonths||36)); return exp.toISOString().slice(0,10)<today2; });
-              const expiringFW = (fs2.wardens||[]).filter(w=>{ const exp=new Date(w.qualDate); exp.setMonth(exp.getMonth()+(w.renewalMonths||36)); const d=Math.ceil((exp-new Date())/86400000); return d>=0&&d<=EXPIRY_WARNING_DAYS; });
-              if(expiredFW.length) notifications.push({type:"report",urgent:true,title:`${expiredFW.length} fire warden cert${expiredFW.length!==1?"s":""} expired`,detail:"Check Fire Safety → Wardens",nav:{tab:"firesafety"}});
-              else if(expiringFW.length) notifications.push({type:"report",urgent:false,title:`${expiringFW.length} fire warden cert${expiringFW.length!==1?"s":""} expiring`,detail:"Check Fire Safety → Wardens",nav:{tab:"firesafety"}});
-              const overdueExtsN = (fs2.extinguishers||[]).filter(e=>e.nextServiceDue&&e.nextServiceDue<today2);
-              if(overdueExtsN.length) notifications.push({type:"report",urgent:true,title:`${overdueExtsN.length} fire extinguisher${overdueExtsN.length!==1?"s":""} overdue for service`,detail:"Check Fire Safety → Extinguishers",nav:{tab:"firesafety"}});
-              const lastDrillN = (fs2.drills||[]).length?(fs2.drills||[]).slice().sort((a,b)=>b.date.localeCompare(a.date))[0]:null;
-              const daysDrillN = lastDrillN?Math.floor((new Date()-new Date(lastDrillN.date))/86400000):null;
-              if(daysDrillN!==null&&daysDrillN>365) notifications.push({type:"report",urgent:true,title:"Fire drill overdue — last drill was "+daysDrillN+" days ago",detail:"Schedule a full evacuation drill",nav:{tab:"firesafety"}});
-              const lastFraN = (fs2.fraReviews||[]).length?(fs2.fraReviews||[]).slice().sort((a,b)=>b.date.localeCompare(a.date))[0]:null;
-              if(lastFraN?.nextReviewDue&&lastFraN.nextReviewDue<today2) notifications.push({type:"report",urgent:true,title:"Fire Risk Assessment review overdue",detail:`Review was due ${lastFraN.nextReviewDue}`,nav:{tab:"firesafety"}});
+              // Fire safety alerts — same rules as the Fire Safety screen (domains/fireSafety/fireLogic.js)
+              const fsum = fireSummary({ fireSafety: fireSafety||{}, extCerts: extCerts||{}, staff, inspections: siteInspections||[], today: fireToday() });
+              if(fsum.expiredWardens.length) notifications.push({type:"report",urgent:true,title:`${fsum.expiredWardens.length} fire warden cert${fsum.expiredWardens.length!==1?"s":""} expired`,detail:fsum.expiredWardens.map(w=>w.name).join(", "),nav:{tab:"firesafety"}});
+              else if(fsum.expiringWardens.length) notifications.push({type:"report",urgent:false,title:`${fsum.expiringWardens.length} fire warden cert${fsum.expiringWardens.length!==1?"s":""} expiring`,detail:fsum.expiringWardens.map(w=>`${w.name} (${w.expiry})`).join(", "),nav:{tab:"firesafety"}});
+              if(fsum.undatedWardens.length) notifications.push({type:"report",urgent:false,title:`${fsum.undatedWardens.length} fire warden certificate${fsum.undatedWardens.length!==1?"s have":" has"} no expiry date`,detail:fsum.undatedWardens.map(w=>w.name).join(", "),nav:{tab:"firesafety"}});
+              if(fsum.overdueExtinguishers.length) notifications.push({type:"report",urgent:true,title:`${fsum.overdueExtinguishers.length} fire extinguisher${fsum.overdueExtinguishers.length!==1?"s":""} overdue for service`,detail:"Check Fire Safety → Extinguishers",nav:{tab:"firesafety"}});
+              if(fsum.drillOverdue) notifications.push({type:"report",urgent:true,title:"Fire drill overdue — last drill was "+fsum.daysSinceDrill+" days ago",detail:"Schedule a full evacuation drill",nav:{tab:"firesafety"}});
+              if(fsum.fraOverdue) notifications.push({type:"report",urgent:true,title:"Fire Risk Assessment review overdue",detail:`Review was due ${fsum.fraNext}`,nav:{tab:"firesafety"}});
 
               // Document review dates
               const overdueReviews = docs.filter(d=>d.reviewDate&&d.reviewDate<today2);
@@ -4432,20 +4448,10 @@ export default function App() {
                       return card(E("🪪",""),"On Site Now",uniqueOnSite.length,uniqueOnSite.length>0?uniqueOnSite.slice(0,2).join(", ")+(uniqueOnSite.length>2?` +${uniqueOnSite.length-2} more`:""):"No contractors today",null,false,()=>setAtab("contractors"));
                     })() },
                     { id:"fireSafety", node: (()=>{
-                      const fs = fireSafety||{};
-                      const wardens2 = fs.wardens||[];
-                      const drills2 = fs.drills||[];
-                      const extinguishers2 = fs.extinguishers||[];
-                      const fraReviews2 = fs.fraReviews||[];
-                      const lastDrill2 = drills2.length?drills2.slice().sort((a,b)=>b.date.localeCompare(a.date))[0]:null;
-                      const daysSinceDrill2 = lastDrill2?Math.floor((new Date()-new Date(lastDrill2.date))/86400000):null;
-                      const expiredWardens2 = wardens2.filter(w=>{ const exp=new Date(w.qualDate); exp.setMonth(exp.getMonth()+(w.renewalMonths||36)); return exp.toISOString().slice(0,10)<today; });
-                      const overdueExts2 = extinguishers2.filter(e=>e.nextServiceDue&&e.nextServiceDue<today);
-                      const lastFra2 = fraReviews2.length?fraReviews2.slice().sort((a,b)=>b.date.localeCompare(a.date))[0]:null;
-                      const fraOverdue2 = lastFra2?.nextReviewDue&&lastFra2.nextReviewDue<today;
-                      const issues = expiredWardens2.length+overdueExts2.length+(fraOverdue2?1:0)+(daysSinceDrill2!==null&&daysSinceDrill2>365?1:0);
-                      const sub = issues>0?`${issues} item${issues!==1?"s":""} need attention`:(daysSinceDrill2!==null?`Last drill ${daysSinceDrill2}d ago`:"");
-                      return card(E("🔥",""),"Fire Safety",wardens2.length,sub,null,issues>0,()=>setAtab("firesafety"));
+                      // same rules as the Fire Safety screen (domains/fireSafety/fireLogic.js)
+                      const f = fireSummary({ fireSafety: fireSafety||{}, extCerts: extCerts||{}, staff: staffList, inspections: siteInspections||[], today: fireToday() });
+                      const sub = f.issues>0?`${f.issues} item${f.issues!==1?"s":""} need attention`:(f.daysSinceDrill!==null?`Last drill ${f.daysSinceDrill}d ago`:"No drills recorded");
+                      return card(E("🔥",""),"Fire Safety",f.wardens.length,sub,null,f.issues>0,()=>setAtab("firesafety"));
                     })() },
                     { id:"firstAid", node: (()=>{
                       const fa = firstAidData||{};
@@ -5695,7 +5701,7 @@ export default function App() {
 
           {atab==="incidents" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
-            <LazyAdminIncidentTab incidents={incidents} setIncidents={setIncidents} dbDeleteIncident={dbDeleteIncident} staff={staff} focusIncidentId={focusIncidentId} setFocusIncidentId={setFocusIncidentId} preset={pagePreset&&pagePreset.tab==="incidents"?pagePreset:null} clearPreset={()=>setPagePreset(null)} showAdminReportForm={showAdminReportForm} setShowAdminReportForm={setShowAdminReportForm}
+            <LazyAdminIncidentTab user={user} incidents={incidents} setIncidents={setIncidents} dbDeleteIncident={dbDeleteIncident} staff={staff} focusIncidentId={focusIncidentId} setFocusIncidentId={setFocusIncidentId} preset={pagePreset&&pagePreset.tab==="incidents"?pagePreset:null} clearPreset={()=>setPagePreset(null)} showAdminReportForm={showAdminReportForm} setShowAdminReportForm={setShowAdminReportForm}
               investigations={investigations} setInvestigations={setInvestigations}
               onOpenInvestigation={id=>{ setInvestigationView(id); setAtab("investigation"); }}
               equipment={equipment} setEquipment={setEquipment}
@@ -5728,7 +5734,8 @@ export default function App() {
 
           {atab==="equipment" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
-            <LazyEquipmentTrackerTab equipment={equipment} setEquipment={setEquipment} preset={pagePreset&&pagePreset.tab==="equipment"?pagePreset:null} clearPreset={()=>setPagePreset(null)} staff={staff} Z={T} font={font}/>
+            <LazyEquipmentTrackerTab equipment={equipment} setEquipment={setEquipment} preset={pagePreset&&pagePreset.tab==="equipment"?pagePreset:null} clearPreset={()=>setPagePreset(null)} staff={staff}
+              extinguishers={(fireSafety&&fireSafety.extinguishers)||[]} onOpenFireSafety={()=>{ setPagePreset({tab:"firesafety",sub:"extinguishers"}); setAtab("firesafety"); }} Z={T} font={font}/>
             </React.Suspense>
           )}
 
@@ -5756,13 +5763,17 @@ export default function App() {
 
           {atab==="inspections" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
-            <LazySiteInspectionsTab inspections={siteInspections} setInspections={setSiteInspections} staff={staff} Z={T} font={font}/>
+            <LazySiteInspectionsTab inspections={siteInspections} setInspections={setSiteInspections} staff={staff} preset={pagePreset&&pagePreset.tab==="inspections"?pagePreset:null} clearPreset={()=>setPagePreset(null)} Z={T} font={font}/>
             </React.Suspense>
           )}
 
           {atab==="firesafety" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
-            <LazyFireSafetyTab fireSafety={fireSafety} setFireSafety={setFireSafety} staff={staff} onUploadFraDoc={dbUploadFraDocument} onDeleteFraDoc={dbDeleteFraDocument} Z={T} font={font}/>
+            <LazyFireSafetyTab fireSafety={fireSafety} setFireSafety={setFireSafety} staff={staff} onUploadFraDoc={dbUploadFraDocument} onDeleteFraDoc={dbDeleteFraDocument}
+              extCerts={extCerts} setExtCerts={setExtCerts} onSaveCert={dbSaveExtCert} onDeleteCert={dbDeleteExtCert}
+              preset={pagePreset&&pagePreset.tab==="firesafety"?pagePreset:null} clearPreset={()=>setPagePreset(null)}
+              inspections={siteInspections} onOpenInspection={id=>{ setPagePreset({tab:"inspections",openId:id}); setAtab("inspections"); }}
+              Z={T} font={font}/>
             </React.Suspense>
           )}
           {atab==="account" && (

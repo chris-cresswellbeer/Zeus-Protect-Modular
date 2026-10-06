@@ -3,6 +3,7 @@ import { ask } from "../../shared/Feedback";
 import { useWindowWidth } from "../../shared/hooks";
 import { PERMIT_TYPES } from "../../data/seedPermits";
 import { PermitForm } from "./PermitForm";
+import { HelpTip } from "../../shared/HelpTip";
 
 /**
  * PermitsTab — admin Permit to Work register: list (filter by status/type), create/edit
@@ -152,7 +153,7 @@ function PermitsTab({ permits, setPermits, dbSavePermit, dbDeletePermit, staff, 
 
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20,flexWrap:"wrap",gap:12}}>
         <div>
-          <h2 style={{fontSize:22,fontWeight:900,letterSpacing:-.5,margin:"0 0 4px"}}>Permit to Work Register</h2>
+          <h2 style={{fontSize:22,fontWeight:900,letterSpacing:-.5,margin:"0 0 4px"}}>Permit to Work Register <HelpTip dark={false} text="A permit to work controls a higher-risk job: hot works, confined spaces, working at height, electrical isolation, excavation, or a general permit. Create the permit (it starts as a draft), make it active when the job is authorised, and close it when the work is finished and the area is safe. Active permits past their end time are flagged as expired."/></h2>
           <p style={{color:T.muted,fontSize:13,margin:0}}>{permits.length} permit{permits.length!==1?"s":""} · {permits.filter(p=>p.status==="active").length} active</p>
         </div>
         <button onClick={()=>setView("new")} style={{background:`linear-gradient(135deg,${T.accent},${T.blue})`,color:"#fff",border:"none",borderRadius:10,padding:"10px 20px",cursor:"pointer",fontFamily:font,fontWeight:700,fontSize:13,boxShadow:`0 4px 14px ${T.accent}44`}}>+ New Permit</button>
@@ -181,7 +182,9 @@ function PermitsTab({ permits, setPermits, dbSavePermit, dbDeletePermit, staff, 
             <span>Type</span><span>Description</span><span>Location</span><span>Status</span><span>Start</span><span>End</span><span></span>
           </div>
         )}
-        {filtered.length===0 && <div style={{padding:"32px 20px",textAlign:"center",color:T.muted,fontSize:14}}>No permits found. Click <strong>+ New Permit</strong> to create one.</div>}
+        {filtered.length===0 && (permits.length===0
+          ? <div style={{padding:"32px 20px",textAlign:"center",color:T.muted,fontSize:14,lineHeight:1.6}}>No permits yet. Click <strong>+ New Permit</strong> before any hot works, confined space, work at height, electrical isolation or excavation job.</div>
+          : <div style={{padding:"32px 20px",textAlign:"center",color:T.muted,fontSize:14}}>No permits match the filters.</div>)}
         {filtered.map((p,i)=>{
           const pt=PERMIT_TYPES.find(x=>x.id===p.type)||PERMIT_TYPES[5];
           const ss=getStatusStyle(p.status);

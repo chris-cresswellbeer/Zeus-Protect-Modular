@@ -137,7 +137,8 @@ function IncidentChart({ incidents, Z, font }) {
       </div>
 
       {/* Year totals summary */}
-      <div style={{display:"flex",gap:10,marginTop:16,flexWrap:"wrap"}}>
+      <div style={{fontSize:11,fontWeight:700,color:Z.muted,textTransform:"uppercase",letterSpacing:.6,marginTop:16}}>In {selectedYear}</div>
+      <div style={{display:"flex",gap:10,marginTop:8,flexWrap:"wrap"}}>
         <div style={{background:"rgba(239,68,68,0.1)",borderRadius:10,padding:"10px 14px",flex:1,minWidth:90,textAlign:"center"}}>
           <div style={{fontSize:22,fontWeight:900,color:"#ef4444",fontFamily:"'Barlow Condensed',sans-serif"}}>{totals.accident}</div>
           <div style={{fontSize:10,color:Z.muted,marginTop:1}}>🚨 Accidents</div>
@@ -156,7 +157,7 @@ function IncidentChart({ incidents, Z, font }) {
         </div>
         <div style={{background:"rgba(16,185,129,0.1)",borderRadius:10,padding:"10px 14px",flex:1,minWidth:90,textAlign:"center"}}>
           <div style={{fontSize:22,fontWeight:900,color:"#10b981",fontFamily:"'Barlow Condensed',sans-serif"}}>{totals.total}</div>
-          <div style={{fontSize:10,color:Z.muted,marginTop:1}}>📊 Total</div>
+          <div style={{fontSize:10,color:Z.muted,marginTop:1}}>📊 Total in {selectedYear}</div>
         </div>
         <div style={{background:"rgba(239,68,68,0.07)",borderRadius:10,padding:"10px 14px",flex:1,minWidth:90,textAlign:"center",border:"1px dashed rgba(239,68,68,0.35)"}}>
           <div style={{fontSize:22,fontWeight:900,color:"#f87171",fontFamily:"'Barlow Condensed',sans-serif"}}>{totals.riddor}</div>

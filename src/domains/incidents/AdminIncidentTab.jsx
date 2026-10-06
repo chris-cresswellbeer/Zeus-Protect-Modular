@@ -35,13 +35,16 @@ import { useRemembered } from "../../lib/remembered";
 // Urgency chosen on a quick hazard report (QuickReportModal / mobile ReportHazard).
 const QUICK_URGENCY_LABEL = { low:"Safe to leave", medium:"Needs attention", high:"STOP WORK" };
 
-function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, investigations, setInvestigations, onOpenInvestigation, equipment, setEquipment, focusIncidentId, setFocusIncidentId, preset, clearPreset, showAdminReportForm, setShowAdminReportForm, Z, font }) {
+function AdminIncidentTab({ user, incidents, setIncidents, dbDeleteIncident, staff, investigations, setInvestigations, onOpenInvestigation, equipment, setEquipment, focusIncidentId, setFocusIncidentId, preset, clearPreset, showAdminReportForm, setShowAdminReportForm, Z, font }) {
   const isMobile = useWindowWidth() <= 1024;
   const [filterType, setFilterType]     = useRemembered("incidents.type", "all");
   const [filterStatus, setFilterStatus] = useRemembered("incidents.status", "all");
   const [filterRiddor, setFilterRiddor] = useRemembered("incidents.riddor", false);
   const [search, setSearch]             = useState("");
   const [expandedId, setExpandedId] = useState(focusIncidentId||null);
+  // The list shows PAGE incidents at a time ("Show more"), newest first
+  const PAGE = 25;
+  const [shown, setShown] = useState(PAGE);
   // Deep-link: expand the requested incident and scroll it into view (retried a few
   // times because the lazy tab may still be rendering), then clear the focus id.
   // Handle focus from dashboard — runs on mount AND on prop change
@@ -398,6 +401,13 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
     }
     return true;
   }).sort((a,b)=>b.date.localeCompare(a.date));
+  // a filter change starts the list from the top again; an incident opened from elsewhere is always shown
+  const filterSig = `${filterType}|${filterStatus}|${filterRiddor}|${search}`;
+  const [lastSig, setLastSig] = useState(filterSig);
+  if (lastSig !== filterSig) { setLastSig(filterSig); setShown(PAGE); }
+  const expandedAt = expandedId ? filtered.findIndex(i=>i.id===expandedId) : -1;
+  const limit = Math.max(shown, expandedAt + 1);
+  const visible = filtered.slice(0, limit);
 
   const selStyle = {background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:10,padding:"8px 14px",color:Z.white,fontSize:13,outline:"none",fontFamily:font,cursor:"pointer"};
 
@@ -409,12 +419,14 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
             <span style={{fontWeight:700,fontSize:15,color:Z.white}}>Report New Incident</span>
             <button onClick={()=>setShowReportForm(false)} style={{background:"rgba(239,68,68,0.1)",color:"#f87171",border:"1px solid rgba(239,68,68,0.2)",borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font}}>✕ Cancel</button>
           </div>
+          {/* the form straight away, reported by the admin who is signed in */}
           <IncidentTracker
-            user={staff[0]||{id:1,name:"Admin",role:"admin"}}
+            user={user||{id:1,name:"Admin",role:"admin"}}
             incidents={incidents}
-            setIncidents={(fn)=>{ setIncidents(fn); setShowReportForm(false); }}
+            setIncidents={setIncidents}
             equipment={equipment}
             setEquipment={setEquipment}
+            formOnly onClose={()=>setShowReportForm(false)}
             Z={Z} font={font}/>
         </div>
       )}
@@ -434,11 +446,11 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
           </div>
           <div style={{background:"rgba(239,68,68,0.08)",borderRadius:10,padding:"10px 16px",textAlign:"center",minWidth:70,border:"1px dashed rgba(239,68,68,0.3)"}}>
             <div style={{fontSize:20,fontWeight:900,color:"#f87171"}}>{incidents.filter(i=>i.riddor).length}</div>
-            <div style={{fontSize:10,color:Z.muted,marginTop:1}}>RIDDOR</div>
+            <div style={{fontSize:10,color:Z.muted,marginTop:1}}>RIDDOR (all time)</div>
           </div>
           <div style={{background:"rgba(16,185,129,0.1)",borderRadius:10,padding:"10px 16px",textAlign:"center",minWidth:70}}>
             <div style={{fontSize:20,fontWeight:900,color:"#10b981"}}>{incidents.length}</div>
-            <div style={{fontSize:10,color:Z.muted,marginTop:1}}>Total</div>
+            <div style={{fontSize:10,color:Z.muted,marginTop:1}}>All time</div>
           </div>
           <div style={{width:1,height:36,background:Z.border,margin:"0 2px"}}/>
           <button onClick={()=>onOpenInvestigation(null)}
@@ -595,7 +607,7 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
         </div>
       ) : (
         <div style={{display:"grid",gap:10}}>
-          {filtered.map(inc=>{
+          {visible.map(inc=>{
             const ti = typeInfo(inc.type);
             const ac = ACCIDENT_CODES.find(c=>c.code===inc.accidentCode);
             const nc = NUMBER_CODES.find(c=>c.num===inc.numberCode);
@@ -631,10 +643,7 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
                       style={{background:"rgba(37,99,235,0.12)",color:Z.accentLt,border:`1px solid ${Z.accent}33`,borderRadius:8,padding:"4px 12px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font}}>
                       ✏ Edit
                     </button>
-                    <button onClick={e=>{ e.stopPropagation(); setConfirmDeleteId(confirmDeleteId===inc.id?null:inc.id); }}
-                      style={{background:confirmDeleteId===inc.id?"rgba(239,68,68,0.2)":"rgba(239,68,68,0.08)",color:"#f87171",border:`1px solid ${confirmDeleteId===inc.id?"rgba(239,68,68,0.5)":"rgba(239,68,68,0.2)"}`,borderRadius:8,padding:"4px 12px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font}}>
-                      🗑
-                    </button>
+{/* Delete is inside the incident (click the row), next to Mark as Closed */}
                     <span style={{color:Z.muted,fontSize:16,transition:"transform .2s",display:"inline-block",transform:isOpen?"rotate(90deg)":"rotate(0deg)"}}>›</span>
                   </div>
                 </div>
@@ -855,6 +864,13 @@ function AdminIncidentTab({ incidents, setIncidents, dbDeleteIncident, staff, in
               </div>
             );
           })}
+          {filtered.length > limit && (
+            <div data-testid="incident-more" style={{display:"flex",gap:10,justifyContent:"center",alignItems:"center",padding:"8px 0",flexWrap:"wrap"}}>
+              <span style={{fontSize:12,color:Z.muted}}>Showing {limit} of {filtered.length}</span>
+              <button type="button" onClick={()=>setShown(limit+PAGE)} style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:10,padding:"8px 18px",color:Z.white,cursor:"pointer",fontFamily:font,fontSize:13,fontWeight:700}}>Show {Math.min(PAGE, filtered.length-limit)} more</button>
+              <button type="button" onClick={()=>setShown(filtered.length)} style={{background:"none",border:"none",color:Z.muted,cursor:"pointer",fontFamily:font,fontSize:12,fontWeight:700,textDecoration:"underline"}}>Show all</button>
+            </div>
+          )}
         </div>
       )}
     </div>

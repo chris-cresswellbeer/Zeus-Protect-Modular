@@ -23,16 +23,18 @@ import { EQ_CATEGORIES } from "../../data/seedEquipment";
  * SAVING: every change goes through setEquipment → App.jsx [equipment] auto-sync
  * effect → dbSaveEquipment (upsert-and-prune). This component never calls Supabase.
  */
-function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPreset, Z, font }) {
+function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPreset, extinguishers=[], onOpenFireSafety, Z, font }) {
   const isMobile = useWindowWidth() <= 1024;
   const [view, setView] = useState("dashboard");     // dashboard | list | detail | form
   const [catFilter, setCatFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [showFilter, setShowFilter] = useState("all");   // all | overdue | soon | defects
+  const [search, setSearch] = useState("");
   const [activeId, setActiveId] = useState(null);
   // Dashboard figure (e.g. "Out of Service") → open the list already filtered
   useEffect(()=>{
     if(!preset) return;
-    setCatFilter("all"); setStatusFilter(preset.status||"all"); setView("list");
+    setCatFilter("all"); setStatusFilter(preset.status||"all"); setShowFilter(preset.show||"all"); setSearch(""); setView("list");
     clearPreset&&clearPreset();
   },[preset]); // eslint-disable-line react-hooks/exhaustive-deps
   const [detailTab, setDetailTab] = useState("overview"); // overview | inspections | defects | service
@@ -43,7 +45,7 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPres
   const [inspectionForm, setInspectionForm] = useState(null);
   const [saved, setSaved] = useState("");
 
-  const today = new Date().toISOString().slice(0,10);
+  const today = (()=>{ const t=new Date(); return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,"0")}-${String(t.getDate()).padStart(2,"0")}`; })();   // local date
 
   const BLANK_EQ = {
     assetNo:"", category:"flt", name:"", make:"", model:"", serial:"", year:new Date().getFullYear(),
@@ -61,6 +63,18 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPres
   const overdueService = equipment.filter(e=>e.nextService && e.nextService < today && e.status==="active").length;
   const dueSoon = equipment.filter(e=>e.nextService && e.nextService >= today && e.nextService <= new Date(Date.now()+60*86400000).toISOString().slice(0,10) && e.status==="active").length;
   const totalActive = equipment.filter(e=>e.status==="active").length;
+  // Fire extinguishers are kept in Fire Safety → Extinguishers (one list); shown here as a link.
+  const extOverdue = (extinguishers||[]).filter(x=>x.nextServiceDue&&x.nextServiceDue<today).length;
+  const soonDate = new Date(Date.now()+60*86400000).toISOString().slice(0,10);
+  const matchesShow = e => showFilter==="all" ? true
+    : showFilter==="overdue" ? !!(e.nextService && e.nextService < today && e.status==="active")
+    : showFilter==="soon" ? !!(e.nextService && e.nextService >= today && e.nextService <= soonDate && e.status==="active")
+    : (e.defects||[]).some(d=>d.status==="open");
+  const q = search.trim().toLowerCase();
+  const matchesSearch = e => !q || [e.assetNo,e.name,e.location,e.make,e.model,e.serial].some(v=>String(v||"").toLowerCase().includes(q));
+  const listed = equipment.filter(e=>(catFilter==="all"||e.category===catFilter)&&(statusFilter==="all"||e.status===statusFilter)&&matchesShow(e)&&matchesSearch(e));
+  const openList = show => { setCatFilter("all"); setStatusFilter("all"); setShowFilter(show); setSearch(""); setView("list"); };
+  const CAP = 5;   // the dashboard lists show this many, then "Show all"
 
   function saveFlash(msg){ setSaved(msg); setTimeout(()=>setSaved(""),2500); }
 
@@ -291,7 +305,7 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPres
       {overdueService>0 && (
         <div style={{background:"rgba(239,68,68,0.07)",border:"1px solid rgba(239,68,68,0.25)",borderRadius:14,padding:"14px 18px",marginBottom:20}}>
           <div style={{fontSize:12,fontWeight:800,color:"#f87171",textTransform:"uppercase",letterSpacing:.5,marginBottom:10}}>🚨 Overdue Service ({overdueService})</div>
-          {equipment.filter(e=>e.nextService&&e.nextService<today&&e.status==="active").map(e=>(
+          {equipment.filter(e=>e.nextService&&e.nextService<today&&e.status==="active").sort((a,b)=>a.nextService.localeCompare(b.nextService)).slice(0,CAP).map(e=>(
             <div key={e.id} style={{display:"flex",alignItems:"center",gap:12,padding:"8px 12px",background:"rgba(239,68,68,0.06)",borderRadius:10,marginBottom:6,flexWrap:"wrap"}}>
               <span style={{fontSize:20}}>{cat(e.category).icon}</span>
               <div style={{flex:1}}>
@@ -304,6 +318,7 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPres
               </button>
             </div>
           ))}
+          {overdueService>CAP && <button type="button" onClick={()=>openList("overdue")} style={{background:"none",border:"none",color:"#f87171",cursor:"pointer",fontFamily:font,fontSize:12,fontWeight:700,padding:"4px 2px"}}>Show all {overdueService} in the asset list →</button>}
         </div>
       )}
 
@@ -311,7 +326,7 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPres
       {openDefects>0 && (
         <div style={{background:"rgba(245,158,11,0.07)",border:"1px solid rgba(245,158,11,0.25)",borderRadius:14,padding:"14px 18px",marginBottom:20}}>
           <div style={{fontSize:12,fontWeight:800,color:"#f59e0b",textTransform:"uppercase",letterSpacing:.5,marginBottom:10}}>⚠️ Open Defects ({openDefects})</div>
-          {equipment.flatMap(e=>e.defects.filter(d=>d.status==="open").map(d=>({...d,eq:e}))).map(d=>(
+          {equipment.flatMap(e=>e.defects.filter(d=>d.status==="open").map(d=>({...d,eq:e}))).slice(0,CAP).map(d=>(
             <div key={d.id} style={{display:"flex",alignItems:"center",gap:12,padding:"8px 12px",background:Z.navyMd,borderRadius:10,marginBottom:6,flexWrap:"wrap"}}>
               <span style={{fontSize:20}}>{cat(d.eq.category).icon}</span>
               <div style={{flex:1}}>
@@ -325,6 +340,7 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPres
               </button>
             </div>
           ))}
+          {openDefects>CAP && <button type="button" onClick={()=>openList("defects")} style={{background:"none",border:"none",color:"#f59e0b",cursor:"pointer",fontFamily:font,fontSize:12,fontWeight:700,padding:"4px 2px"}}>Show all equipment with open defects →</button>}
         </div>
       )}
 
@@ -350,6 +366,12 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPres
                 {overdue>0&&<span style={{fontSize:10,background:"rgba(239,68,68,0.1)",color:"#fca5a5",padding:"2px 8px",borderRadius:99,fontWeight:700}}>⏰ {overdue} overdue</span>}
                 {defects===0&&overdue===0&&<span style={{fontSize:10,background:"rgba(16,185,129,0.1)",color:"#10b981",padding:"2px 8px",borderRadius:99,fontWeight:700}}>✓ All clear</span>}
               </div>
+              {c.id==="fire" && (
+                <button type="button" data-testid="eq-extinguishers-link" onClick={ev=>{ ev.stopPropagation(); onOpenFireSafety&&onOpenFireSafety(); }}
+                  style={{marginTop:10,width:"100%",textAlign:"left",background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:8,padding:"7px 10px",color:Z.white,cursor:"pointer",fontFamily:font,fontSize:11.5,lineHeight:1.4}}>
+                  {E("🧯 ","")}<b>{(extinguishers||[]).length} extinguisher{(extinguishers||[]).length!==1?"s":""}</b>{extOverdue?<span style={{color:"#f87171",fontWeight:700}}> · {extOverdue} service overdue</span>:""} — kept in Fire Safety → Extinguishers →
+                </button>
+              )}
             </div>
           );
         })}
@@ -371,8 +393,17 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPres
             </button>
           ))}
         </div>
-        <select value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}
-          style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:8,padding:"5px 10px",color:Z.white,fontSize:12,fontFamily:font,outline:"none",cursor:"pointer",marginLeft:"auto"}}>
+        <input aria-label="Search equipment" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search asset no, name, location…"
+          style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:8,padding:"6px 10px",color:Z.white,fontSize:12,fontFamily:font,outline:"none",minWidth:200,marginLeft:"auto"}}/>
+        <select aria-label="Show" value={showFilter} onChange={e=>setShowFilter(e.target.value)}
+          style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:8,padding:"5px 10px",color:Z.white,fontSize:12,fontFamily:font,outline:"none",cursor:"pointer"}}>
+          <option value="all">Any service date</option>
+          <option value="overdue">Service overdue</option>
+          <option value="soon">Service due in 60 days</option>
+          <option value="defects">Open defects</option>
+        </select>
+        <select aria-label="Status" value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}
+          style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:8,padding:"5px 10px",color:Z.white,fontSize:12,fontFamily:font,outline:"none",cursor:"pointer"}}>
           <option value="all">All Status</option>
           <option value="active">Active</option>
           <option value="inactive">Inactive</option>
@@ -381,9 +412,14 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPres
       </div>
 
       <div style={{display:"grid",gap:10}}>
-        {equipment
-          .filter(e=>(catFilter==="all"||e.category===catFilter)&&(statusFilter==="all"||e.status===statusFilter))
-          .sort((a,b)=>a.assetNo.localeCompare(b.assetNo))
+        <div style={{fontSize:12,color:Z.muted}}>Showing {listed.length} of {equipment.length}</div>
+        {catFilter==="fire" && (
+          <div role="note" style={{fontSize:12.5,color:Z.white,background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:10,padding:"9px 14px"}}>
+            {E("🧯 ","")}Fire extinguishers are kept in <button type="button" onClick={()=>onOpenFireSafety&&onOpenFireSafety()} style={{background:"none",border:"none",color:Z.accentLt||"#93c5fd",cursor:"pointer",fontFamily:font,fontSize:12.5,fontWeight:700,padding:0}}>Fire Safety → Extinguishers</button>. Use this list for the other fire equipment, such as the alarm panel and hose reels.
+          </div>
+        )}
+        {listed
+          .slice().sort((a,b)=>a.assetNo.localeCompare(b.assetNo))
           .map(e=>{
             const c = cat(e.category);
             const openDef = e.defects.filter(d=>d.status==="open").length;
@@ -415,15 +451,12 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPres
                     style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:8,padding:"6px 12px",cursor:"pointer",fontFamily:font,fontSize:12,fontWeight:700,color:Z.muted}}>
                     ✏
                   </button>
-                  <button onClick={async()=>{ if(await ask({ title: `Delete ${e.name}?`, message: "Its inspections and defects are removed too. This can't be undone.", ok: "Delete", danger: true })) deleteEquipment(e.id); }}
-                    style={{background:"rgba(239,68,68,0.1)",color:"#f87171",border:"1px solid rgba(239,68,68,0.2)",borderRadius:8,padding:"6px 10px",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:font}}>
-                    🗑
-                  </button>
+{/* Delete is on the equipment's own page (Open →), away from the everyday buttons */}
                 </div>
               </div>
             );
           })}
-        {equipment.filter(e=>(catFilter==="all"||e.category===catFilter)&&(statusFilter==="all"||e.status===statusFilter)).length===0&&(
+        {listed.length===0&&(
           <div style={{textAlign:"center",padding:40,color:Z.muted,fontSize:13}}>No equipment matches the current filters.</div>
         )}
       </div>
@@ -451,6 +484,7 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPres
             <select value={form.category} onChange={e=>setF("category",e.target.value)} style={{...inputSt,cursor:"pointer"}}>
               {EQ_CATEGORIES.map(c=><option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
             </select>
+            {form.category==="fire" && <div style={{fontSize:11.5,color:Z.muted,marginTop:5,lineHeight:1.45}}>Fire <b>extinguishers</b> go in Fire Safety → Extinguishers, each with its own service date. Use this for the alarm panel, hose reels and other fire equipment.</div>}
           </div>
         </div>
         <div style={{marginBottom:14}}><label style={labelSt}>EQUIPMENT NAME *</label><input value={form.name} onChange={e=>setF("name",e.target.value)} placeholder="e.g. Counterbalance Forklift — Bay 4" style={inputSt}/></div>

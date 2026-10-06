@@ -121,7 +121,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
       ["Zeus Protect — Staff Compliance Report"],
       [`Generated: ${today}`],
       [],
-      ["Name","Email","Job Title","Manager","Last Login","Modules Assigned","Modules Completed","Modules Pending","Compliance %","Status","Incomplete Modules","Certificates","First Aid Cert","First Aid Expiry","Fire Marshall Cert","Fire Marshall Expiry"],
+      ["Name","Email","Job Title","Manager","Last Login","Modules Assigned","Modules Completed","Modules Pending","Compliance %","Status","Incomplete Modules","Certificates","First Aid Cert","First Aid Expiry","Fire Warden Cert","Fire Warden Expiry"],
     ];
     staff.forEach(u => {
       const assignedIds = assigns[u.id]||[];
@@ -137,8 +137,9 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
       const userExtCerts = (extCerts||{})[u.id] || {};
       const firstAid = userExtCerts["first_aid"];
       const fireMarshal = userExtCerts["fire_marshall"];
-      const firstAidStatus = firstAid ? (new Date(firstAid.expiryDate) < new Date() ? "Expired" : "Valid") : "Not uploaded";
-      const fireMarshalStatus = fireMarshal ? (new Date(fireMarshal.expiryDate) < new Date() ? "Expired" : "Valid") : "Not uploaded";
+      const certStatus = c => !c ? "Not uploaded" : !c.expiryDate ? "No expiry date" : (new Date(c.expiryDate) < new Date() ? "Expired" : "Valid");
+      const firstAidStatus = certStatus(firstAid);
+      const fireMarshalStatus = certStatus(fireMarshal);
       rows.push([u.name, u.email, u.jobTitle||"", u.manager||"", lastLogin, a, d, a-d, pct+"%", status, pending, certs,
         firstAidStatus, firstAid?.expiryDate||"",
         fireMarshalStatus, fireMarshal?.expiryDate||""]);

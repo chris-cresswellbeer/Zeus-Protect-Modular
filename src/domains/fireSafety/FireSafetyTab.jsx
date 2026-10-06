@@ -1,12 +1,21 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { E } from "../../lib/emoji";
-import { EXPIRY_WARNING_DAYS } from "../../lib/dates";
+import { notify, ask } from "../../shared/Feedback";
+import { sb } from "../../lib/supabase";
+import { openFile } from "../../lib/fileAccess";
+import { auditEvent } from "../../lib/audit";
+import { useSiteLists } from "../../lib/siteLists";
+import { checkMachineFiles, MACHINE_EVIDENCE_ACCEPT } from "../machinery/machineEvidence";
+import { fireSummary, expiryState, plusMonths, todayLocal, WARDEN_CERT } from "./fireLogic";
 
 /**
  * FireSafetyTab — admin fire safety log book (Regulatory Reform (Fire Safety) Order 2005).
  *
  * Six sub-tabs, each a list stored in its own Supabase table:
- *   wardens        → fire_wardens        { id, staffId, name, zone, qualDate, renewalMonths (default 36) }
+ *   wardens        → the Fire Warden certificate on each staff member (ext_certs "fire_marshall":
+ *                    { issuedDate, expiryDate, zones, fileName, fileUrl }), plus any older
+ *                    typed-in rows in fire_wardens { id, name, zone, qualDate, renewalMonths }
+ *                    until they are linked to a staff member (fireLogic.js wardenList).
  *   drills         → fire_drills         { id, date, time, zone, evacuTime "m:ss", headcountOk, conductedBy, issues, weather }
  *   alarm          → fire_alarm_tests    { id, date, callPoint, testedBy, result: pass|fault, notes }  (weekly test)
  *   extinguishers  → fire_extinguishers  { id, location, type, serialNo, lastService, nextServiceDue, lastVisualDate, visualOk, notes }
@@ -16,19 +25,28 @@ import { EXPIRY_WARNING_DAYS } from "../../lib/dates";
  *
  * All six live in ONE state object `fireSafety` in App.jsx; any change is saved by the
  * [fireSafety] auto-sync effect → dbSaveFireSafety (upsert-and-prune per table).
- * Add/edit uses a single shared modal whose fields depend on `subTab`.
+ * Add/edit uses a single shared modal whose fields depend on `subTab` (wardens have their
+ * own form, which saves the certificate record instead).
+ * Fire Drill and Fire Risk Assessment INSPECTIONS (Inspections screen) are listed in the
+ * Drill Log and FRA Reviews too, and count in the summary (fireLogic.js).
+ * Removing a log entry can be undone for a few seconds (FRA entries with a file ask first).
  *
  * FRA documents: a picked file is held as `_fileObj` (+ base64 `fileData` for instant
  * preview) and uploaded to the "fire-safety" bucket only when the modal is saved.
  * Extinguishers support bulk CSV import (columns: location, type, serialno,
  * lastservice, nextservicedue — validated and previewed before import).
  */
-function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDeleteFraDoc, Z, font }) {
+function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDeleteFraDoc,
+  extCerts={}, setExtCerts, onSaveCert, onDeleteCert, inspections=[], onOpenInspection, preset, clearPreset, Z, font }) {
   const {
-    wardens=[], drills=[], alarmTests=[], extinguishers=[], emergLighting=[], fraReviews=[]
+    alarmTests=[], extinguishers=[], emergLighting=[]
   } = fireSafety;
+  const site = useSiteLists();
+  const sum = fireSummary({ fireSafety, extCerts, staff, inspections, today: todayLocal() });
 
   const [subTab, setSubTab] = useState("wardens");
+  // opened from elsewhere on a particular list (e.g. Equipment Register → extinguishers)
+  useEffect(() => { if (preset && preset.sub) { setSubTab(preset.sub); clearPreset && clearPreset(); } }, [preset]); // eslint-disable-line react-hooks/exhaustive-deps
   const [showModal, setShowModal] = useState(false);
   const [modalForm, setModalForm] = useState({});
   const [editId, setEditId] = useState(null);
@@ -38,6 +56,9 @@ function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDel
   const [extCsvPreview, setExtCsvPreview] = useState([]);
   const [extCsvError, setExtCsvError] = useState("");
   const extCsvRef = useRef(null);
+  const [wForm, setWForm] = useState(null);        // the warden form (null = closed)
+  const [wBusy, setWBusy] = useState(false);
+  const wFileRef = useRef(null);
 
   const today = new Date().toISOString().slice(0,10);
 
@@ -55,17 +76,6 @@ function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDel
     if(!dateStr) return null;
     return Math.ceil((new Date(dateStr) - new Date()) / 86400000);
   }
-  // Warden qualification valid for renewalMonths (default 36) from qualDate; amber within EXPIRY_WARNING_DAYS (lib/dates.js).
-  // The same rule is duplicated in App.jsx (admin notifications + dashboard) — keep in step.
-  function wardenStatus(w) {
-    const expiry = new Date(w.qualDate);
-    expiry.setMonth(expiry.getMonth() + (w.renewalMonths||36));
-    const exp = expiry.toISOString().slice(0,10);
-    const d = daysUntil(exp);
-    if(d < 0)  return { label:"Expired",             color:"#ef4444", bg:"rgba(239,68,68,0.15)" };
-    if(d <= EXPIRY_WARNING_DAYS) return { label:`Expires in ${d}d`,   color:"#f59e0b", bg:"rgba(245,158,11,0.15)" };
-    return       { label:"Valid",                    color:"#10b981", bg:"rgba(16,185,129,0.12)" };
-  }
   // Generic due-date badge: Overdue / Due in N days (≤ urgentDays) / OK.
   function expiryBadge(dateStr, urgentDays=60) {
     if(!dateStr) return null;
@@ -76,7 +86,7 @@ function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDel
   }
 
   const SUB_TABS = [
-    { id:"wardens",   label:E("🧑‍🚒 ","")+"Wardens",          count: wardens.filter(w=>{ const s=wardenStatus(w); return s.color!=="#10b981"; }).length || null },
+    { id:"wardens",   label:E("🧑‍🚒 ","")+"Wardens",          count: sum.wardens.filter(w=>w.state.key!=="valid").length || null },
     { id:"drills",    label:E("🚨 ","")+"Drill Log",          count: null },
     { id:"alarm",     label:E("🔔 ","")+"Alarm Tests",        count: alarmTests.filter(t=>t.result==="fault").length || null },
     { id:"extinguishers", label:E("🧯 ","")+"Extinguishers",  count: extinguishers.filter(e=>{ const b=expiryBadge(e.nextServiceDue); return b&&b.color!=="#10b981"; }).length || null },
@@ -85,25 +95,46 @@ function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDel
   ];
 
   // ── MODALS ──
-  function openAdd() { setEditId(null); setModalForm({}); setFraFileUploading(false); setShowModal(true); }
+  // New entries start with the choices the drop-downs show, so what you see is what is saved.
+  const ADD_DEFAULTS = { drills:{ headcountOk:"true", weather:"Dry", date:todayLocal() }, alarm:{ result:"pass", date:todayLocal() }, extinguishers:{ type:"CO2", visualOk:"true" },
+    lighting:{ testType:"monthly", result:"pass", date:todayLocal() }, fra:{ reviewType:"internal", trigger:"Annual review", date:todayLocal() } };
+  function openAdd() { if (subTab==="wardens") { openWarden(null); return; } setEditId(null); setModalForm({ ...(ADD_DEFAULTS[subTab]||{}) }); setFraFileUploading(false); setShowModal(true); }
   function openEdit(item) { setEditId(item.id); setModalForm({...item}); setFraFileUploading(false); setShowModal(true); }
   // `key` maps the active sub-tab to its list inside the fireSafety object.
-  function deleteItem(id) {
-    // If deleting an FRA review with a stored file, remove from Storage
-    if(subTab==="fra" && onDeleteFraDoc) {
-      const review = (fireSafety.fraReviews||[]).find(r=>r.id===id);
-      if(review && review.fileName) onDeleteFraDoc(id, review.fileName);
+  const listKey = () => subTab==="drills"?"drills":subTab==="alarm"?"alarmTests":subTab==="extinguishers"?"extinguishers":subTab==="lighting"?"emergLighting":"fraReviews";
+  const NOUN = { drills:"Drill", alarmTests:"Alarm test", extinguishers:"Extinguisher", emergLighting:"Lighting test", fraReviews:"FRA review" };
+  // Removes the entry with a few seconds to Undo. An FRA review with a stored file asks
+  // first instead, because the file is deleted too and can't be put back.
+  async function deleteItem(id) {
+    const key = listKey();
+    const item = (fireSafety[key]||[]).find(x=>x.id===id);
+    if (!item) return;
+    if (key==="fraReviews" && item.fileName) {
+      const ok = await ask({ title:"Remove this FRA review?", message:`The review of ${item.date||"this date"} and its attached document (${item.fileName}) will be deleted. This can't be undone.`, ok:"Remove review", danger:true });
+      if (!ok) return;
+      if (onDeleteFraDoc) onDeleteFraDoc(id, item.fileName);
+      setFireSafety(prev => ({ ...prev, [key]: (prev[key]||[]).filter(x=>x.id!==id) }));
+      notify("FRA review removed.");
+      return;
     }
-    setFireSafety(prev => {
-      const key = subTab==="wardens"?"wardens":subTab==="drills"?"drills":subTab==="alarm"?"alarmTests":subTab==="extinguishers"?"extinguishers":subTab==="lighting"?"emergLighting":"fraReviews";
-      return { ...prev, [key]: prev[key].filter(x=>x.id!==id) };
-    });
+    const at = (fireSafety[key]||[]).findIndex(x=>x.id===id);
+    setFireSafety(prev => ({ ...prev, [key]: (prev[key]||[]).filter(x=>x.id!==id) }));
+    notify(`${NOUN[key]} removed.`, { undo: () => setFireSafety(prev => {
+      const list = (prev[key]||[]).filter(x=>x.id!==id); list.splice(Math.min(at, list.length), 0, item);
+      return { ...prev, [key]: list };
+    }) });
   }
+  // The fields each log needs before it can be saved.
+  const REQUIRED = { drills:[["date","the date"]], alarmTests:[["date","the date"],["callPoint","the call point"]], extinguishers:[["location","the location"],["type","the type"]], emergLighting:[["date","the date"],["zone","the zone or area"]], fraReviews:[["date","the review date"]] };
+  const missing = () => (REQUIRED[listKey()]||[]).filter(([k])=>!String(modalForm[k]??"").trim()).map(([,l])=>l);
   // Uploads a pending FRA file first (so the saved record has its URL), then adds or
   // replaces the record in the active list.
   async function saveModal() {
-    const key = subTab==="wardens"?"wardens":subTab==="drills"?"drills":subTab==="alarm"?"alarmTests":subTab==="extinguishers"?"extinguishers":subTab==="lighting"?"emergLighting":"fraReviews";
+    const key = listKey();
+    const gap = missing();
+    if (gap.length) { notify(`Please add ${gap.join(" and ")}.`, { kind:"error", timeout:5000 }); return; }
     let formToSave = {...modalForm};
+
     // If saving an FRA review with a new file object, upload to Storage first
     if(subTab==="fra" && formToSave._fileObj && onUploadFraDoc) {
       const recordId = editId || uid();
@@ -159,13 +190,7 @@ function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDel
     <textarea rows={rows} value={modalForm[k]||""} onChange={e=>fSet(k,e.target.value)} placeholder={placeholder} style={{...inp,resize:"vertical",marginBottom:0}}/>
   );
 
-  const formContent = subTab==="wardens" ? (<>
-    {label("Name")} {fInp("name","text","Full name")}
-    {label("Zone / Area Covered")} {fInp("zone","text","e.g. Office Block A")}
-    {label("Qualification Date")} {fInp("qualDate","date")}
-    {label("Renewal Period (months)")} {fSel("renewalMonths",[{v:12,l:"12 months"},{v:24,l:"24 months"},{v:36,l:"36 months (standard)"}])}
-    {label("Notes")} {fTA("notes",3,"Any additional details...")}
-  </>) : subTab==="drills" ? (<>
+  const formContent = subTab==="drills" ? (<>
     {label("Date")} {fInp("date","date")}
     {label("Time")} {fInp("time","time")}
     {label("Zone / Scope")} {fInp("zone","text","e.g. Full Site")}
@@ -240,18 +265,94 @@ function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDel
     )}
   </>) : null;
 
-  // ── WARDEN SUMMARY FOR TOP OF PAGE ──
-  const expiredWardens  = wardens.filter(w=>wardenStatus(w).color==="#ef4444");
-  const expiringWardens = wardens.filter(w=>wardenStatus(w).color==="#f59e0b");
-  const lastDrill = drills.length ? drills.slice().sort((a,b)=>b.date.localeCompare(a.date))[0] : null;
-  const daysSinceDrill = lastDrill ? daysSince(lastDrill.date) : null;
-  const overdueExtinguishers = extinguishers.filter(e=>{ const b=expiryBadge(e.nextServiceDue); return b&&b.color==="#ef4444"; });
-  const lastFra = fraReviews.length ? fraReviews.slice().sort((a,b)=>b.date.localeCompare(a.date))[0] : null;
-  const fraNextDue = lastFra?.nextReviewDue;
+  // ── SUMMARY FOR TOP OF PAGE (fireLogic.js — the dashboard card and bell use the same) ──
+  const { expiredWardens, expiringWardens, lastDrill, daysSinceDrill, overdueExtinguishers, fraNext: fraNextDue } = sum;
   const fraStatus = fraNextDue ? expiryBadge(fraNextDue, 30) : null;
+  const staffName = id => ((staff||[]).find(u=>String(u.id)===String(id))||{}).name || "";
+
+  // ── WARDENS: the form saves the person's Fire Warden certificate record ──
+  // w = an entry from sum.wardens (edit / link), or null (new)
+  function openWarden(w) {
+    const c = w && w.cert ? w.cert : null;
+    setWForm({
+      key: w ? w.key : null, legacyId: w && w.source==="record" ? w.record.id : null,
+      // only a person who is in the list can be pre-chosen (never a leaver)
+      staffId: w && w.staffId && (staff||[]).some(u=>String(u.id)===String(w.staffId)&&u.status!=="leaver") ? String(w.staffId) : "", zones: w ? [...w.zones] : [],
+      issuedDate: w ? (w.issued||"") : "", renewal: 36, expiryDate: w ? (w.expiry||"") : "", expiryTouched: !!(c && c.expiryDate),
+      file: null, fileName: c ? c.fileName||"" : "", fileUrl: c ? c.fileUrl||"" : "", zoneText: "", legacyName: w && w.source==="record" ? w.name : "",
+    });
+  }
+  // the storage path of one of our certificate files (from its link), or null
+  const filePath = url => { const m = String(url||"").match(/\/storage\/v1\/object\/(?:public|sign|authenticated)\/documents\/([^?#]+)/); try { return m ? m[1].split("/").map(decodeURIComponent).join("/") : null; } catch { return null; } };
+  const removeFile = path => { if (path) sb.storage.remove("documents", [path]).catch(() => {}); };
+  const fileIsFor = (url, staffId) => { const p = filePath(url); return !p || p.startsWith(`ext_certs/${staffId}_`); };
+  const wSet = patch => setWForm(f => {
+    const n = { ...f, ...patch };
+    // a file stored under another person can't be opened by the new one: attach theirs instead
+    if ("staffId" in patch && n.fileUrl && !fileIsFor(n.fileUrl, n.staffId)) { n.fileUrl = ""; n.fileName = ""; }
+    if (!n.expiryTouched && ("issuedDate" in patch || "renewal" in patch)) n.expiryDate = n.issuedDate ? plusMonths(n.issuedDate, n.renewal) : "";
+    return n;
+  });
+  const wardenZones = [...new Set([...(site.firstAidZones||[]), ...((wForm&&wForm.zones)||[])])];
+  async function saveWarden() {
+    const f = wForm;
+    if (!f.staffId) { notify("Choose the staff member.", { kind:"error", timeout:4000 }); return; }
+    if (!f.issuedDate) { notify("Add the date they qualified.", { kind:"error", timeout:4000 }); return; }
+    if (!f.expiryDate) { notify("Add the expiry date.", { kind:"error", timeout:4000 }); return; }
+    if (f.expiryDate <= f.issuedDate) { notify("The expiry date must be after the date they qualified.", { kind:"error", timeout:5000 }); return; }
+    const existing = (extCerts[f.staffId]||{})[WARDEN_CERT] || null;
+    // editing a warden and changing the person: the old person's record goes
+    const oldStaff = f.key && f.key.startsWith("cert_") ? f.key.slice(5) : null;
+    // saving onto someone who already has a warden certificate replaces it — say so first
+    if (existing && oldStaff !== String(f.staffId) && !(await ask({ title:"Replace their Fire Warden certificate?", message:`${staffName(f.staffId)} already has a Fire Warden certificate (expires ${existing.expiryDate||"—"}). Saving replaces it with these details.`, ok:"Replace" }))) return;
+    setWBusy(true);
+    let fileName = f.fileName, fileUrl = f.fileUrl, newPath = null;
+    if (f.file) {
+      const safe = f.file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const path = `ext_certs/${f.staffId}_${WARDEN_CERT}_${Date.now()}_${safe}`;
+      const { error } = await sb.storage.upload("documents", path, f.file);
+      if (error) { setWBusy(false); notify(`The certificate file couldn't be uploaded: ${error}`, { kind:"error" }); return; }
+      fileName = f.file.name; fileUrl = sb.storage.getPublicUrl("documents", path); newPath = path;
+    }
+    const rec = { ...(existing||{}), issuedDate: f.issuedDate, expiryDate: f.expiryDate, zones: f.zones, fileName: fileName||"", fileUrl: fileUrl||"",
+      uploadedAt: f.file ? new Date().toLocaleDateString("en-GB") : (existing && existing.uploadedAt) || new Date().toLocaleDateString("en-GB") };
+    const ok = await onSaveCert(f.staffId, WARDEN_CERT, rec);
+    if (!ok) { removeFile(newPath); setWBusy(false); return; }   // onSaveCert has already said what went wrong
+    setExtCerts(p => ({ ...p, [f.staffId]: { ...(p[f.staffId]||{}), [WARDEN_CERT]: rec } }));
+    // the file this record replaced (a new upload over an old one) is no longer needed
+    if (existing && existing.fileUrl && filePath(existing.fileUrl) !== filePath(fileUrl)) removeFile(filePath(existing.fileUrl));
+    let warn = "";
+    if (oldStaff && oldStaff !== String(f.staffId)) {
+      const oldCert = (extCerts[oldStaff]||{})[WARDEN_CERT];
+      if (await onDeleteCert(oldStaff, WARDEN_CERT)) {
+        setExtCerts(p => { const n = { ...p }; if (n[oldStaff]) { n[oldStaff] = { ...n[oldStaff] }; delete n[oldStaff][WARDEN_CERT]; } return n; });
+        if (oldCert && oldCert.fileUrl && filePath(oldCert.fileUrl) !== filePath(fileUrl)) removeFile(filePath(oldCert.fileUrl));
+      } else warn = ` ${staffName(oldStaff)}'s old Fire Warden record couldn't be removed: remove it from the list.`;
+    }
+    if (f.legacyId) setFireSafety(prev => ({ ...prev, wardens: (prev.wardens||[]).filter(x=>x.id!==f.legacyId) }));
+    auditEvent("fire_warden", f.staffId, f.key ? "update" : "create", `${f.key ? "Fire warden updated" : "Fire warden added"}: ${staffName(f.staffId)} (expires ${f.expiryDate})`, { zones: f.zones.join(", "), file: fileName||"" }, staffName(f.staffId));
+    setWBusy(false); setWForm(null);
+    notify((f.legacyId ? `${staffName(f.staffId)} is now linked to their staff record.` : "Fire warden saved.") + warn, warn ? { kind:"error" } : {});
+  }
+  async function removeWarden(w) {
+    if (w.source==="record") {
+      const row = w.record;
+      setFireSafety(prev => ({ ...prev, wardens: (prev.wardens||[]).filter(x=>x.id!==row.id) }));
+      notify(`${w.name} removed from the wardens list.`, { undo: () => setFireSafety(prev => ({ ...prev, wardens: [...(prev.wardens||[]).filter(x=>x.id!==row.id), row] })) });
+      return;
+    }
+    const ok = await ask({ title:`Remove ${w.name} as a fire warden?`, message:"This deletes their Fire Warden certificate record (the same one shown under Assign Training → External Certificates). Their training records are not affected.", ok:"Remove warden", danger:true });
+    if (!ok) return;
+    const saved = await onDeleteCert(w.staffId, WARDEN_CERT);
+    if (saved === false) { notify("The warden couldn't be removed. Please try again.", { kind:"error" }); return; }
+    setExtCerts(p => { const n = { ...p }; if (n[w.staffId]) { n[w.staffId] = { ...n[w.staffId] }; delete n[w.staffId][WARDEN_CERT]; } return n; });
+    removeFile(filePath(w.fileUrl));
+    auditEvent("fire_warden", w.staffId, "delete", `Fire warden removed: ${w.name}`, {}, w.name);
+    notify(`${w.name} removed as a fire warden.`);
+  }
 
   const summaryCards = [
-    { icon:E("🧑‍🚒","👤"), label:"Wardens",      value:wardens.length,   sub: expiredWardens.length>0?`${expiredWardens.length} expired`:`${expiringWardens.length} expiring`, alert:expiredWardens.length>0, warn:expiringWardens.length>0 },
+    { icon:E("🧑‍🚒","👤"), label:"Wardens",      value:sum.wardens.length,   sub: expiredWardens.length>0?`${expiredWardens.length} expired`:sum.undatedWardens.length>0?`${sum.undatedWardens.length} with no expiry date`:`${expiringWardens.length} expiring`, alert:expiredWardens.length>0, warn:expiringWardens.length>0||sum.undatedWardens.length>0 },
     { icon:E("🚨","!"), label:"Last Drill",   value:lastDrill?lastDrill.date:"None recorded", sub: daysSinceDrill!==null?`${daysSinceDrill} days ago`:"", alert:daysSinceDrill!==null&&daysSinceDrill>365, warn:daysSinceDrill!==null&&daysSinceDrill>300 },
     { icon:E("🧯","Ex"), label:"Extinguishers",value:extinguishers.length, sub: overdueExtinguishers.length>0?`${overdueExtinguishers.length} service overdue`:"All services current", alert:overdueExtinguishers.length>0, warn:false },
     { icon:E("📋","Doc"), label:"FRA Next Review", value:fraNextDue||"Not set", sub:fraStatus?fraStatus.label:"", alert:fraStatus?.color==="#ef4444", warn:fraStatus?.color==="#f59e0b" },
@@ -291,41 +392,50 @@ function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDel
 
       {/* ── WARDENS ── */}
       {subTab==="wardens" && (
-        <div>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+        <div data-testid="fire-wardens">
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,gap:12,flexWrap:"wrap"}}>
             <div>
               <div style={{fontSize:15,fontWeight:800,color:Z.white}}>Fire Wardens</div>
-              <div style={{fontSize:12,color:Z.muted,marginTop:2}}>Designated wardens must hold a current Fire Warden certificate (typically 3-year renewal).</div>
+              <div style={{fontSize:12,color:Z.muted,marginTop:2}}>Each warden is a member of staff with a current Fire Warden certificate. The certificate is the same one shown under Assign Training → External Certificates.</div>
             </div>
             <AddBtn label="Add Warden"/>
           </div>
-          {wardens.length===0 && <div style={{color:Z.muted,fontSize:14,padding:"24px 0",textAlign:"center"}}>No fire wardens recorded yet.</div>}
+          {sum.unlinkedWardens.length>0 && (
+            <div role="status" style={{background:"rgba(245,158,11,0.08)",border:"1px solid rgba(245,158,11,0.3)",borderRadius:10,padding:"10px 14px",marginBottom:14,fontSize:13,color:Z.white,lineHeight:1.5}}>
+              {sum.unlinkedWardens.length} warden{sum.unlinkedWardens.length!==1?"s were":" was"} typed in before wardens were linked to staff. Click <b>Link to staff</b> on each to choose the person and attach their certificate.
+            </div>
+          )}
+          {sum.wardens.length===0 && <div style={{color:Z.muted,fontSize:14,padding:"24px 0",textAlign:"center"}}>No fire wardens yet. Click <b>+ Add Warden</b>.</div>}
           <div style={{display:"flex",flexDirection:"column",gap:8}}>
-            {wardens.map(w=>{
-              const expiry = new Date(w.qualDate); expiry.setMonth(expiry.getMonth()+(w.renewalMonths||36));
-              const expiryStr = expiry.toISOString().slice(0,10);
-              const st = wardenStatus(w);
+            {sum.wardens.map(w=>{
+              const st = w.state;
               return (
-                <div key={w.id} style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:12,padding:"14px 16px",display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
-                  <div style={{width:38,height:38,borderRadius:"50%",background:"rgba(239,68,68,0.15)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>🧑‍🚒</div>
-                  <div style={{flex:1,minWidth:120}}>
-                    <div style={{fontWeight:700,fontSize:14,color:Z.white}}>{w.name}</div>
-                    <div style={{fontSize:12,color:Z.muted,marginTop:1}}>{w.zone}</div>
+                <div key={w.key} data-testid="warden-row" style={{background:Z.overlay,border:`1px solid ${st.key==="expired"?"rgba(239,68,68,0.35)":Z.borderMd}`,borderRadius:12,padding:"14px 16px",display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
+                  <div style={{width:38,height:38,borderRadius:"50%",background:"rgba(239,68,68,0.15)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{E("🧑‍🚒","W")}</div>
+                  <div style={{flex:1,minWidth:160}}>
+                    <div style={{fontWeight:700,fontSize:14,color:Z.white,display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                      {w.name}
+                      {w.source==="record" && <span style={{fontSize:10,fontWeight:700,color:"#f59e0b",background:"rgba(245,158,11,0.12)",border:"1px solid rgba(245,158,11,0.3)",borderRadius:6,padding:"1px 7px"}}>Not linked to staff</span>}
+                    </div>
+                    <div style={{fontSize:12,color:Z.muted,marginTop:1}}>{[w.jobTitle, w.zones.length?w.zones.join(", "):"No areas set"].filter(Boolean).join(" · ")}</div>
                   </div>
                   <div style={{textAlign:"center",minWidth:90}}>
                     <div style={{fontSize:11,color:Z.muted,fontWeight:600,marginBottom:2}}>QUALIFIED</div>
-                    <div style={{fontSize:13,color:Z.white,fontWeight:700}}>{w.qualDate}</div>
+                    <div style={{fontSize:13,color:Z.white,fontWeight:700}}>{w.issued||"—"}</div>
                   </div>
                   <div style={{textAlign:"center",minWidth:90}}>
                     <div style={{fontSize:11,color:Z.muted,fontWeight:600,marginBottom:2}}>EXPIRES</div>
-                    <div style={{fontSize:13,fontWeight:700,color:st.color}}>{expiryStr}</div>
+                    <div style={{fontSize:13,fontWeight:700,color:st.color}}>{w.expiry||"—"}</div>
                   </div>
                   <Badge label={st.label} color={st.color} bg={st.bg}/>
-                  {w.notes && <div style={{fontSize:12,color:Z.muted,width:"100%",marginTop:4,paddingTop:8,borderTop:`1px solid ${Z.border}`}}>{w.notes}</div>}
-                  <div style={{display:"flex",gap:6,marginLeft:"auto"}}>
-                    <button onClick={()=>openEdit(w)} style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:8,padding:"5px 12px",color:Z.muted,cursor:"pointer",fontSize:12,fontFamily:font,fontWeight:600}}>Edit</button>
-                    <button onClick={()=>deleteItem(w.id)} style={{background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.2)",borderRadius:8,padding:"5px 12px",color:"#f87171",cursor:"pointer",fontSize:12,fontFamily:font,fontWeight:600}}>Delete</button>
+                  <div style={{display:"flex",gap:6,marginLeft:"auto",flexWrap:"wrap"}}>
+                    {w.fileUrl
+                      ? <button type="button" onClick={()=>{ if(!openFile(w.fileUrl)) notify("Your browser blocked the new tab. Allow pop-ups for this site.", { kind:"error" }); }} style={{background:"rgba(16,185,129,0.08)",border:"1px solid rgba(16,185,129,0.25)",borderRadius:8,padding:"5px 12px",color:"#10b981",cursor:"pointer",fontSize:12,fontFamily:font,fontWeight:700}}>📄 Certificate</button>
+                      : w.source==="cert" && <span style={{fontSize:11,color:"#f59e0b",alignSelf:"center"}}>No certificate file</span>}
+                    <button type="button" onClick={()=>openWarden(w)} style={{background:w.source==="record"?"rgba(245,158,11,0.12)":Z.overlay,border:`1px solid ${w.source==="record"?"rgba(245,158,11,0.35)":Z.borderMd}`,borderRadius:8,padding:"5px 12px",color:w.source==="record"?"#f59e0b":Z.muted,cursor:"pointer",fontSize:12,fontFamily:font,fontWeight:700}}>{w.source==="record"?"Link to staff":"Edit"}</button>
+                    <button type="button" aria-label={`Remove ${w.name}`} onClick={()=>removeWarden(w)} style={{background:"none",border:`1px solid ${Z.borderMd}`,borderRadius:8,padding:"5px 10px",color:Z.muted,cursor:"pointer",fontSize:12,fontFamily:font,fontWeight:600}}>Remove</button>
                   </div>
+                  {w.record && w.record.notes && <div style={{fontSize:12,color:Z.muted,width:"100%",marginTop:4,paddingTop:8,borderTop:`1px solid ${Z.border}`}}>{w.record.notes}</div>}
                 </div>
               );
             })}
@@ -333,13 +443,13 @@ function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDel
         </div>
       )}
 
-      {/* ── DRILLS ── */}
+      {/* ── DRILLS (drill log + Fire Drill inspections) ── */}
       {subTab==="drills" && (
-        <div>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+        <div data-testid="fire-drills">
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,gap:12,flexWrap:"wrap"}}>
             <div>
               <div style={{fontSize:15,fontWeight:800,color:Z.white}}>Fire Drill Log</div>
-              <div style={{fontSize:12,color:Z.muted,marginTop:2}}>HSE recommends at least one full evacuation drill per year. Many insurers require two.</div>
+              <div style={{fontSize:12,color:Z.muted,marginTop:2}}>HSE recommends at least one full evacuation drill per year. Many insurers require two. Fire Drill checklists done under Inspections (or on a phone) are listed here too.</div>
             </div>
             <AddBtn label="Log Drill"/>
           </div>
@@ -348,29 +458,47 @@ function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDel
               ⚠️ Last drill was {daysSinceDrill} days ago — consider scheduling the next drill.
             </div>
           )}
-          {drills.length===0 && <div style={{color:Z.muted,fontSize:14,padding:"24px 0",textAlign:"center"}}>No drills recorded yet.</div>}
+          {sum.drills.length===0 && <div style={{color:Z.muted,fontSize:14,padding:"24px 0",textAlign:"center"}}>No drills recorded yet.</div>}
           <div style={{display:"flex",flexDirection:"column",gap:10}}>
-            {drills.slice().sort((a,b)=>b.date.localeCompare(a.date)).map(d=>(
-              <div key={d.id} style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:12,padding:"14px 16px"}}>
+            {sum.drills.map(row=>{
+              const d = row.drill, ins = row.inspection;
+              const pct = ins && ins.maxScore>0 ? Math.round(ins.overallScore/ins.maxScore*100) : null;
+              const insLink = ins && (
+                <button type="button" onClick={()=>onOpenInspection&&onOpenInspection(ins.id)} style={{background:"rgba(245,158,11,0.1)",border:"1px solid rgba(245,158,11,0.3)",borderRadius:8,padding:"5px 12px",color:"#f59e0b",cursor:"pointer",fontSize:12,fontFamily:font,fontWeight:700}}>
+                  🔔 Checklist{pct!=null?` ${pct}%`:""} →
+                </button>);
+              if (!d) return (
+                <div key={row.key} data-testid="drill-row" style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:12,padding:"14px 16px",display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+                  <div style={{fontSize:22}}>{E("🔔","")}</div>
+                  <div style={{flex:1,minWidth:140}}>
+                    <div style={{fontWeight:700,fontSize:14,color:Z.white}}>{ins.date}</div>
+                    <div style={{fontSize:12,color:Z.muted,marginTop:1}}>{[ins.location, ins.inspector && `Checked by ${ins.inspector}`, "Fire Drill checklist (Inspections)"].filter(Boolean).join(" · ")}</div>
+                  </div>
+                  {insLink}
+                </div>);
+              const hcOk = d.headcountOk===true||d.headcountOk==="true";
+              return (
+              <div key={row.key} data-testid="drill-row" style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:12,padding:"14px 16px"}}>
                 <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",marginBottom:d.issues?10:0}}>
                   <div style={{fontSize:22}}>🚨</div>
                   <div style={{flex:1,minWidth:100}}>
-                    <div style={{fontWeight:700,fontSize:14,color:Z.white}}>{d.date} at {d.time}</div>
-                    <div style={{fontSize:12,color:Z.muted,marginTop:1}}>{d.zone} · Conducted by {d.conductedBy} · {d.weather}</div>
+                    <div style={{fontWeight:700,fontSize:14,color:Z.white}}>{d.date}{d.time?` at ${d.time}`:""}</div>
+                    <div style={{fontSize:12,color:Z.muted,marginTop:1}}>{[d.zone, d.conductedBy && `Conducted by ${d.conductedBy}`, d.weather].filter(Boolean).join(" · ")}</div>
                   </div>
-                  <div style={{textAlign:"center",padding:"6px 14px",background:"rgba(37,99,235,0.1)",borderRadius:8,border:"1px solid rgba(37,99,235,0.2)"}}>
+                  {d.evacuTime && <div style={{textAlign:"center",padding:"6px 14px",background:"rgba(37,99,235,0.1)",borderRadius:8,border:"1px solid rgba(37,99,235,0.2)"}}>
                     <div style={{fontSize:10,color:Z.muted,fontWeight:600,marginBottom:1}}>EVAC TIME</div>
                     <div style={{fontSize:16,fontWeight:800,color:"#93c5fd"}}>{d.evacuTime}</div>
-                  </div>
-                  <Badge label={d.headcountOk===true||d.headcountOk==="true"?"✓ Headcount OK":"⚠ Headcount Issue"} color={d.headcountOk===true||d.headcountOk==="true"?"#10b981":"#f59e0b"} bg={d.headcountOk===true||d.headcountOk==="true"?"rgba(16,185,129,0.12)":"rgba(245,158,11,0.12)"}/>
-                  <div style={{display:"flex",gap:6,marginLeft:"auto"}}>
+                  </div>}
+                  <Badge label={hcOk?"✓ Headcount OK":"⚠ Headcount Issue"} color={hcOk?"#10b981":"#f59e0b"} bg={hcOk?"rgba(16,185,129,0.12)":"rgba(245,158,11,0.12)"}/>
+                  <div style={{display:"flex",gap:6,marginLeft:"auto",flexWrap:"wrap"}}>
+                    {insLink}
                     <button onClick={()=>openEdit(d)} style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:8,padding:"5px 12px",color:Z.muted,cursor:"pointer",fontSize:12,fontFamily:font,fontWeight:600}}>Edit</button>
-                    <button onClick={()=>deleteItem(d.id)} style={{background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.2)",borderRadius:8,padding:"5px 12px",color:"#f87171",cursor:"pointer",fontSize:12,fontFamily:font,fontWeight:600}}>Delete</button>
+                    <button aria-label="Remove drill" onClick={()=>deleteItem(d.id)} style={{background:"none",border:`1px solid ${Z.borderMd}`,borderRadius:8,padding:"5px 10px",color:Z.muted,cursor:"pointer",fontSize:12,fontFamily:font,fontWeight:600}}>Remove</button>
                   </div>
                 </div>
                 {d.issues && <div style={{fontSize:12,color:Z.muted,paddingTop:8,borderTop:`1px solid ${Z.border}`,lineHeight:1.5}}><span style={{fontWeight:600,color:Z.white}}>Notes: </span>{d.issues}</div>}
               </div>
-            ))}
+            );})}
           </div>
         </div>
       )}
@@ -408,7 +536,7 @@ function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDel
                     <td style={{padding:"9px 12px"}}>
                       <div style={{display:"flex",gap:5}}>
                         <button onClick={()=>openEdit(t)} style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:7,padding:"4px 10px",color:Z.muted,cursor:"pointer",fontSize:11,fontFamily:font,fontWeight:600}}>Edit</button>
-                        <button onClick={()=>deleteItem(t.id)} style={{background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.2)",borderRadius:7,padding:"4px 10px",color:"#f87171",cursor:"pointer",fontSize:11,fontFamily:font,fontWeight:600}}>Del</button>
+                        <button aria-label="Remove" onClick={()=>deleteItem(t.id)} style={{background:"none",border:`1px solid ${Z.borderMd}`,borderRadius:7,padding:"4px 10px",color:Z.muted,cursor:"pointer",fontSize:11,fontFamily:font,fontWeight:600}}>Remove</button>
                       </div>
                     </td>
                   </tr>
@@ -425,7 +553,7 @@ function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDel
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
             <div>
               <div style={{fontSize:15,fontWeight:800,color:Z.white}}>Extinguisher Inspection Log</div>
-              <div style={{fontSize:12,color:Z.muted,marginTop:2}}>Annual service by competent person required. Monthly visual checks by a responsible person.</div>
+              <div style={{fontSize:12,color:Z.muted,marginTop:2}}>Annual service by competent person required. Monthly visual checks by a responsible person. This is the one list of extinguishers: the Equipment Register links here, and keeps the other fire equipment (alarm panel, hose reels).</div>
             </div>
             <div style={{display:"flex",gap:8}}>
               <button onClick={()=>{ setShowExtCsvImport(true); setExtCsvPreview([]); setExtCsvError(""); }}
@@ -622,7 +750,7 @@ function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDel
                     </div>
                     <div style={{display:"flex",gap:6,marginLeft:"auto"}}>
                       <button onClick={()=>openEdit(e)} style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:8,padding:"5px 12px",color:Z.muted,cursor:"pointer",fontSize:12,fontFamily:font,fontWeight:600}}>Edit</button>
-                      <button onClick={()=>deleteItem(e.id)} style={{background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.2)",borderRadius:8,padding:"5px 12px",color:"#f87171",cursor:"pointer",fontSize:12,fontFamily:font,fontWeight:600}}>Delete</button>
+                      <button aria-label="Remove extinguisher" onClick={()=>deleteItem(e.id)} style={{background:"none",border:`1px solid ${Z.borderMd}`,borderRadius:8,padding:"5px 10px",color:Z.muted,cursor:"pointer",fontSize:12,fontFamily:font,fontWeight:600}}>Remove</button>
                     </div>
                   </div>
                   {e.notes && <div style={{fontSize:12,color:Z.muted,paddingTop:8,marginTop:8,borderTop:`1px solid ${Z.border}`}}>{e.notes}</div>}
@@ -669,7 +797,7 @@ function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDel
                     <td style={{padding:"9px 12px"}}>
                       <div style={{display:"flex",gap:5}}>
                         <button onClick={()=>openEdit(t)} style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:7,padding:"4px 10px",color:Z.muted,cursor:"pointer",fontSize:11,fontFamily:font,fontWeight:600}}>Edit</button>
-                        <button onClick={()=>deleteItem(t.id)} style={{background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.2)",borderRadius:7,padding:"4px 10px",color:"#f87171",cursor:"pointer",fontSize:11,fontFamily:font,fontWeight:600}}>Del</button>
+                        <button aria-label="Remove" onClick={()=>deleteItem(t.id)} style={{background:"none",border:`1px solid ${Z.borderMd}`,borderRadius:7,padding:"4px 10px",color:Z.muted,cursor:"pointer",fontSize:11,fontFamily:font,fontWeight:600}}>Remove</button>
                       </div>
                     </td>
                   </tr>
@@ -695,15 +823,37 @@ function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDel
               {fraStatus.color==="#ef4444"?E("⚠️ ","")+"FRA review is overdue":E("⏰ ","")+"FRA review due soon"} — next review was due {fraNextDue}
             </div>
           )}
-          {fraReviews.length===0 && <div style={{color:Z.muted,fontSize:14,padding:"24px 0",textAlign:"center"}}>No FRA reviews recorded yet.</div>}
+          {sum.fras.length===0 && <div style={{color:Z.muted,fontSize:14,padding:"24px 0",textAlign:"center"}}>No FRA reviews recorded yet.</div>}
           <div style={{display:"flex",flexDirection:"column",gap:10}}>
-            {fraReviews.slice().sort((a,b)=>b.date.localeCompare(a.date)).map(r=>(
-              <div key={r.id} style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:12,padding:"16px"}}>
+            {sum.fras.map(row=>{
+              const r = row.review, ins = row.inspection;
+              const pct = ins && ins.maxScore>0 ? Math.round(ins.overallScore/ins.maxScore*100) : null;
+              const insLink = ins && (
+                <button type="button" onClick={()=>onOpenInspection&&onOpenInspection(ins.id)} style={{background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:8,padding:"5px 12px",color:"#f87171",cursor:"pointer",fontSize:12,fontFamily:font,fontWeight:700}}>
+                  {E("🔥 ","")}FRA checklist{pct!=null?` ${pct}%`:""} →
+                </button>);
+              const due = row.nextDue && (()=>{ const b = expiryBadge(row.nextDue, 30); return (
+                <div style={{textAlign:"right",minWidth:110}}>
+                  <div style={{fontSize:10,color:Z.muted,fontWeight:600,marginBottom:3}}>NEXT REVIEW DUE</div>
+                  <Badge label={row.nextDue} color={b?.color||Z.white} bg={b?.bg||"transparent"}/>
+                </div>); })();
+              if (!r) return (
+                <div key={row.key} data-testid="fra-row" style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:12,padding:"16px",display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+                  <div style={{width:38,height:38,borderRadius:"50%",background:"rgba(239,68,68,0.15)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{E("🔥","")}</div>
+                  <div style={{flex:1,minWidth:160}}>
+                    <div style={{fontWeight:700,fontSize:14,color:Z.white}}>{ins.date}{ins.inspector?` — ${ins.inspector}`:""}</div>
+                    <div style={{fontSize:12,color:Z.muted,marginTop:2}}>{[ins.location, "Fire Risk Assessment checklist (Inspections)"].filter(Boolean).join(" · ")}</div>
+                  </div>
+                  {due}
+                  {insLink}
+                </div>);
+              return (
+              <div key={row.key} data-testid="fra-row" style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:12,padding:"16px"}}>
                 <div style={{display:"flex",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
                   <div style={{width:38,height:38,borderRadius:"50%",background:r.reviewType==="external"?"rgba(139,92,246,0.15)":"rgba(239,68,68,0.15)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{r.reviewType==="external"?"🏢":"📋"}</div>
                   <div style={{flex:1,minWidth:160}}>
                     <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:2}}>
-                      <div style={{fontWeight:700,fontSize:14,color:Z.white}}>{r.date} — {r.reviewedBy}</div>
+                      <div style={{fontWeight:700,fontSize:14,color:Z.white}}>{r.date}{r.reviewedBy?` — ${r.reviewedBy}`:""}</div>
                       {r.reviewType==="external" && <span style={{fontSize:11,fontWeight:700,color:"#a78bfa",background:"rgba(139,92,246,0.15)",border:"1px solid rgba(139,92,246,0.3)",borderRadius:6,padding:"1px 8px"}}>External</span>}
                     </div>
                     {r.reviewType==="external" && r.externalCompany && (
@@ -711,8 +861,8 @@ function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDel
                         {r.externalCompany}{r.assessorQual ? ` — ${r.assessorQual}` : ""}{r.reportRef ? ` · Ref: ${r.reportRef}` : ""}
                       </div>
                     )}
-                    <div style={{fontSize:12,color:Z.muted,marginBottom:6}}><span style={{fontWeight:600,color:"#93c5fd"}}>Trigger: </span>{r.trigger}</div>
-                    <div style={{fontSize:13,color:Z.white,lineHeight:1.5}}>{r.changes}</div>
+                    {r.trigger && <div style={{fontSize:12,color:Z.muted,marginBottom:6}}><span style={{fontWeight:600,color:"#93c5fd"}}>Trigger: </span>{r.trigger}</div>}
+                    {r.changes && <div style={{fontSize:13,color:Z.white,lineHeight:1.5}}>{r.changes}</div>}
                     {r.fileName && (r.fileUrl || r.fileData) && (
                       <div style={{marginTop:10}}>
                         <a href={r.fileUrl || r.fileData} target="_blank" rel="noreferrer"
@@ -722,20 +872,81 @@ function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDel
                       </div>
                     )}
                   </div>
-                  <div style={{textAlign:"right",minWidth:110}}>
-                    <div style={{fontSize:10,color:Z.muted,fontWeight:600,marginBottom:3}}>NEXT REVIEW DUE</div>
-                    {r.nextReviewDue && (()=>{
-                      const b = expiryBadge(r.nextReviewDue, 30);
-                      return <Badge label={r.nextReviewDue} color={b?.color||Z.white} bg={b?.bg||"transparent"}/>;
-                    })()}
-                  </div>
-                  <div style={{display:"flex",gap:6}}>
+                  {due}
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                    {insLink}
                     <button onClick={()=>openEdit(r)} style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:8,padding:"5px 12px",color:Z.muted,cursor:"pointer",fontSize:12,fontFamily:font,fontWeight:600}}>Edit</button>
-                    <button onClick={()=>deleteItem(r.id)} style={{background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.2)",borderRadius:8,padding:"5px 12px",color:"#f87171",cursor:"pointer",fontSize:12,fontFamily:font,fontWeight:600}}>Delete</button>
+                    <button aria-label="Remove review" onClick={()=>deleteItem(r.id)} style={{background:"none",border:`1px solid ${Z.borderMd}`,borderRadius:8,padding:"5px 10px",color:Z.muted,cursor:"pointer",fontSize:12,fontFamily:font,fontWeight:600}}>Remove</button>
                   </div>
                 </div>
               </div>
-            ))}
+            );})}
+          </div>
+        </div>
+      )}
+
+      {/* ── WARDEN FORM ── */}
+      {wForm && (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:9000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+          <div role="dialog" aria-modal="true" aria-label="Fire warden" data-testid="warden-form" tabIndex={-1}
+            ref={el=>{ if (el && !el.dataset.focused) { el.dataset.focused = "1"; el.focus(); } }}
+            onKeyDown={e=>{ if (e.key==="Escape" && !wBusy) setWForm(null); }} style={{outline:"none",background:`linear-gradient(135deg,${Z.navyDk||"#060d2e"},${Z.navyMd||"#0d1f5c"})`,border:`1px solid ${Z.borderMd}`,borderRadius:16,padding:28,width:"100%",maxWidth:560,maxHeight:"88vh",overflowY:"auto"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+              <h3 style={{margin:0,fontSize:17,fontWeight:800,color:Z.white}}>{wForm.legacyId?"Link warden to staff":wForm.key?"Edit fire warden":"Add fire warden"}</h3>
+              <button type="button" aria-label="Close" onClick={()=>setWForm(null)} style={{background:"none",border:"none",color:Z.muted,fontSize:20,cursor:"pointer",fontFamily:font,lineHeight:1}}>✕</button>
+            </div>
+            {wForm.legacyId && <div style={{fontSize:12.5,color:Z.muted,lineHeight:1.5,marginBottom:4}}>Typed in as <b style={{color:Z.white}}>{wForm.legacyName}</b>. Choose the staff member and save: the old entry is replaced by their Fire Warden certificate record.</div>}
+            {label("Staff member *")}
+            <select aria-label="Staff member" value={wForm.staffId} onChange={e=>wSet({staffId:e.target.value})} style={{...inp,marginBottom:0}}>
+              <option value="">Choose…</option>
+              {(staff||[]).filter(u=>u.status!=="leaver").sort((a,b)=>a.name.localeCompare(b.name)).map(u=><option key={u.id} value={String(u.id)}>{u.name}{u.jobTitle?` — ${u.jobTitle}`:""}</option>)}
+            </select>
+            {label("Areas they cover")}
+            {wardenZones.length ? (
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                {wardenZones.map(z=>{ const on = wForm.zones.includes(z); return (
+                  <button key={z} type="button" aria-pressed={on} onClick={()=>wSet({zones:on?wForm.zones.filter(x=>x!==z):[...wForm.zones,z]})}
+                    style={{padding:"5px 11px",borderRadius:8,border:`1px solid ${on?"#ef4444":Z.borderMd}`,background:on?"rgba(239,68,68,0.12)":Z.overlay,color:on?"#fca5a5":Z.muted,cursor:"pointer",fontFamily:font,fontSize:12,fontWeight:on?700:500}}>
+                    {on?"✓ ":""}{z}
+                  </button>); })}
+              </div>
+            ) : <div style={{fontSize:12,color:Z.muted}}>No areas set up yet: add them in Documents ▼ → Site Settings (first aid zones). You can type one below.</div>}
+            <div style={{display:"flex",gap:8,marginTop:8}}>
+              <input aria-label="Add another area" value={wForm.zoneText} onChange={e=>wSet({zoneText:e.target.value})} placeholder="Another area…" style={{...inp,marginBottom:0,flex:1}}
+                onKeyDown={e=>{ if(e.key==="Enter"){ e.preventDefault(); const v=wForm.zoneText.trim(); if(v&&!wForm.zones.includes(v)) wSet({zones:[...wForm.zones,v],zoneText:""}); } }}/>
+              <button type="button" onClick={()=>{ const v=wForm.zoneText.trim(); if(v&&!wForm.zones.includes(v)) wSet({zones:[...wForm.zones,v],zoneText:""}); }} style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:10,padding:"8px 14px",color:Z.white,cursor:"pointer",fontFamily:font,fontWeight:700,fontSize:12}}>+ Add</button>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              <div>{label("Qualified on *")}<input aria-label="Qualified on" type="date" value={wForm.issuedDate} onChange={e=>wSet({issuedDate:e.target.value})} style={{...inp,marginBottom:0}}/></div>
+              <div>{label("Renewal")}
+                <select aria-label="Renewal" value={wForm.renewal} onChange={e=>wSet({renewal:Number(e.target.value),expiryTouched:false})} style={{...inp,marginBottom:0}}>
+                  <option value={12}>12 months</option><option value={24}>24 months</option><option value={36}>36 months (usual)</option>
+                </select></div>
+            </div>
+            {label("Expires *")}
+            <input aria-label="Expires" type="date" value={wForm.expiryDate} onChange={e=>setWForm(f=>({...f,expiryDate:e.target.value,expiryTouched:true}))} style={{...inp,marginBottom:0}}/>
+            <div style={{fontSize:11.5,color:Z.muted,marginTop:4}}>Worked out from the qualified date and renewal. Change it if the certificate shows a different date.</div>
+            {label("Certificate")}
+            <input ref={wFileRef} type="file" accept={MACHINE_EVIDENCE_ACCEPT} style={{display:"none"}} data-testid="warden-file" onChange={e=>{
+              const f = e.target.files && e.target.files[0]; e.target.value = "";
+              if (!f) return; const bad = checkMachineFiles([f]); if (bad) { notify(bad, { kind:"error" }); return; }
+              setWForm(w=>({...w,file:f}));
+            }}/>
+            {wForm.file || wForm.fileName ? (
+              <div style={{display:"flex",alignItems:"center",gap:10,background:"rgba(16,185,129,0.08)",border:"1px solid rgba(16,185,129,0.25)",borderRadius:10,padding:"10px 14px"}}>
+                <span style={{fontSize:16}}>📄</span>
+                <div style={{flex:1,minWidth:0,fontSize:13,fontWeight:700,color:"#10b981",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{wForm.file ? wForm.file.name : wForm.fileName}{wForm.file?" (new)":""}</div>
+                <button type="button" onClick={()=>wFileRef.current&&wFileRef.current.click()} style={{background:"none",border:"none",color:Z.muted,cursor:"pointer",fontSize:12,fontFamily:font,fontWeight:700}}>Replace</button>
+              </div>
+            ) : (
+              <button type="button" onClick={()=>wFileRef.current&&wFileRef.current.click()} style={{width:"100%",background:Z.overlay,border:`2px dashed ${Z.borderMd}`,borderRadius:10,padding:"12px",color:Z.muted,cursor:"pointer",fontSize:13,fontFamily:font,fontWeight:600}}>Attach the certificate (PDF or photo)</button>
+            )}
+            <div style={{display:"flex",gap:10,marginTop:22}}>
+              <button type="button" data-testid="warden-save" onClick={saveWarden} disabled={wBusy} style={{flex:1,background:`linear-gradient(135deg,#ef4444,#dc2626)`,border:"none",borderRadius:10,padding:"11px",color:"#fff",fontWeight:700,fontSize:14,cursor:wBusy?"default":"pointer",fontFamily:font,opacity:wBusy?.6:1}}>
+                {wBusy?"Saving…":wForm.legacyId?"Link and save":"Save warden"}
+              </button>
+              <button type="button" onClick={()=>setWForm(null)} style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:10,padding:"11px 20px",color:Z.muted,cursor:"pointer",fontFamily:font,fontWeight:600}}>Cancel</button>
+            </div>
           </div>
         </div>
       )}

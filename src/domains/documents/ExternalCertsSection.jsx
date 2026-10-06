@@ -9,7 +9,7 @@ import { useSiteLists } from "../../lib/siteLists";
 /**
  * ExternalCertsSection — admin upload/management of externally-issued certificates
  * per staff member (types defined in data/seedExtCerts.js EXT_CERT_TYPES —
- * currently First Aid and Fire Marshall; add more there). Shown on the Assign Training tab.
+ * currently First Aid and Fire Warden; add more there). Shown on the Assign Training tab.
  *
  * Data: extCerts = { [userId]: { [certTypeId]: { fileName, fileUrl, issuedDate,
  *        expiryDate, uploadedAt, zones?:[..], shifts?:[..] } } }
@@ -52,7 +52,7 @@ function ExternalCertsSection({ staff, extCerts, setExtCerts, dbSaveExtCert, dbD
   return (
     <div style={{marginTop:32,borderTop:`1px solid ${T.border}`,paddingTop:28}}>
       <h3 style={{fontSize:18,fontWeight:800,letterSpacing:-.3,marginBottom:4,margin:"0 0 4px"}}>External Certificates</h3>
-      <p style={{color:T.muted,fontSize:13,marginBottom:20}}>Upload externally issued certificates such as First Aid and Fire Marshall training.</p>
+      <p style={{color:T.muted,fontSize:13,marginBottom:20}}>Upload externally issued certificates such as First Aid and Fire Warden training. Fire Warden certificates are also managed on Fire Safety → Wardens.</p>
 
       {/* Staff selector */}
       <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20,flexWrap:"wrap"}}>
@@ -93,9 +93,9 @@ function ExternalCertsSection({ staff, extCerts, setExtCerts, dbSaveExtCert, dbD
                       <div><div style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:.5,marginBottom:2}}>Issued</div><div style={{fontSize:13,fontWeight:600,color:T.white}}>{cert.issuedDate||"—"}</div></div>
                       <div><div style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:.5,marginBottom:2}}>Expires</div><div style={{fontSize:13,fontWeight:600,color:isExpired?"#f87171":T.white}}>{cert.expiryDate||"—"}</div></div>
                     </div>
-                    {ct.id==="first_aid" && (
+                    {(ct.id==="first_aid"||ct.id==="fire_marshall") && (
                       <div style={{marginBottom:12,padding:"10px 12px",background:T.overlay,borderRadius:8,border:`1px solid ${T.border}`}}>
-                        <div style={{fontSize:10,color:T.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:.5,marginBottom:8}}>Coverage — First Aid Register</div>
+                        <div style={{fontSize:10,color:T.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:.5,marginBottom:8}}>{ct.id==="first_aid"?"Coverage — First Aid Register":"Areas covered — Fire Safety → Wardens"}</div>
                         <div style={{marginBottom:8}}>
                           <div style={{fontSize:11,color:T.muted,marginBottom:4}}>Zones / Areas</div>
                           <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
@@ -113,7 +113,7 @@ function ExternalCertsSection({ staff, extCerts, setExtCerts, dbSaveExtCert, dbD
                             })}
                           </div>
                         </div>
-                        <div>
+                        {ct.id==="first_aid" && <div>
                           <div style={{fontSize:11,color:T.muted,marginBottom:4}}>Shifts</div>
                           <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
                             {FA_SHIFTS.map(s=>{
@@ -129,7 +129,7 @@ function ExternalCertsSection({ staff, extCerts, setExtCerts, dbSaveExtCert, dbD
                               </button>;
                             })}
                           </div>
-                        </div>
+                        </div>}
                       </div>
                     )}
                     <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>

@@ -36,6 +36,7 @@ import { ScrollNav } from "../shared/ScrollNav";
 import { bundlesFor } from "../domains/documents/bundles";
 import { progressMap, saveProgress as saveModuleProgress, clearProgress } from "../lib/moduleProgress";
 import { dueInfo } from "../lib/dueDates";
+import { latestByKey } from "../domains/inspections/inspectionDue";
 
 const FONT = "'Barlow','Trebuchet MS',system-ui,sans-serif";
 const OLD_PROGRESS_KEY = "zeus.mobile.progress";   // before Oct 2026: one list for everyone on the phone (removed)
@@ -343,23 +344,14 @@ function MobileApp({
   }
 
   // ── Inspections & permits ─────────────────────────────────────────────────
-  // One "due" row per mobile-runnable inspection type, from the latest record
-  // of that type: its nextDue and the location it was last run at.
-  const todayIso = new Date().toISOString().slice(0, 10);
-  const inspectionsDue = MOBILE_INSP_TYPES.map((typeId) => {
-    const ofType = (siteInspections || [])
-      .filter((r) => r.type === typeId)
-      .sort((a, b) => String(a.date).localeCompare(String(b.date)));
-    const latest = ofType[ofType.length - 1];
-    if (!latest || !latest.nextDue) return null;
-    if (latest.nextDue > todayIso) return null;
-    return {
-      typeId,
-      location: latest.location,
-      dueDate: latest.nextDue,
-      overdue: latest.nextDue < todayIso,
-    };
-  }).filter(Boolean);
+  // One "due" row per mobile-runnable inspection type AND place, from the latest record
+  // of that type at that place (same rule as the desktop: domains/inspections/inspectionDue.js).
+  const _t = new Date();
+  const todayIso = `${_t.getFullYear()}-${String(_t.getMonth() + 1).padStart(2, "0")}-${String(_t.getDate()).padStart(2, "0")}`;
+  const inspectionsDue = [...latestByKey(siteInspections || []).values()]
+    .filter((r) => MOBILE_INSP_TYPES.includes(r.type) && r.nextDue && r.nextDue <= todayIso)
+    .sort((a, b) => String(a.nextDue).localeCompare(String(b.nextDue)))
+    .map((r) => ({ typeId: r.type, location: r.location, dueDate: r.nextDue, overdue: r.nextDue < todayIso }));
 
   const recentInspections = (siteInspections || [])
     .slice()

@@ -3,11 +3,13 @@ import { notify } from "../../shared/Feedback";
 import { useFormGuard } from "../../lib/unsaved";
 import { auditEvent } from "../../lib/audit";
 import { useSiteLists, saveSiteLists, loadSiteLists, SITE_LIST_DEFAULTS } from "../../lib/siteLists";
+import { EmailSettings } from "./EmailSettings";
 
 /**
  * SiteSettingsTab — Documents ▼ → Site Settings (admins).
  * The lists that differ from site to site, kept in the database (lib/siteLists.js):
- * first aid zones, first aid shifts and the hazard report locations.
+ * first aid zones, first aid shifts and the hazard report locations; and the
+ * email reminder settings (EmailSettings.jsx).
  */
 const LISTS = [
   { key: "reportLocations", title: "Hazard report locations", help: "The \"Where was it?\" choices when someone makes a quick hazard report, on a phone or computer. They can always type somewhere else.", add: "e.g. Racking Aisle 4" },
@@ -94,6 +96,7 @@ function SiteSettingsTab({ Z, font }) {
         {LISTS.map(l => <ListEditor key={l.key} list={l} items={form[l.key]} onChange={v => setForm(f => ({ ...f, [l.key]: v }))} Z={Z} font={font}/>)}
       </div>
       <p style={{ fontSize: 12, color: Z.muted, marginTop: 14 }}>The COSHH substances are kept in the COSHH Register (Documents ▼ → COSHH Register), and machine types under Machinery Competence → Machine types.</p>
+      <EmailSettings Z={Z} font={font}/>
     </div>
   );
 }

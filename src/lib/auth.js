@@ -29,6 +29,7 @@ import { SUPABASE_URL, SUPABASE_ANON, setAccessToken } from "./supabase";
 const ENV = (typeof import.meta !== "undefined" && import.meta.env) || {};
 const AUTH_MODE = ENV.VITE_AUTH_MODE === "supabase" ? "supabase" : "legacy";
 const ADMIN_FN = "/.netlify/functions/zp-admin";
+const EMAIL_FN = "/.netlify/functions/zp-email";   // email reminders (netlify/functions/zp-email.mjs)
 
 let session = null;          // { access_token, refresh_token, expires_at (ms), user }
 let refreshTimer = null;
@@ -115,18 +116,23 @@ const meta = u => (u && u.app_metadata) || {};
  * Call the admin server function. Returns { ok, ...result } or { ok:false, error }.
  * Actions: status, create, setPassword, sync, remove, createMissing, passwordChanged.
  */
-async function adminCall(action, payload = {}) {
+async function adminCall(action, payload = {}) { return serverCall(ADMIN_FN, "account service", action, payload); }
+
+/** Email reminders: status, preview, test, sendNow (administrators only). Same reply shape as adminCall. */
+async function emailCall(action, payload = {}) { return serverCall(EMAIL_FN, "email service", action, payload); }
+
+async function serverCall(fn, label, action, payload) {
   if (!session) return { ok: false, error: "You're not signed in." };
   let res;
   try {
-    res = await fetch(ADMIN_FN, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+    res = await fetch(fn, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
       body: JSON.stringify({ action, ...payload }) });
   } catch {
-    return { ok: false, error: "Can't reach the account service. Check your connection and try again." };
+    return { ok: false, error: `Can't reach the ${label}. Check your connection and try again.` };
   }
   let json = {};
   try { json = await res.json(); } catch { /* ignore */ }
-  if (!res.ok || json.ok === false) return { ok: false, error: json.error || `Account service error (${res.status}).` };
+  if (!res.ok || json.ok === false) return { ok: false, error: json.error || `${label[0].toUpperCase()}${label.slice(1)} error (${res.status}).` };
   return { ok: true, ...json };
 }
 
@@ -137,4 +143,4 @@ function makeTempPassword() {
   return `${pick(4)}-${pick(4)}-${pick(4)}`;
 }
 
-export { AUTH_MODE, signIn, signOut, checkPassword, changeOwnPassword, currentAuthUser, meta, adminCall, makeTempPassword };
+export { AUTH_MODE, signIn, signOut, checkPassword, changeOwnPassword, currentAuthUser, meta, adminCall, emailCall, makeTempPassword };

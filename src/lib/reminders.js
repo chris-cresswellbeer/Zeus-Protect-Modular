@@ -21,6 +21,13 @@
  *   weekly     to a person, on settings.weeklyDay: everything they still have to do
  *   manager    to a line manager, same day: their team's outstanding items
  *   digest     to admins, same day: the site summary
+ *   incident   to admins (and the reporter's line manager), at ANY hour, when a high-risk
+ *              incident or hazard is reported: STOP WORK hazard reports, someone taken to
+ *              hospital, RIDDOR, or a serious injury (settings.inc*). One email per incident,
+ *              once. Says what kind, when, where and why it's high-risk (and, for a hazard report,
+ *              who reported it and the hazard); never who was hurt or what the injury was. Sent within minutes: the portal
+ *              asks the server to check straight after an incident is saved
+ *              (netlify/functions/zp-email-alert.mjs), and the 15-minute job catches anything missed.
  *
  * DUPLICATES are prevented with KEYS stored in the email_keys table once an email
  * has gone (e.g. "new:t:4:fire_safety", "exp:4:ext:first_aid:2026-11-02:30",
@@ -42,6 +49,7 @@ import { MACHINERY_TYPES, machineState } from "../data/seedMachinery";
 import { parseCompletionDate } from "../domains/training/completion";
 import { collectOpenActions } from "./openActions";
 import { riddorDue, riddorUrgent, riddorDueText } from "../domains/incidents/riddor";
+import { INJURY_TYPES } from "../data/seedIncidents";
 import { renderEmail, ukDate } from "./emailTemplates";
 
 // ── Settings (app_settings row "email") ─────────────────────────────────────
@@ -59,11 +67,32 @@ export const EMAIL_DEFAULTS = {
   sendHour: 8,             // daily and weekly emails go from this hour (UK time)
   dailyLimit: 100,         // most emails per day (Resend's free plan allows 100)
   extraAdminEmails: [],    // more addresses for admin alerts and the digest
+  // high-risk incident alerts (any hour, to admins + extraAdminEmails + incidentEmails)
+  incidentAlerts: true,    // email when a high-risk incident or hazard is reported
+  incStopWork: true,       //   a hazard report marked "STOP WORK — Urgent"
+  incHospital: true,       //   someone taken to hospital, or an ambulance called
+  incRiddor: true,         //   marked RIDDOR-reportable
+  incInjury: true,         //   one of the serious injury types below
+  incAll: false,           //   every other incident and hazard report too
+  seriousInjuries: ["Fracture", "Head injury", "Crush injury", "Burn / Scald", "Eye injury", "Electric shock", "Multiple injuries", "Fatality"],
+  incidentManager: true,   // also the line manager of the person who reported it
+  incidentEmails: [],      // more addresses for incident alerts only (e.g. operations director)
 };
+/** Incidents dated more than this many days ago never trigger an alert (e.g. an old one edited). */
+export const INCIDENT_ALERT_DAYS = 14;   // a little longer than RIDDOR's 10 days, for accidents reported late
+/**
+ * Once an incident's alert has gone, someone added to the recipients later (a new admin, an
+ * extra address) isn't sent it: only people still waiting within this time (e.g. Resend was
+ * down for one of them) are. The time is kept in a key "incat:<incident id>:<minute>".
+ */
+const INCIDENT_RETRY_MINUTES = 120;
 export const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const NEW_FROM_HOUR = 7, NEW_UNTIL_HOUR = 21;   // "new" emails wait until morning when assigned at night
 
 const isEmail = s => /^[^\s@<>(),;:"]+@[^\s@<>(),;:"]+\.[^\s@<>(),;:"]+$/.test(String(s || "").trim());
+/** "a@x.co.uk, b@y.com" or a list → up to 10 distinct, valid, lower-case addresses */
+const emailList = v => [...new Set((Array.isArray(v) ? v : String(v || "").split(/[\s,;]+/))
+  .map(s => String(s).trim().toLowerCase()).filter(isEmail))].slice(0, 10);
 
 /** Settings as stored, with defaults filled in and values kept in range. */
 export function emailSettings(data) {
@@ -76,8 +105,11 @@ export function emailSettings(data) {
     expiry: !!d.expiry, adminAlerts: !!d.adminAlerts, digest: !!d.digest,
     weeklyDay: int(d.weeklyDay, 1, 5, 1), sendHour: int(d.sendHour, 5, 12, 8), dailyLimit: int(d.dailyLimit, 1, 5000, 100),
     warnDays: [...new Set(warn.length ? warn : EMAIL_DEFAULTS.warnDays)].sort((a, b) => b - a).slice(0, 4),
-    extraAdminEmails: [...new Set((Array.isArray(d.extraAdminEmails) ? d.extraAdminEmails : String(d.extraAdminEmails || "").split(/[\s,;]+/))
-      .map(s => String(s).trim().toLowerCase()).filter(isEmail))].slice(0, 10),
+    extraAdminEmails: emailList(d.extraAdminEmails),
+    incidentAlerts: !!d.incidentAlerts, incStopWork: !!d.incStopWork, incHospital: !!d.incHospital, incRiddor: !!d.incRiddor,
+    incInjury: !!d.incInjury, incAll: !!d.incAll, incidentManager: !!d.incidentManager,
+    seriousInjuries: INJURY_TYPES.filter(t => t !== INJURY_TYPES[0] && (Array.isArray(d.seriousInjuries) ? d.seriousInjuries : EMAIL_DEFAULTS.seriousInjuries).includes(t)),
+    incidentEmails: emailList(d.incidentEmails),
   };
 }
 
@@ -89,7 +121,7 @@ export function ukClock(now = new Date()) {
   const today = `${parts.year}-${parts.month}-${parts.day}`;
   const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(parts.weekday);
   const iso = weekday === 0 ? 7 : weekday;                        // Monday 1 … Sunday 7
-  return { today, hour: Number(parts.hour) % 24, weekday, isoDay: iso, weekStart: plusDays(today, 1 - iso) };
+  return { today, hour: Number(parts.hour) % 24, weekday, isoDay: iso, weekStart: plusDays(today, 1 - iso), ms: now.getTime() };
 }
 
 // ── date helpers (plain "YYYY-MM-DD", UTC maths so the time zone can't shift a day) ──
@@ -138,8 +170,10 @@ export function prepareData(rows = {}) {
   r("ext_certs").forEach(x => { (extCerts[String(x.user_id)] = extCerts[String(x.user_id)] || {})[x.cert_type] = x.data || {}; });
   const machineComps = {};
   r("machine_completions").forEach(x => { (machineComps[String(x.user_id)] = machineComps[String(x.user_id)] || []).push({ ...(x.data || {}), id: (x.data && x.data.id) || x.machine_id }); });
-  const incidents = r("incidents").map(x => ({ ...((x.details && typeof x.details === "object") ? x.details : {}),
-    id: x.id, date: x.date, type: x.type, location: x.location, riddor: x.riddor, riddorReported: !!x.riddor_reported, closed: x.closed, accidentCode: x.accident_code, numberCode: x.number_code }));
+  const incidents = r("incidents").map(x => { const det = (x.details && typeof x.details === "object") ? x.details : {}; return { ...det,
+    id: x.id, date: x.date, type: x.type, location: x.location, riddor: x.riddor, riddorReported: !!x.riddor_reported, closed: x.closed, accidentCode: x.accident_code, numberCode: x.number_code,
+    injuryType: x.injury_type || det.injuryType || "", reportedBy: x.reported_by != null ? String(x.reported_by) : (det.reportedBy != null ? String(det.reportedBy) : ""),
+    quickReport: !!(x.quick_report || det.quickReport), urgency: x.urgency || det.urgency || "", description: x.description || "" }; });
   const investigations = {};
   r("investigations").forEach(x => { investigations[x.incident_id] = x.data || {}; });
   return { staff, modules, machineTypes, assigns, dueDates, comps, docs, docAssign, acks, extCerts, machineComps, incidents, investigations,
@@ -222,6 +256,26 @@ const INCIDENT_TYPES = { accident: "Accident", near_miss: "Near miss", unsafe_co
 /** "Accident 12 — 25/09/2026, Goods In": enough to find it in the portal, no details of what happened or who was hurt. */
 const incidentLabel = inc => `${INCIDENT_TYPES[inc.type] || "Incident"}${inc.accidentCode ? ` ${inc.accidentCode}` : ""} — ${ukDate(inc.date)}${inc.location ? `, ${inc.location}` : ""}`;
 
+// ── High-risk incidents ─────────────────────────────────────────────────────
+const isHospital = o => /hospital|ambulance/i.test(String(o || ""));
+/**
+ * Why an incident needs an alert now: [] when it doesn't. Reasons are worded so they
+ * can go in an email: they say THAT it's serious, never what the injury was.
+ */
+export function incidentAlertReasons(inc, settings) {
+  const s = emailSettings(settings);
+  if (!inc) return [];
+  const out = [];
+  if (s.incStopWork && inc.quickReport && inc.urgency === "high") out.push("Hazard reported as STOP WORK — Urgent");
+  if (s.incHospital && isHospital(inc.postIncidentOutcome)) out.push("Someone was taken to hospital or an ambulance was called");
+  if (s.incRiddor && inc.riddor) out.push("Marked as reportable under RIDDOR");
+  if (s.incInjury && inc.injuryType && s.seriousInjuries.includes(inc.injuryType)) out.push("A serious injury was recorded");
+  return out;
+}
+const isStopWork = inc => !!inc.quickReport && inc.urgency === "high";
+const incidentKind = inc => (inc.quickReport ? "hazard report" : (INCIDENT_TYPES[inc.type] || "incident").toLowerCase());
+const clip = (t, n) => { const v = String(t || "").replace(/\s+/g, " ").trim(); return v.length > n ? `${v.slice(0, n - 1).trimEnd()}…` : v; };
+
 // ── The plan ────────────────────────────────────────────────────────────────
 /**
  * What to send now.
@@ -231,10 +285,11 @@ const incidentLabel = inc => `${INCIDENT_TYPES[inc.type] || "Incident"}${inc.acc
  *   sent       Set of keys already done (email_keys)
  *   portalUrl  link target, e.g. "https://zeus-protect.netlify.app"
  *   ignoreSchedule  true for "Send now" / preview: don't wait for the send hour or weekday
+ *   only       "incident": high-risk incident alerts and nothing else (the alert function)
  * → { emails:[{ kind, priority, userId, name, to, subject, html, text, keys:[] }],
  *     quietKeys:[], baselineKeys:[], firstRun, noEmail:[names] }
  */
-export function planEmails({ data, settings, clock, sent = new Set(), portalUrl = "", ignoreSchedule = false }) {
+export function planEmails({ data, settings, clock, sent = new Set(), portalUrl = "", ignoreSchedule = false, only = "" }) {
   const s = emailSettings(settings);
   const { today, hour, isoDay, weekStart } = clock;
   const firstRun = !sent.has("baseline");
@@ -262,6 +317,75 @@ export function planEmails({ data, settings, clock, sent = new Set(), portalUrl 
   //   first run → noted without emailing; that kind of email switched off → noted too (so switching
   //   it on later doesn't send old news); otherwise → emailed (when the time is right)
   const disposition = on => (firstRun ? baselineKeys : !on ? quietKeys : null);
+
+  // 0. INCIDENT — high-risk incidents and hazards, at any hour, one email per recipient per incident.
+  //    Its own first-run marker ("baseline:inc"), so adding this to a site that already sends
+  //    reminders doesn't email about last week's incidents; anything dated today still goes.
+  //    Keys: "inc:<recipient>:<incident>" for the high-risk alert, "incn:…" for a "New incident"
+  //    email (incAll) — kept apart so an incident first sent as "new" still gets its high-risk
+  //    alert if it becomes serious later. "incat:"/"incatn:" record when each was first sent.
+  {
+    const incFirst = !sent.has("baseline:inc");
+    if (incFirst) baselineKeys.push("baseline:inc");
+    const since = plusDays(today, -INCIDENT_ALERT_DAYS), until = plusDays(today, 1);
+    const recent = data.incidents.filter(inc => { const d = okDate(inc.date); return d && d >= since && d <= until; });
+    const nowMin = Math.floor((clock.ms || Date.now()) / 60000);
+    const firstAlerted = pre => { let t = null; sent.forEach(k => { if (k.startsWith(pre)) { const n = Number(k.slice(pre.length)); if (Number.isFinite(n) && (t == null || n < t)) t = n; } }); return t; };
+    recent.forEach(inc => {
+      const reasons = incidentAlertReasons(inc, s);
+      const high = reasons.length > 0;
+      if (!high && !s.incAll) return;
+      const reporter = data.staff.find(u => String(u.id) === String(inc.reportedBy));
+      const to = [...admins.map(a => ({ ...a, admin: true }))];
+      s.incidentEmails.forEach(e => to.push({ id: `x-${e}`, name: "", email: e, admin: true }));
+      if (s.incidentManager && reporter && reporter.manager) {
+        const manager = withEmail.find(m => m.id !== reporter.id && norm(m.name) === norm(reporter.manager));
+        if (manager) to.push({ id: manager.id, name: manager.name, email: manager.email.trim(), admin: manager.role === "admin", manager: true });
+      }
+      const seen = new Set();
+      const recipients = to.filter(r => {                     // each address once; not the person who reported it
+        const k = r.email.toLowerCase();
+        if (seen.has(k) || (reporter && (String(r.id) === String(reporter.id) || k === String(reporter.email || "").trim().toLowerCase()))) return false;
+        seen.add(k); return true;
+      });
+      const what = incidentKind(inc);
+      const What = what[0].toUpperCase() + what.slice(1);
+      const noun = inc.quickReport ? "hazard" : what;           // "a hazard has been reported", not "a hazard report has been reported"
+      const an = /^[aeiou]/.test(noun) ? "an" : "a";
+      const stop = s.incStopWork && isStopWork(inc);
+      // A hazard report names who reported it. An incident doesn't: the person reporting an
+      // accident is often the person hurt, and "taken to hospital" next to their name is health information.
+      const named = inc.quickReport && reporter;
+      const subject = `${stop ? "STOP WORK" : high ? "High-risk incident" : "New incident"}: ${What}${inc.location ? ` — ${clip(inc.location, 60)}` : ""}${inc.date && okDate(inc.date) !== today ? ` (${ukDate(inc.date)})` : ""}`;
+      const facts = [
+        { text: `${What}${inc.accidentCode ? ` (code ${inc.accidentCode})` : ""}`, sub: [okDate(inc.date) && ukDate(inc.date), inc.time && `at ${String(inc.time).slice(0, 5)}`, inc.location].filter(Boolean).join(" · ") },
+        named ? { text: `Reported by ${reporter.name}`, sub: reporter.jobTitle || "" } : { text: "Reported by a member of staff", sub: "Who reported it and who was involved are in Zeus Protect" },
+        inc.quickReport && inc.description && { text: "The hazard, as reported", sub: clip(inc.description, 240) },
+      ].filter(Boolean);
+      const [kp, mp] = high ? ["inc", "incat"] : ["incn", "incatn"];
+      const was = firstAlerted(`${mp}:${inc.id}:`);
+      const marker = `${mp}:${inc.id}:${was != null ? was : nowMin}`;
+      const late = was != null && nowMin - was > INCIDENT_RETRY_MINUTES;   // told about long ago: a new recipient isn't sent old news
+      recipients.forEach(r => {
+        const key = `${kp}:${r.id}:${inc.id}`;
+        if (sent.has(key) || (!high && sent.has(`inc:${r.id}:${inc.id}`))) return;
+        if (!s.incidentAlerts || late) { quietKeys.push(key, marker); return; }
+        if (incFirst && okDate(inc.date) < today) { baselineKeys.push(key, marker); return; }   // older than today on the first run: note only
+        const intro = r.manager && !r.admin
+          ? `${named ? `${reporter.name}, in your team,` : "Someone in your team"} has reported ${an} ${noun} in Zeus Protect${high ? " that needs attention now" : ""}.`
+          : `${high ? "A high-risk" : an[0].toUpperCase() + an.slice(1)} ${noun} has been reported in Zeus Protect.`;
+        emails.push({ kind: "incident", priority: -1, userId: /^x-/.test(String(r.id)) ? null : r.id, name: r.name, to: r.email, subject, keys: [key, marker],
+          ...renderEmail({ preheader: high ? reasons[0] : `A new ${noun} has been reported`, greeting: r.name ? `Hi ${firstName(r)},` : "Hello,", intro,
+            sections: [{ title: "What was reported", items: facts }, high && { title: "Why you're getting this", items: reasons.map(x => ({ text: x, flag: true })) }].filter(Boolean),
+            note: `${stop ? "If you haven't already, make sure the area is safe and work has stopped. " : ""}Details of what happened and who was involved are in Zeus Protect, not in this email.`,
+            button: r.admin ? { label: "Open Incidents", href: link("#/admin/incidents") } : { label: "Open Zeus Protect", href: link("") } }) });
+      });
+    });
+  }
+  if (only === "incident") {
+    emails.sort((a, b) => a.priority - b.priority);
+    return { emails, quietKeys, baselineKeys, firstRun: false, noEmail };
+  }
 
   // 1. NEW — training or reading just assigned
   withEmail.forEach(u => {
@@ -421,5 +545,5 @@ export function planEmails({ data, settings, clock, sent = new Set(), portalUrl 
   }
 
   emails.sort((a, b) => a.priority - b.priority);
-  return { emails, quietKeys, baselineKeys: firstRun ? [...new Set([...baselineKeys, "baseline"])] : [], firstRun, noEmail };
+  return { emails, quietKeys, baselineKeys: [...new Set([...baselineKeys, ...(firstRun ? ["baseline"] : [])])], firstRun, noEmail };
 }

@@ -153,6 +153,7 @@ import { loadSiteLists, getSiteLists, coverShifts, isAllShift } from "./lib/site
 import { loadWelcomeVideo, showWelcome, hideWelcome, WelcomeReplay, WelcomeVideoSettings } from "./shared/WelcomeVideo";
 import { useRemembered, clearRemembered } from "./lib/remembered";
 import { setAuditUser, primeAudit, primeAuditList, primeAuditMap, auditRecord, auditList, auditDelete, auditEvent } from "./lib/audit";
+import { pingIncidentAlert } from "./lib/incidentAlert";
 
 // Wraps a dashboard stat card to make it draggable. Only the small handle in
 // the corner starts a drag — the rest of the card keeps its own onClick
@@ -1413,7 +1414,7 @@ export default function App() {
     Object.entries(inc).forEach(([k, v]) => {
       if (!INCIDENT_CORE_KEYS.has(k) && v !== undefined && typeof v !== "function") details[k] = v;
     });
-    await dbWrite(sb.from("incidents").upsert({
+    const savedOk = await dbWrite(sb.from("incidents").upsert({
       id: inc.id, date: inc.date, type: inc.type, accident_code: inc.accidentCode,
       number_code: inc.numberCode, location: inc.location, reported_by: inc.reportedBy,
       description: inc.description, injury_type: inc.injuryType, riddor: inc.riddor, closed: inc.closed,
@@ -1426,6 +1427,7 @@ export default function App() {
       urgency: inc.urgency||null,
       details,
     }, { onConflict: "id" }), "incident", { alertOnError: true });
+    if (savedOk) pingIncidentAlert(inc.id);   // high-risk? the server emails admins straight away (Site Settings → Email reminders)
     auditRecord("incident", inc.id, { ...inc, photos }, incidentAuditLabel(inc));
   }
 

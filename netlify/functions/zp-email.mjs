@@ -13,7 +13,7 @@
  *   sendNow   send what's due now, without waiting for the send hour or weekday
  * Works on staging (branch deploys) too, where scheduled runs don't happen.
  */
-import { cfg, runEmailJob, sendTestEmail, emailStatus } from "../shared/emailJob.mjs";
+import { cfg, siteOf, runEmailJob, sendTestEmail, emailStatus } from "../shared/emailJob.mjs";
 
 const reply = (status, body) => ({ statusCode: status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" }, body: JSON.stringify(body) });
 const fail = (status, error) => reply(status, { ok: false, error });
@@ -43,14 +43,8 @@ export const handler = async (event) => {
   // Which site is this? Staff are only emailed from the LIVE site's own address; anywhere else
   // (staging, a branch or preview deploy) is test mode, whatever EMAIL_SEND_TO_STAFF says.
   // Links in emails sent from here point at the site the admin is using, if it's one of ours.
-  const host = String((event.headers && (event.headers["x-forwarded-host"] || event.headers.host)) || "").toLowerCase().split(",")[0].trim();
-  const liveHosts = [process.env.PORTAL_URL, process.env.URL].filter(Boolean).map(u => { try { return new URL(u).host.toLowerCase(); } catch { return ""; } }).filter(Boolean);
-  const site = String(process.env.SITE_NAME || "").toLowerCase();
-  if (site) liveHosts.push(`${site}.netlify.app`);
-  const isLive = liveHosts.includes(host);
-  const ours = isLive || (site && host.endsWith(`--${site}.netlify.app`)) || /^localhost(:\d+)?$/.test(host);
+  const { isLive, portalUrl } = siteOf(event);
   const forceTest = !isLive;
-  const portalUrl = ours ? `${/^localhost/.test(host) ? "http" : "https"}://${host}` : c.portalUrl;
   try {
     const who = await caller(token);
     if (who.error) return fail(...who.error);

@@ -293,8 +293,8 @@ function ReportHazard({ user, managerName, suggestedLocation, online, onSubmit, 
             padding: "11px 14px", marginBottom: 12, fontSize: 12.5, color: Z.slate, textAlign: "left", lineHeight: 1.5,
           }}>
             {urgency === "high"
-              ? <><b style={{ color: Z.red }}>STOP WORK — tell someone now.</b> This report doesn&rsquo;t send an alarm, text or email. Make the area safe if you can do so without risk, and tell your supervisor or manager in person straight away.</>
-              : <>This report doesn&rsquo;t send an alarm, text or email. If it needs sorting quickly, tell your supervisor too.</>}
+              ? <><b style={{ color: Z.red }}>STOP WORK — tell someone now.</b> The H&amp;S team may be emailed about it too, but don&rsquo;t wait for that. Make the area safe if you can do so without risk, and tell your supervisor or manager in person straight away.</>
+              : <>This report doesn&rsquo;t send an alarm or a text. If it needs sorting quickly, tell your supervisor too.</>}
           </div>
           <div style={{
             background: `${Z.amber}14`, border: `1px solid ${Z.amber}55`, borderRadius: 14,

@@ -2,10 +2,12 @@
  * ═══════════════════════════════════════════════════════════════════════════
  * netlify/shared/emailJob.mjs — the email reminder job (server side)
  * ═══════════════════════════════════════════════════════════════════════════
- * Used by two Netlify functions:
- *   zp-email-run  every 15 minutes on the live site (netlify.toml schedule)
- *   zp-email      the admin buttons in Site Settings → Email reminders
- *                 (check set-up, preview, send a test, send now)
+ * Used by three Netlify functions:
+ *   zp-email-run    every 15 minutes on the live site (netlify.toml schedule)
+ *   zp-email        the admin buttons in Site Settings → Email reminders
+ *                   (check set-up, preview, send a test, send now)
+ *   zp-email-alert  called by the portal straight after an incident is saved, so a
+ *                   high-risk incident is emailed within a minute (mode "incident")
  *
  * It reads the database with the Supabase SERVICE ROLE key, works out what to send
  * with src/lib/reminders.js (the same rules as the portal's screens), sends through
@@ -25,7 +27,7 @@
  *   PORTAL_URL                optional; the portal's address for links (default: Netlify's URL)
  *   SUPABASE_SERVICE_ROLE_KEY, VITE_SUPABASE_URL   (already set for the sign-in service)
  */
-import { prepareData, planEmails, ukClock, emailSettings, EMAIL_SETTINGS_ROW } from "../../src/lib/reminders.js";
+import { prepareData, planEmails, ukClock, emailSettings, plusDays, EMAIL_SETTINGS_ROW, INCIDENT_ALERT_DAYS } from "../../src/lib/reminders.js";
 import { renderEmail } from "../../src/lib/emailTemplates.js";
 import crypto from "crypto";
 
@@ -49,6 +51,29 @@ export const cfg = ({ forceTest = false } = {}) => ({
   portalUrl: String(process.env.PORTAL_URL || process.env.URL || "").replace(/\/+$/, ""),
 });
 
+/**
+ * Which of our sites a request came from (Netlify functions see the Host header).
+ *   isLive     the live site's own address: staff may be emailed (if EMAIL_SEND_TO_STAFF)
+ *   ours       live, one of its branch/preview deploys, or localhost
+ *   portalUrl  where links in emails sent from here should point
+ * Anything that isn't the live address is test mode, whatever EMAIL_SEND_TO_STAFF says.
+ */
+export function siteOf(event) {
+  const h = (event && event.headers) || {};
+  // Host first: it's what Netlify routed the request by, so it can't name a different site.
+  const host = String(h.host || h["x-forwarded-host"] || "").toLowerCase().split(",")[0].trim();
+  const liveHosts = [process.env.PORTAL_URL, process.env.URL].filter(Boolean).map(u => { try { return new URL(u).host.toLowerCase(); } catch { return ""; } }).filter(Boolean);
+  const site = String(process.env.SITE_NAME || "").toLowerCase();
+  if (site) liveHosts.push(`${site}.netlify.app`);
+  // CONTEXT (production / branch-deploy / deploy-preview), when Netlify provides it, has the last word.
+  const ctx = String(process.env.CONTEXT || "").toLowerCase();
+  const isLive = !!host && liveHosts.includes(host) && (!ctx || ctx === "production");
+  const deployHosts = [process.env.DEPLOY_PRIME_URL, process.env.DEPLOY_URL].filter(Boolean).map(u => { try { return new URL(u).host.toLowerCase(); } catch { return ""; } });
+  const ours = isLive || (!!host && deployHosts.includes(host)) || (!!site && host.endsWith(`--${site}.netlify.app`)) || /^localhost(:\d+)?$/.test(host);
+  const portalUrl = ours ? `${/^localhost/.test(host) ? "http" : "https"}://${host}` : cfg().portalUrl;
+  return { host, isLive, ours, portalUrl };
+}
+
 const TABLES = {   // table → order for stable paging
   users: "id", training_assigns: "user_id,module_id", training_completions: "user_id,module_id", custom_modules: "id",
   documents: "id", doc_assignments: "doc_id,user_id", doc_acknowledgements: "user_id,doc_id", ext_certs: "user_id,cert_type",
@@ -57,6 +82,7 @@ const TABLES = {   // table → order for stable paging
 };
 const PAGE = 1000;
 const TIME_BUDGET_MS = 18000;   // scheduled functions get 30 seconds; leave room to record what was sent
+const INCIDENT_BUDGET_MS = 6000; // the alert function is an ordinary one: 10 seconds
 const FETCH_MS = 8000;          // no single request may hang the run
 /**
  * Keys made in TEST MODE are kept apart ("t|" in front), so trying reminders out in test
@@ -107,15 +133,18 @@ const addKeys = (c, keys, source) => keys.length
   ? rest(c, "email_keys?on_conflict=key", { method: "POST", body: [...new Set(keys)].map(key => ({ key: keyNs(c) + key, source })), prefer: "resolution=ignore-duplicates,return=minimal" })
   : null;
 /** The keys that count for this mode (live or test), without the test prefix. */
-async function readKeys(c) {
+async function readKeys(c, filter = "") {
   const ns = keyNs(c);
-  return new Set((await readAll(c, "email_keys", "key", "key")).map(r => r.key)
+  return new Set((await readAll(c, "email_keys", "key", "key", filter)).map(r => r.key)
     .filter(k => (ns ? k.startsWith(ns) : !k.startsWith(NS_TEST))).map(k => k.slice(ns.length)));
 }
-/** Weekly keys are only needed for the week they're for: drop them after 8 weeks so the list stays small. */
+/** Weekly keys are only needed for the week they're for: drop them after 8 weeks so the list stays small; incident keys after the alert window. */
 async function pruneKeys(c) {
   const before = new Date(Date.now() - 56 * 86400000).toISOString();
   await rest(c, `email_keys?at=lt.${before}&or=(key.like.*weekly:*,key.like.*manager:*,key.like.*digest:*,key.like.*round:*)`, { method: "DELETE", prefer: "return=minimal" }).catch(() => {});
+  // incident alert keys only matter while the incident is inside the alert window (INCIDENT_ALERT_DAYS)
+  const incBefore = new Date(Date.now() - (INCIDENT_ALERT_DAYS + 30) * 86400000).toISOString();
+  await rest(c, `email_keys?at=lt.${incBefore}&or=(key.like.*inc:*,key.like.*incn:*,key.like.*incat:*,key.like.*incatn:*)`, { method: "DELETE", prefer: "return=minimal" }).catch(() => {});
 }
 const addLog = (c, rows) => rows.length ? rest(c, "email_log", { method: "POST", body: rows, prefer: "return=minimal" }) : null;
 
@@ -137,7 +166,7 @@ async function resend(c, path, body, idem) {
     headers: { Authorization: `Bearer ${c.resendKey}`, "Content-Type": "application/json", ...(idem ? { "Idempotency-Key": idem } : {}) },
     body: JSON.stringify(body) });
   let json = null; try { json = await res.json(); } catch { /* empty */ }
-  if (!res.ok) { const e = new Error((json && (json.message || json.error || json.name)) || `Resend HTTP ${res.status}`); e.status = res.status; e.refused = res.status === 400 || res.status === 422; throw e; }
+  if (!res.ok) { const e = new Error((json && (json.message || json.error || json.name)) || `Resend HTTP ${res.status}`); e.status = res.status; e.code = (json && json.name) || ""; e.refused = res.status === 400 || res.status === 422; throw e; }
   return json;
 }
 const pause = ms => new Promise(r => setTimeout(r, ms));
@@ -151,13 +180,37 @@ const pause = ms => new Promise(r => setTimeout(r, ms));
  *     Not retried one by one, because Resend may have accepted the batch after all.
  * result: { e, ok, id, error, held, rejected }
  */
-async function deliver(c, list, started, onBatch) {
+async function deliver(c, list, started, onBatch, budget = TIME_BUDGET_MS) {
   const out = [];
   const hold = (e, why) => ({ e, ok: false, held: true, error: why });
+  // Incident alerts go one at a time with a fixed Idempotency-Key per recipient and incident, so the
+  // alert function and the 15-minute job running at the same moment can't both send one: Resend
+  // keeps the first and answers 409 to the other, which counts as sent.
+  const singles = list.filter(e => e.kind === "incident");
+  if (singles.length) {
+    const res = [];
+    for (const e of singles) {
+      if (Date.now() - started > budget) { res.push(hold(e, "out of time — on the next run")); continue; }
+      try { const r = await resend(c, "/emails", payload(c, e), `zp-i-${hash(`${keyNs(c)}${e.actualTo}|${e.keys[0]}`)}`); res.push({ e, ok: true, id: r && r.id }); }
+      catch (err) {
+        // 409 "invalid_idempotent_request": this key was used before, i.e. it was sent already.
+        // 409 "concurrent_idempotent_requests": another run is sending it right now and may yet
+        // fail, so hold it: the next run either sends it or gets told it went.
+        if (err.status === 409 && err.code !== "concurrent_idempotent_requests") res.push({ e, ok: true, id: null, dup: true });
+        else if (err.status === 409) res.push(hold(e, "being sent by another check — confirmed on the next run"));
+        else if (err.status === 401 || err.status === 403) res.push({ e, ok: false, error: `Resend refused the API key (${err.message})` });
+        else res.push(err.refused ? { e, ok: false, rejected: true, error: err.message } : hold(e, `Resend didn't answer (${err.message}) — on the next run`));
+      }
+      if (singles.length > 1) await pause(150);
+    }
+    out.push(...res);
+    if (onBatch) await onBatch(res);
+    list = list.filter(e => e.kind !== "incident");
+  }
   for (let i = 0; i < list.length; i += 100) {
     const batch = list.slice(i, i + 100);
     const res = [];
-    if (Date.now() - started > TIME_BUDGET_MS) { list.slice(i).forEach(e => out.push(hold(e, "out of time — on the next run"))); break; }
+    if (Date.now() - started > budget) { list.slice(i).forEach(e => out.push(hold(e, "out of time — on the next run"))); break; }
     try {
       const r = await resend(c, "/emails/batch", batch.map(e => payload(c, e)), `zp-b-${hash(batch.map(e => e.actualTo + e.subject + e.keys.join()).join("|"))}`);
       const ids = (r && (r.data || r)) || [];
@@ -166,7 +219,7 @@ async function deliver(c, list, started, onBatch) {
       if (err.status === 401 || err.status === 403) batch.forEach(e => res.push({ e, ok: false, error: `Resend refused the API key (${err.message})` }));
       else if (!err.refused) batch.forEach(e => res.push(hold(e, `Resend didn't answer (${err.message}) — on the next run`)));
       else for (const e of batch) {
-        if (Date.now() - started > TIME_BUDGET_MS) { res.push(hold(e, "out of time — on the next run")); continue; }
+        if (Date.now() - started > budget) { res.push(hold(e, "out of time — on the next run")); continue; }
         try { const r = await resend(c, "/emails", payload(c, e), `zp-e-${hash(e.actualTo + e.subject + e.keys.join())}`); res.push({ e, ok: true, id: r && r.id }); }
         catch (e2) { res.push(e2.refused ? { e, ok: false, rejected: true, error: e2.message } : hold(e, `Resend didn't answer (${e2.message}) — on the next run`)); }
         await pause(150);   // Resend allows 10 requests a second
@@ -196,6 +249,8 @@ export function setupProblems(c, { forSending = true } = {}) {
  *   mode "scheduled"  the 15-minute run: waits for the send hour / weekday
  *   mode "now"        admin's "Send due emails now": doesn't wait for the hour or weekday
  *   mode "preview"    works out what "now" would send, sends nothing, records nothing
+ *   mode "incident"   high-risk incident alerts only (zp-email-alert, after an incident is saved);
+ *                     reads only the staff list and recent incidents, so it's quick
  * → { ok, mode, message, sent, failed, held, firstRun, baseline, emails?:[...] , noEmail }
  */
 export async function runEmailJob({ mode = "scheduled", now = new Date(), portalUrl, forceTest = false } = {}) {
@@ -207,19 +262,24 @@ export async function runEmailJob({ mode = "scheduled", now = new Date(), portal
   const settings = await loadSettings(c);
   if (mode !== "preview" && !settings.enabled) return { ok: true, mode, message: "Email reminders are switched off (Site Settings → Email reminders).", sent: 0 };
 
-  const names = Object.keys(TABLES);
-  if (mode === "scheduled") await pruneKeys(c);
-  const [sent, ...tableRows] = await Promise.all([readKeys(c), ...names.map(t => readOptional(c, t))]);
-  const rows = Object.fromEntries(names.map((t, i) => [t, tableRows[i]]));
   const clock = ukClock(now);
-  const plan = planEmails({ data: prepareData(rows), settings, clock, sent, portalUrl: portalUrl || c.portalUrl, ignoreSchedule: mode !== "scheduled" });
+  const incidentOnly = mode === "incident";
+  if (incidentOnly && !settings.incidentAlerts) return { ok: true, mode, message: "High-risk incident emails are switched off.", sent: 0 };
+  const names = incidentOnly ? ["users", "incidents"] : Object.keys(TABLES);
+  if (mode === "scheduled") await pruneKeys(c);
+  const since = plusDays(clock.today, -INCIDENT_ALERT_DAYS - 1);
+  const [sent, ...tableRows] = await Promise.all([readKeys(c, incidentOnly ? "&key=like.*inc*" : ""), ...names.map(t => incidentOnly && t === "incidents" ? readAll(c, t, "*", TABLES[t], `&date=gte.${since}`) : readOptional(c, t))]);
+  const rows = Object.fromEntries(names.map((t, i) => [t, tableRows[i]]));
+  const plan = planEmails({ data: prepareData(rows), settings, clock, sent, portalUrl: portalUrl || c.portalUrl, ignoreSchedule: mode !== "scheduled", only: incidentOnly ? "incident" : "" });
 
+  // High-risk incident emails never wait for the daily limit (they still count towards it).
   const limitLeft = mode === "preview" ? settings.dailyLimit : Math.max(0, settings.dailyLimit - await sentToday(c, clock.today));
-  const toSend = plan.emails.slice(0, limitLeft);
+  const urgent = plan.emails.filter(e => e.kind === "incident"), rest = plan.emails.filter(e => e.kind !== "incident");
+  const toSend = [...urgent, ...rest.slice(0, Math.max(0, limitLeft - urgent.length))];
   const overLimit = plan.emails.length - toSend.length;
 
   if (mode === "preview") {
-    return { ok: true, mode, live: c.live, testTo: c.testTo, firstRun: plan.firstRun, baseline: plan.baselineKeys.filter(k => k !== "baseline").length,
+    return { ok: true, mode, live: c.live, testTo: c.testTo, firstRun: plan.firstRun, baseline: plan.baselineKeys.filter(k => !/^(baseline|inc)/.test(k)).length,
       noEmail: plan.noEmail, dailyLimit: settings.dailyLimit, overLimit, enabled: settings.enabled,
       emails: plan.emails.slice(0, 300).map((e, i) => ({ kind: e.kind, to: e.to, name: e.name, subject: e.subject, html: i < 60 ? e.html : "" })), total: plan.emails.length };
   }
@@ -232,13 +292,13 @@ export async function runEmailJob({ mode = "scheduled", now = new Date(), portal
     // what went (and what Resend refused outright — retrying a bad address every 15 minutes helps no one)
     await addKeys(c, batch.filter(r => r.ok).flatMap(r => r.e.keys), mode);
     await addKeys(c, batch.filter(r => r.rejected).flatMap(r => r.e.keys), "rejected");
-    await addLog(c, batch.filter(r => !r.held).map(r => ({ day: clock.today, kind: r.e.kind, user_id: r.e.userId || null, to_addr: r.e.actualTo, intended_to: r.e.to,
+    await addLog(c, batch.filter(r => !r.held && !r.dup).map(r => ({ day: clock.today, kind: r.e.kind, user_id: r.e.userId || null, to_addr: r.e.actualTo, intended_to: r.e.to,
       subject: r.e.subject.slice(0, 300), status: r.ok ? r.e.status : "failed", error: r.ok ? null : String(r.error || "").slice(0, 500), resend_id: r.id || null, mode })));
-  });
+  }, incidentOnly ? INCIDENT_BUDGET_MS : TIME_BUDGET_MS);
 
-  const sentN = results.filter(r => r.ok).length, failed = results.filter(r => !r.ok && !r.held), held = results.filter(r => r.held).length + overLimit;
+  const sentN = results.filter(r => r.ok && !r.dup).length, failed = results.filter(r => !r.ok && !r.held), held = results.filter(r => r.held).length + overLimit;
   const msg = [sentN ? `${sentN} email${sentN === 1 ? "" : "s"} sent${c.live ? "" : ` (to ${c.testTo} — test mode)`}.` : "Nothing was due to send.",
-    plan.firstRun ? `First run: ${plan.baselineKeys.length - 1} things already assigned or expiring were noted without emailing.` : "",
+    plan.firstRun ? `First run: ${plan.baselineKeys.filter(k => !/^(baseline|inc)/.test(k)).length} things already assigned or expiring were noted without emailing.` : "",
     failed.length ? `${failed.length} couldn't be sent: ${failed[0].error}` : "",
     overLimit ? `${overLimit} held back by the daily limit of ${settings.dailyLimit}; they'll go tomorrow.` : "",
     held - overLimit > 0 ? `${held - overLimit} will be tried again on the next run (${(results.find(r => r.held) || {}).error || ""}).` : ""].filter(Boolean).join(" ");

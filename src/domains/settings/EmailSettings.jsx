@@ -4,20 +4,22 @@ import { AUTH_MODE, emailCall } from "../../lib/auth";
 import { notify, ask } from "../../shared/Feedback";
 import { auditEvent } from "../../lib/audit";
 import { useFormGuard, DraftBanner } from "../../lib/unsaved";
-import { EMAIL_DEFAULTS, EMAIL_SETTINGS_ROW, WEEKDAYS, emailSettings } from "../../lib/reminders";
+import { EMAIL_DEFAULTS, EMAIL_SETTINGS_ROW, WEEKDAYS, INCIDENT_ALERT_DAYS, emailSettings } from "../../lib/reminders";
+import { INJURY_TYPES } from "../../data/seedIncidents";
 
 /**
  * EmailSettings — Site Settings → 📧 Email reminders (admins).
  *   • the switches, stored in app_settings row "email" (lib/reminders.js reads them)
  *   • set-up check, preview, test email and "Send due emails now", which call the
  *     server (netlify/functions/zp-email.mjs) — these need the individual sign-ins
+ *   • high-risk incident emails: which incidents count, and who's told
  *   • the last 50 emails sent (email_log, email_reminders.sql)
  * The emails themselves are sent by the scheduled job on Netlify every 15 minutes.
  */
 const KIND_LABEL = { new: "New training or reading", expiry: "Renewal warning", alerts: "Admin alert", weekly: "Weekly reminder",
-  manager: "Manager summary", digest: "Weekly summary (admins)", test: "Test" };
+  manager: "Manager summary", digest: "Weekly summary (admins)", incident: "High-risk incident", test: "Test" };
 const STATUS = { sent: ["Sent", "#10b981"], redirected: ["Sent to test address", "#f59e0b"], failed: ["Failed", "#ef4444"] };
-const toForm = s => ({ ...s, warnDays: s.warnDays.join(", "), extraAdminEmails: s.extraAdminEmails.join(", ") });
+const toForm = s => ({ ...s, warnDays: s.warnDays.join(", "), extraAdminEmails: s.extraAdminEmails.join(", "), incidentEmails: s.incidentEmails.join(", ") });
 const when = t => { const d = new Date(t); return isNaN(d) ? "" : d.toLocaleString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }); };
 
 function EmailSettings({ Z, font }) {
@@ -49,7 +51,7 @@ function EmailSettings({ Z, font }) {
   async function save() {
     const clean = emailSettings({ ...form });
     if (clean.enabled && !savedForm.enabled && !(await ask({ title: "Switch email reminders on?",
-      message: "From the next check (every 15 minutes on the live site), staff will be emailed about new training and reading, renewals and, each week, what they still have to do.\n\nThe first check only notes what's already assigned or expiring, so nobody is sent a pile of old reminders. Use Preview to see what will go.",
+      message: "From the next check (every 15 minutes on the live site), staff will be emailed about new training and reading, renewals and, each week, what they still have to do. High-risk incidents are emailed to admins as soon as they're reported.\n\nThe first check only notes what's already assigned or expiring, and incidents from before today, so nobody is sent a pile of old news. Use Preview to see what will go.",
       ok: "Switch on" }))) return;
     setBusy("save");
     const r = await sb.from("app_settings").upsert({ id: EMAIL_SETTINGS_ROW, data: clean, updated_at: new Date().toISOString() }, { onConflict: "id" });
@@ -58,8 +60,10 @@ function EmailSettings({ Z, font }) {
     const was = emailSettings({ ...savedForm });
     const what = clean.enabled !== was.enabled ? (clean.enabled ? "Email reminders switched on" : "Email reminders switched off") : "Email reminder settings changed";
     auditEvent("settings", EMAIL_SETTINGS_ROW, "update", what, {}, "Email reminders");
+    const typed = v => String(v || "").split(/[\s,;]+/).map(x => x.trim()).filter(Boolean);
+    const dropped = [...typed(form.extraAdminEmails), ...typed(form.incidentEmails)].filter(x => !clean.extraAdminEmails.includes(x.toLowerCase()) && !clean.incidentEmails.includes(x.toLowerCase()));
     const f = toForm(clean); setForm(f); setSavedForm(f); guard.saved();
-    notify(`${what}.`);
+    notify(`${what}.${dropped.length ? ` Not saved, as ${dropped.length === 1 ? "it isn't an email address" : "they aren't email addresses"}: ${[...new Set(dropped)].join(", ")}.` : ""}`, dropped.length ? { kind: "warn", timeout: 9000 } : undefined);
   }
 
   async function run(action) {
@@ -102,8 +106,8 @@ function EmailSettings({ Z, font }) {
         <div style={{ flex: "1 1 320px" }}>
           <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: Z.white }}>📧 Email reminders</h3>
           <p style={{ margin: "4px 0 0", fontSize: 12.5, color: Z.muted, lineHeight: 1.5 }}>
-            Emails staff, managers and admins about training, reading and renewals, so nobody has to sign in to find out. Emails say what needs doing and link to the portal;
-            they never include incident details, health information or files.
+            Emails staff, managers and admins about training, reading and renewals, and admins about high-risk incidents, so nobody has to sign in to find out. Emails say what needs doing and link to the portal;
+            they never say who was hurt or how, and never include health information or files.
           </p>
         </div>
         <button type="button" data-testid="email-save" onClick={save} disabled={!changed || busy === "save"} style={btn(true, !changed || busy === "save")}>
@@ -132,6 +136,37 @@ function EmailSettings({ Z, font }) {
           <input aria-label="Days before expiry" value={form.warnDays} onChange={e => set("warnDays", e.target.value)} style={{ ...inp, width: 90 }} placeholder="30, 7"/></>)}
         {check("adminAlerts", "Same-day alerts to admins", "When someone's certificate or licence reaches a warning point (including people with no email address), and RIDDOR reports due to the HSE.")}
         {check("digest", "Weekly summary to admins", "On the weekly reminder day: overdue training, renewals, overdue actions, RIDDOR reports to make and unconfirmed documents.")}
+        {check("incidentAlerts", "High-risk incidents, straight away", "Email the admins within a minute or two of a high-risk incident or hazard being reported, at any time of day or night. One email per incident. It says what kind, when, where and why it's high-risk (for a hazard report, also who reported it and the hazard), never who was hurt or what the injury was.", form.incidentAlerts && (
+          <div data-testid="incident-rules" style={{ width: "100%", display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ fontSize: 12.5, color: Z.muted }}>Counts as high-risk:</div>
+            {[["incStopWork", "A hazard report marked 🔴 STOP WORK — Urgent"], ["incHospital", "Someone taken to hospital, or an ambulance called"], ["incRiddor", "Marked as reportable under RIDDOR"],
+              ["incInjury", "A serious injury (choose which below)"], ["incAll", "Every other incident and hazard report too (\"New incident\" emails)"]].map(([k, label]) => (
+              <label key={k} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12.5, color: Z.white, cursor: "pointer" }}>
+                <input type="checkbox" checked={!!form[k]} onChange={e => set(k, e.target.checked)} style={{ width: 15, height: 15, accentColor: Z.accent }}/>{label}
+              </label>))}
+            {form.incInjury && (
+              <div role="group" aria-label="Serious injury types" style={{ display: "flex", flexWrap: "wrap", gap: 6, marginLeft: 23 }}>
+                {INJURY_TYPES.slice(1).map(t => { const onT = (form.seriousInjuries || []).includes(t); return (
+                  <button key={t} type="button" aria-pressed={onT} onClick={() => set("seriousInjuries", onT ? form.seriousInjuries.filter(x => x !== t) : [...(form.seriousInjuries || []), t])}
+                    style={{ padding: "4px 10px", borderRadius: 14, fontSize: 11.5, fontFamily: font, cursor: "pointer", border: `1px solid ${onT ? "rgba(239,68,68,0.55)" : Z.borderMd}`,
+                      background: onT ? "rgba(239,68,68,0.14)" : Z.overlay, color: onT ? "#fca5a5" : Z.muted, fontWeight: onT ? 700 : 400 }}>{onT ? "✓ " : ""}{t}</button>); })}
+              </div>
+            )}
+            <div style={{ fontSize: 12.5, color: Z.muted, marginTop: 4 }}>Who's told: every admin{form.extraAdminEmails ? ", the addresses below for admin alerts" : ""}, and</div>
+            <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12.5, color: Z.white, cursor: "pointer" }}>
+              <input type="checkbox" checked={!!form.incidentManager} onChange={e => set("incidentManager", e.target.checked)} style={{ width: 15, height: 15, accentColor: Z.accent }}/>
+              the line manager of the person who reported it
+            </label>
+            <label style={{ fontSize: 12.5, color: Z.muted }}>Also tell (incident emails only)<br/>
+              <input aria-label="Incident alert emails" value={form.incidentEmails || ""} onChange={e => set("incidentEmails", e.target.value)} placeholder="e.g. operations.director@yourdomain.co.uk, site.manager@yourdomain.co.uk"
+                style={{ ...inp, width: "100%", boxSizing: "border-box", marginTop: 4 }}/>
+            </label>
+            <div style={{ fontSize: 11.5, color: Z.muted, lineHeight: 1.5 }}>
+              The person who reported it isn't emailed about their own report. Incidents dated more than {INCIDENT_ALERT_DAYS} days ago never trigger an email, and when this is first switched on, incidents from before today are noted, not emailed.
+              An incident that becomes high-risk later (e.g. "taken to hospital" added when the full report is written) is emailed then.
+            </div>
+          </div>
+        ))}
         <div style={{ display: "flex", flexWrap: "wrap", gap: 16, padding: "12px 0 2px", borderTop: `1px solid ${Z.border}`, alignItems: "flex-end" }}>
           <label style={{ fontSize: 12.5, color: Z.muted }}>Daily and weekly emails go at<br/>
             <select aria-label="Send time" value={form.sendHour} onChange={e => set("sendHour", Number(e.target.value))} style={{ ...inp, marginTop: 4 }}>

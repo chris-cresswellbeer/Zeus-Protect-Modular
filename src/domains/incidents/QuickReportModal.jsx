@@ -61,8 +61,8 @@ function QuickReportModal({ user, onSubmit, onClose, Z, font }) {
             <p style={{color:Z.muted,fontSize:13,marginBottom:16}}>Your report has been logged in the portal for the H&S team to review. Thank you for keeping the site safe.</p>
             <div style={{background:urgency==="high"?`${Z.red}1A`:Z.overlay,border:`1px solid ${urgency==="high"?`${Z.red}66`:Z.borderMd}`,borderRadius:10,padding:"10px 14px",marginBottom:12,fontSize:12,color:Z.slate,textAlign:"left",lineHeight:1.5}}>
               {urgency==="high"
-                ? <><b style={{color:Z.red}}>STOP WORK — tell someone now.</b> This report doesn't send an alarm, text or email. Make the area safe if you can do so without risk, and tell your supervisor or manager in person straight away.</>
-                : <>This report doesn't send an alarm, text or email. If it needs sorting quickly, tell your supervisor too.</>}
+                ? <><b style={{color:Z.red}}>STOP WORK — tell someone now.</b> The H&amp;S team may be emailed about it too, but don't wait for that. Make the area safe if you can do so without risk, and tell your supervisor or manager in person straight away.</>
+                : <>This report doesn't send an alarm or a text. If it needs sorting quickly, tell your supervisor too.</>}
             </div>
             <div style={{background:`${Z.amber}14`,border:`1px solid ${Z.amber}55`,borderRadius:10,padding:"10px 14px",marginBottom:20,fontSize:12,color:Z.slate,textAlign:"left",lineHeight:1.5}}>
               <b style={{color:Z.amber}}>Next step:</b> complete the full report under <b>Report Incident</b> by the end of tomorrow. You'll see a reminder on your dashboard until it's done.

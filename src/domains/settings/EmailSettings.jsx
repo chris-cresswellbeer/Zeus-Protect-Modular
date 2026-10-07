@@ -17,7 +17,7 @@ import { INJURY_TYPES } from "../../data/seedIncidents";
  * The emails themselves are sent by the scheduled job on Netlify every 15 minutes.
  */
 const KIND_LABEL = { new: "New training or reading", expiry: "Renewal warning", alerts: "Admin alert", weekly: "Weekly reminder",
-  manager: "Manager summary", digest: "Weekly summary (admins)", incident: "High-risk incident", test: "Test" };
+  manager: "Manager summary", digest: "Weekly summary (admins)", incident: "High-risk incident", action: "New action", test: "Test" };
 const STATUS = { sent: ["Sent", "#10b981"], redirected: ["Sent to test address", "#f59e0b"], failed: ["Failed", "#ef4444"] };
 const toForm = s => ({ ...s, warnDays: s.warnDays.join(", "), extraAdminEmails: s.extraAdminEmails.join(", "), incidentEmails: s.incidentEmails.join(", ") });
 const when = t => { const d = new Date(t); return isNaN(d) ? "" : d.toLocaleString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }); };
@@ -68,7 +68,7 @@ function EmailSettings({ Z, font }) {
 
   async function run(action) {
     if (action === "sendNow" && !(await ask({ title: "Send due emails now?",
-      message: "This sends everything that's due, without waiting for the usual time or day: new items, renewal warnings, alerts and, if they haven't gone this week, the weekly reminders and summaries.\n\nNothing is sent twice: anything already sent is left out.",
+      message: "This sends everything that's due, without waiting for the usual time or day: new items and actions, renewal warnings, alerts and, if they haven't gone this week, the weekly reminders and summaries.\n\nNothing is sent twice: anything already sent is left out.",
       ok: "Send now" }))) return;
     setBusy(action);
     const r = await emailCall(action);
@@ -135,7 +135,15 @@ function EmailSettings({ Z, font }) {
           <span style={{ fontSize: 12.5, color: Z.muted }}>Days before</span>
           <input aria-label="Days before expiry" value={form.warnDays} onChange={e => set("warnDays", e.target.value)} style={{ ...inp, width: 90 }} placeholder="30, 7"/></>)}
         {check("adminAlerts", "Same-day alerts to admins", "When someone's certificate or licence reaches a warning point (including people with no email address), and RIDDOR reports due to the HSE.")}
-        {check("digest", "Weekly summary to admins", "On the weekly reminder day: overdue training, renewals, overdue actions, RIDDOR reports to make and unconfirmed documents.")}
+        {check("newActions", "New actions", "Email a person soon after a corrective action is put in their name (incident investigations, inspections, risk assessments). Several at once come in one email. The weekly reminder lists them again when they're nearly due.")}
+        {check("digest", "Weekly summary to admins", "On the weekly reminder day: overdue training, renewals, overdue actions, RIDDOR reports to make and unconfirmed documents.", form.digest && <>
+          <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12.5, color: Z.white, cursor: "pointer" }}>
+            <input type="checkbox" aria-label="Include reviews and checks" checked={!!form.digestReviews} onChange={e => set("digestReviews", e.target.checked)} style={{ width: 15, height: 15, accentColor: Z.accent }}/>
+            Also list reviews and checks overdue or due in the next
+          </label>
+          <input aria-label="Review days" type="number" min={7} max={90} value={form.reviewDays} disabled={!form.digestReviews} onChange={e => set("reviewDays", e.target.value === "" ? "" : Number(e.target.value))} style={{ ...inp, width: 70 }}/>
+          <span style={{ fontSize: 12.5, color: Z.muted }}>days: risk assessments, COSHH assessments, documents, equipment servicing, site inspections, fire drills, the fire risk assessment, extinguishers, first aid kits and needs assessment, and contractors' certificates.</span>
+        </>)}
         {check("incidentAlerts", "High-risk incidents, straight away", "Email the admins within a minute or two of a high-risk incident or hazard being reported, at any time of day or night. One email per incident. It says what kind, when, where and why it's high-risk (for a hazard report, also who reported it and the hazard), never who was hurt or what the injury was.", form.incidentAlerts && (
           <div data-testid="incident-rules" style={{ width: "100%", display: "flex", flexDirection: "column", gap: 8 }}>
             <div style={{ fontSize: 12.5, color: Z.muted }}>Counts as high-risk:</div>
@@ -258,6 +266,7 @@ function EmailSettings({ Z, font }) {
                   {preview.overLimit > 0 && ` ${preview.overLimit} would wait for tomorrow (daily limit ${preview.dailyLimit}).`}
                   {!preview.enabled && " Reminders are switched off, so the schedule won't send these."}
                 </p>
+                {(preview.skipped || []).length > 0 && <p style={{ margin: "4px 0 0", fontSize: 12, color: "#fbbf24" }}>Couldn't read {preview.skipped.join(", ")} for the reviews list. Run <code>email_service_access.sql</code> in Supabase → SQL Editor.</p>}
                 {(preview.noEmail || []).length > 0 && <p style={{ margin: "4px 0 0", fontSize: 12, color: "#fbbf24" }}>No email address: {preview.noEmail.join(", ")}.</p>}
               </div>
               <button type="button" aria-label="Close preview" onClick={() => { setPreview(null); setView(null); }} style={btn(false, false)}>✕</button>

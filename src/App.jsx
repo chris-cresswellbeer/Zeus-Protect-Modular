@@ -154,6 +154,7 @@ import { loadWelcomeVideo, showWelcome, hideWelcome, WelcomeReplay, WelcomeVideo
 import { useRemembered, clearRemembered } from "./lib/remembered";
 import { setAuditUser, primeAudit, primeAuditList, primeAuditMap, auditRecord, auditList, auditDelete, auditEvent } from "./lib/audit";
 import { pingIncidentAlert } from "./lib/incidentAlert";
+import { sameName } from "./lib/openActions";
 
 // Wraps a dashboard stat card to make it draggable. Only the small handle in
 // the corner starts a drag — the rest of the card keeps its own onClick
@@ -3140,10 +3141,10 @@ export default function App() {
                 const openIssues=latestDse.issues.filter((_,ii)=>!(adminResponses[user.id]||{})[`${ri}_${ii}`]?.resolved&&latestDse.issueCount>0);
                 if(openIssues.length) notifications.push({type:"dse",urgent:false,title:`${openIssues.length} open DSE issue${openIssues.length!==1?"s":""}`,detail:"Check My DSE for H&S team responses",nav:{tab:"dse"}});
               }
-              // NB: action owners are matched by NAME (a.owner===user.name), not id — renaming a user orphans their actions.
+              // NB: action owners are matched by NAME (lib/openActions sameName: ignoring case and extra spaces), not id — renaming a user orphans their actions.
               // Investigation corrective actions assigned to this user
               const myActions = Object.values(investigations).flatMap(inv=>
-                (inv.actions||[]).filter(a=>a.owner===user.name&&a.status!=="complete"&&a.status!=="closed")
+                (inv.actions||[]).filter(a=>sameName(a.owner,user.name)&&a.status!=="complete"&&a.status!=="closed")
               );
               const overdueActions = myActions.filter(a=>a.dueDate&&a.dueDate<todayISO());
               // Line managers: team items waiting for their sign-off

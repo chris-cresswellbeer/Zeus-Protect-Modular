@@ -79,7 +79,13 @@ const TABLES = {   // table → order for stable paging
   documents: "id", doc_assignments: "doc_id,user_id", doc_acknowledgements: "user_id,doc_id", ext_certs: "user_id,cert_type",
   machine_completions: "user_id,machine_id", custom_machine_types: "id", incidents: "id", investigations: "incident_id",
   site_inspections: "id", risk_assessments: "id",
+  // for the reviews and checks in the admins' weekly summary (reminders.js dueChecks)
+  equipment: "id", coshh_assessments: "code", custom_chemicals: "code", fire_wardens: "id", fire_drills: "id",
+  fire_extinguishers: "id", fire_fra_reviews: "id", first_aid_register: "id", contractors: "id", contractor_certs: "contractor_id",
 };
+/** Tables only the review list needs: if one can't be read, the rest of the emails still go. */
+const REVIEW_TABLES = new Set(["equipment", "coshh_assessments", "custom_chemicals", "fire_wardens", "fire_drills", "fire_extinguishers",
+  "fire_fra_reviews", "first_aid_register", "contractors", "contractor_certs"]);
 const PAGE = 1000;
 const TIME_BUDGET_MS = 18000;   // scheduled functions get 30 seconds; leave room to record what was sent
 const INCIDENT_BUDGET_MS = 6000; // the alert function is an ordinary one: 10 seconds
@@ -115,9 +121,23 @@ async function readAll(c, table, select = "*", order = TABLES[table], filter = "
   }
   return out;
 }
-/** Tables that may not exist on an older database just count as empty. */
-async function readOptional(c, table) {
-  try { return await readAll(c, table); } catch (e) { if (e.status === 404 || /does not exist|schema cache/i.test(e.message)) return []; throw e; }
+/** Is any admin's weekly summary (with its reviews list) due to go in this run? */
+function reviewsNeeded({ mode, settings, clock, sent, users = [] }) {
+  if (!settings.digest || !settings.digestReviews) return false;
+  if (mode !== "scheduled") return true;
+  if (clock.isoDay > 5 || clock.isoDay < settings.weeklyDay || clock.hour < settings.sendHour) return false;
+  const ids = users.map(r => ({ ...(r.data || {}), id: String(r.id) })).filter(u => u.role === "admin" && (u.status || "active") !== "leaver").map(u => u.id)
+    .concat((settings.extraAdminEmails || []).map(e => `x-${e}`));
+  return ids.some(id => !sent.has(`digest:${id}:${clock.weekStart}`));
+}
+/** Tables that may not exist on an older database just count as empty. A review-list table that
+ *  can't be read (e.g. the service key wasn't given access: email_service_access.sql) is noted in `skipped`. */
+async function readOptional(c, table, skipped = []) {
+  try { return await readAll(c, table); } catch (e) {
+    if (e.status === 404 || /does not exist|schema cache/i.test(e.message)) return [];
+    if (REVIEW_TABLES.has(table) && (e.status === 401 || e.status === 403)) { skipped.push(table); return []; }   // no access: noted; anything else (time-out, outage): the run fails and is tried again
+    throw e;
+  }
 }
 
 export async function loadSettings(c) {
@@ -265,12 +285,20 @@ export async function runEmailJob({ mode = "scheduled", now = new Date(), portal
   const clock = ukClock(now);
   const incidentOnly = mode === "incident";
   if (incidentOnly && !settings.incidentAlerts) return { ok: true, mode, message: "High-risk incident emails are switched off.", sent: 0 };
-  const names = incidentOnly ? ["users", "incidents"] : Object.keys(TABLES);
+  const names = incidentOnly ? ["users", "incidents"] : Object.keys(TABLES).filter(t => !REVIEW_TABLES.has(t));
   if (mode === "scheduled") await pruneKeys(c);
   const since = plusDays(clock.today, -INCIDENT_ALERT_DAYS - 1);
-  const [sent, ...tableRows] = await Promise.all([readKeys(c, incidentOnly ? "&key=like.*inc*" : ""), ...names.map(t => incidentOnly && t === "incidents" ? readAll(c, t, "*", TABLES[t], `&date=gte.${since}`) : readOptional(c, t))]);
+  const skipped = [];
+  const [sent, ...tableRows] = await Promise.all([readKeys(c, incidentOnly ? "&key=like.*inc*" : ""), ...names.map(t => incidentOnly && t === "incidents" ? readAll(c, t, "*", TABLES[t], `&date=gte.${since}`) : readOptional(c, t, skipped))]);
   const rows = Object.fromEntries(names.map((t, i) => [t, tableRows[i]]));
-  const plan = planEmails({ data: prepareData(rows), settings, clock, sent, portalUrl: portalUrl || c.portalUrl, ignoreSchedule: mode !== "scheduled", only: incidentOnly ? "incident" : "" });
+  // The review registers are only read when an admin's weekly summary is due (or for Send now / Preview).
+  if (!incidentOnly && reviewsNeeded({ mode, settings, clock, sent, users: rows.users })) {
+    const extra = [...REVIEW_TABLES];
+    const got = await Promise.all(extra.map(t => readOptional(c, t, skipped)));
+    extra.forEach((t, i) => { rows[t] = got[i]; });
+  }
+  const data = prepareData(rows); data.skipped = skipped;
+  const plan = planEmails({ data, settings, clock, sent, portalUrl: portalUrl || c.portalUrl, ignoreSchedule: mode !== "scheduled", only: incidentOnly ? "incident" : "" });
 
   // High-risk incident emails never wait for the daily limit (they still count towards it).
   const limitLeft = mode === "preview" ? settings.dailyLimit : Math.max(0, settings.dailyLimit - await sentToday(c, clock.today));
@@ -280,7 +308,7 @@ export async function runEmailJob({ mode = "scheduled", now = new Date(), portal
 
   if (mode === "preview") {
     return { ok: true, mode, live: c.live, testTo: c.testTo, firstRun: plan.firstRun, baseline: plan.baselineKeys.filter(k => !/^(baseline|inc)/.test(k)).length,
-      noEmail: plan.noEmail, dailyLimit: settings.dailyLimit, overLimit, enabled: settings.enabled,
+      noEmail: plan.noEmail, dailyLimit: settings.dailyLimit, overLimit, enabled: settings.enabled, skipped,
       emails: plan.emails.slice(0, 300).map((e, i) => ({ kind: e.kind, to: e.to, name: e.name, subject: e.subject, html: i < 60 ? e.html : "" })), total: plan.emails.length };
   }
 
@@ -301,7 +329,8 @@ export async function runEmailJob({ mode = "scheduled", now = new Date(), portal
     plan.firstRun ? `First run: ${plan.baselineKeys.filter(k => !/^(baseline|inc)/.test(k)).length} things already assigned or expiring were noted without emailing.` : "",
     failed.length ? `${failed.length} couldn't be sent: ${failed[0].error}` : "",
     overLimit ? `${overLimit} held back by the daily limit of ${settings.dailyLimit}; they'll go tomorrow.` : "",
-    held - overLimit > 0 ? `${held - overLimit} will be tried again on the next run (${(results.find(r => r.held) || {}).error || ""}).` : ""].filter(Boolean).join(" ");
+    held - overLimit > 0 ? `${held - overLimit} will be tried again on the next run (${(results.find(r => r.held) || {}).error || ""}).` : "",
+    skipped.length ? `Couldn't read ${skipped.join(", ")} for the reviews list: run email_service_access.sql in Supabase.` : ""].filter(Boolean).join(" ");
   return { ok: !failed.length, mode, message: msg, sent: sentN, failed: failed.length, held, firstRun: plan.firstRun, noEmail: plan.noEmail };
 }
 

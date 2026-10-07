@@ -1,5 +1,6 @@
 import React, { useState, useRef } from "react";
 import { getExpiryStatus, todayISO } from "../../lib/dates";
+import { sameName } from "../../lib/openActions";
 import { ACCEPT_IMG_DOCS } from "../../lib/constants";
 import { myIncompleteQuickReports, isQuickReportOverdue, quickReportDueLabel } from "../incidents/quickReportStatus";
 
@@ -8,7 +9,8 @@ import { myIncompleteQuickReports, isQuickReportOverdue, quickReportDueLabel } f
  *   • assigned training not yet done, or expiring/expired
  *   • assigned documents not yet acknowledged
  *   • open issues on their latest DSE assessment
- *   • investigation corrective actions where action.owner === user.name
+ *   • investigation corrective actions in the user's name (sameName: case and extra spaces ignored,
+ *     as in the reminder emails)
  * For corrective actions the user can mark complete, add progress notes and attach
  * evidence (base64). Changes go into `investigations` state and are saved by App.jsx's
  * [investigations] auto-sync effect.
@@ -47,7 +49,7 @@ function StaffActionsTab({ user, onCompleteQuickReport, incidents, investigation
     const inc = incidents.find(i=>i.id===incidentId);
     return (inv.actions||[])
       .map((a,ai) => ({...a, incidentId, incidentDate:inc?.date, incidentDesc:inc?.description, incidentLocation:inc?.location, actionIdx:ai}))
-      .filter(a => a.owner === user.name);
+      .filter(a => sameName(a.owner, user.name));
   });
 
   const open     = myActions.filter(a=>a.status!=="complete"&&a.status!=="closed");

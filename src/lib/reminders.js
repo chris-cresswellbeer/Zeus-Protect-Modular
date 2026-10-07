@@ -20,7 +20,14 @@
  *   alerts     to admins, the same day: expiry warnings for everyone + RIDDOR deadlines
  *   weekly     to a person, on settings.weeklyDay: everything they still have to do
  *   manager    to a line manager, same day: their team's outstanding items
- *   digest     to admins, same day: the site summary
+ *   digest     to admins, same day: the site summary, including (settings.digestReviews) the
+ *              reviews and checks due in the next settings.reviewDays days or overdue: risk
+ *              assessments, COSHH assessments, documents, equipment servicing, site inspections,
+ *              fire drills / FRA / extinguishers, first aid kits and needs assessment, and
+ *              contractors' certificates — the same rules as the bell and each register (dueChecks)
+ *   action     to a person, soon after a corrective action is put in their name (incident
+ *              investigations, inspections, risk assessments — matched by NAME, as on the Actions
+ *              page). Several at once come in one email. Its own first-run marker ("baseline:act").
  *   incident   to admins (and the reporter's line manager), at ANY hour, when a high-risk
  *              incident or hazard is reported: STOP WORK hazard reports, someone taken to
  *              hospital, RIDDOR, or a serious injury (settings.inc*). One email per incident,
@@ -50,6 +57,10 @@ import { parseCompletionDate } from "../domains/training/completion";
 import { collectOpenActions } from "./openActions";
 import { riddorDue, riddorUrgent, riddorDueText } from "../domains/incidents/riddor";
 import { INJURY_TYPES } from "../data/seedIncidents";
+import { INSP_TYPES } from "../data/seedInspections";
+import { CONTRACTOR_CERT_TYPES } from "../data/seedContractors";
+import { latestByKey } from "../domains/inspections/inspectionDue";
+import { fireSummary, DRILL_INSPECTION, FRA_INSPECTION } from "../domains/fireSafety/fireLogic";
 import { renderEmail, ukDate } from "./emailTemplates";
 
 // ── Settings (app_settings row "email") ─────────────────────────────────────
@@ -64,6 +75,9 @@ export const EMAIL_DEFAULTS = {
   warnDays: [30, 7],       // days before expiry
   adminAlerts: true,       // same-day alerts to admins (expiries, RIDDOR deadlines)
   digest: true,            // weekly summary to admins
+  digestReviews: true,     //   …with the reviews and checks coming due
+  reviewDays: 30,          //   …in the next this-many days (and anything overdue)
+  newActions: true,        // email a person when a corrective action is put in their name
   sendHour: 8,             // daily and weekly emails go from this hour (UK time)
   dailyLimit: 100,         // most emails per day (Resend's free plan allows 100)
   extraAdminEmails: [],    // more addresses for admin alerts and the digest
@@ -102,7 +116,8 @@ export function emailSettings(data) {
     .map(v => Math.round(Number(v))).filter(n => Number.isFinite(n) && n >= 1 && n <= 365);
   return {
     enabled: !!d.enabled, newItems: !!d.newItems, weekly: !!d.weekly, managerCopies: !!d.managerCopies,
-    expiry: !!d.expiry, adminAlerts: !!d.adminAlerts, digest: !!d.digest,
+    expiry: !!d.expiry, adminAlerts: !!d.adminAlerts, digest: !!d.digest, digestReviews: !!d.digestReviews, newActions: !!d.newActions,
+    reviewDays: (n => (Number.isFinite(n) && String(d.reviewDays).trim() !== "" ? Math.min(90, Math.max(7, n)) : 30))(Math.round(Number(d.reviewDays))),
     weeklyDay: int(d.weeklyDay, 1, 5, 1), sendHour: int(d.sendHour, 5, 12, 8), dailyLimit: int(d.dailyLimit, 1, 5000, 100),
     warnDays: [...new Set(warn.length ? warn : EMAIL_DEFAULTS.warnDays)].sort((a, b) => b - a).slice(0, 4),
     extraAdminEmails: emailList(d.extraAdminEmails),
@@ -161,7 +176,7 @@ export function prepareData(rows = {}) {
     if (!x.recorded && !x.cert_id && x.score != null && Number(x.score) < 70) return;   // a failed attempt (older versions saved these)
     (comps[String(x.user_id)] = comps[String(x.user_id)] || {})[String(x.module_id)] = { date: x.date, score: x.score };
   });
-  const docs = r("documents").map(x => ({ id: String(x.id), title: x.title || "Document", type: x.type || "Document" }));
+  const docs = r("documents").map(x => ({ id: String(x.id), title: x.title || "Document", type: x.type || "Document", reviewDate: x.review_date || (x.data && x.data.reviewDate) || "" }));
   const docAssign = {};
   r("doc_assignments").forEach(x => { const uid = String(x.user_id); (docAssign[uid] = docAssign[uid] || []).includes(String(x.doc_id)) || docAssign[uid].push(String(x.doc_id)); });
   const acks = {};
@@ -176,8 +191,18 @@ export function prepareData(rows = {}) {
     quickReport: !!(x.quick_report || det.quickReport), urgency: x.urgency || det.urgency || "", description: x.description || "" }; });
   const investigations = {};
   r("investigations").forEach(x => { investigations[x.incident_id] = x.data || {}; });
+  const data = x => x.data;
+  const chemNames = {}; r("custom_chemicals").forEach(x => { if (x && x.code != null) chemNames[String(x.code)] = (x.data && x.data.name) || ""; });
+  const conCerts = {}; r("contractor_certs").forEach(x => { conCerts[String(x.contractor_id)] = x.data || {}; });
+  const firstAidRow = r("first_aid_register").find(x => x.id === "singleton") || r("first_aid_register")[0];
   return { staff, modules, machineTypes, assigns, dueDates, comps, docs, docAssign, acks, extCerts, machineComps, incidents, investigations,
-    inspections: r("site_inspections").map(x => x.data).filter(Boolean), ras: r("risk_assessments").map(x => x.data).filter(Boolean) };
+    inspections: r("site_inspections").map(data).filter(Boolean), ras: r("risk_assessments").map(data).filter(Boolean),
+    equipment: r("equipment").map(data).filter(Boolean),
+    coshh: r("coshh_assessments").map(x => ({ code: String(x.code), name: chemNames[String(x.code)] || "", ...(x.data || {}) })),
+    fireSafety: { wardens: r("fire_wardens").map(data).filter(Boolean), drills: r("fire_drills").map(data).filter(Boolean),
+      extinguishers: r("fire_extinguishers").map(data).filter(Boolean), fraReviews: r("fire_fra_reviews").map(data).filter(Boolean) },
+    firstAid: (firstAidRow && firstAidRow.data) || {},
+    contractors: r("contractors").map(data).filter(Boolean), conCerts };
 }
 
 const active = u => (u.status || "active") !== "leaver";
@@ -242,7 +267,8 @@ const trainingItems = list => list.map(t => ({ text: t.title, sub: [dueLine(t), 
 const readingItems = list => list.map(r => ({ text: r.title, sub: "Read and confirm" }));
 const renewalItems = list => list.map(x => ({ text: x.title, sub: `${expLine(x)} — ${x.why}`, flag: x.daysLeft < 0 }));
 /** Investigation actions can describe what happened to someone, so emails name only where they came from. */
-const actionTitle = a => (a.source === "Incident investigation" ? `Incident investigation action${a.ref ? ` (${a.ref})` : ""}` : a.title);
+const ukDates = t => String(t || "").replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, "$3/$2/$1");
+const actionTitle = a => (a.source === "Incident investigation" ? `Incident investigation action${a.ref ? ` (${ukDates(a.ref)})` : ""}` : a.title);
 const actionItems = list => list.map(a => ({ text: actionTitle(a), sub: `${a.source} · ${actLine(a)}`, flag: a.daysOverdue > 0 }));
 
 /** The stage an expiry has reached: "expired", or the tightest warning it's inside, or null. */
@@ -255,6 +281,48 @@ const stageRank = s => (s === "expired" ? -1 : Number(s));
 const INCIDENT_TYPES = { accident: "Accident", near_miss: "Near miss", unsafe_condition: "Unsafe condition", unsafe_act: "Unsafe act" };
 /** "Accident 12 — 25/09/2026, Goods In": enough to find it in the portal, no details of what happened or who was hurt. */
 const incidentLabel = inc => `${INCIDENT_TYPES[inc.type] || "Incident"}${inc.accidentCode ? ` ${inc.accidentCode}` : ""} — ${ukDate(inc.date)}${inc.location ? `, ${inc.location}` : ""}`;
+
+// ── Reviews and checks coming due (for the admins' weekly summary) ───────────
+/**
+ * Everything with a review, service or check date that's overdue or due within `days`,
+ * soonest first: [{ what, text, due, days }]. The same rules as the bell and each register:
+ *   risk assessments (reviewDate), COSHH assessments (nextReviewDate), documents (review date),
+ *   equipment in use (nextService), site inspections (the latest of each type at each place —
+ *   lib inspectionDue; fire drills and FRAs come from the fire rules instead), fire drills (a year
+ *   after the last), the FRA review, extinguisher servicing (lib fireLogic), first aid kits (35 days
+ *   after the last check) and the first aid needs assessment, and contractors' certificates.
+ */
+/** "2026-10-07" or "07/10/2026" → "2026-10-07"; anything else (or an impossible date) → null. */
+const anyDate = v => {
+  const t = String(v || "").trim(); let m = t.match(/^(\d{4})-(\d{2})-(\d{2})/), y, mo, d;
+  if (m) [y, mo, d] = [m[1], m[2], m[3]]; else if ((m = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/))) [y, mo, d] = [m[3], m[2].padStart(2, "0"), m[1].padStart(2, "0")]; else return null;
+  const iso = `${y}-${mo}-${d}`; const back = new Date(`${iso}T00:00:00Z`);
+  return !isNaN(back) && back.toISOString().slice(0, 10) === iso ? iso : null;
+};
+export function dueChecks(data, today, days = 30) {
+  const out = [];
+  const add = (what, text, due) => { const d = anyDate(due); if (!d) return; const n = daysBetween(today, d); if (n <= days) out.push({ what, text, due: d, days: n }); };
+  (data.ras || []).forEach(ra => add("Risk assessment review", ra.title || ra.location || "Risk assessment", ra.reviewDate));
+  (data.coshh || []).forEach(c => add("COSHH assessment review", [c.code, c.name].filter(Boolean).join(" · ") || "COSHH assessment", c.nextReviewDate || c.reviewDate));
+  (data.docs || []).forEach(d => add("Document review", d.title, d.reviewDate));
+  (data.equipment || []).filter(e => e.status === "active").forEach(e => add("Equipment service", [e.assetNo, e.name].filter(Boolean).join(" · ") || "Equipment", e.nextService));
+  [...latestByKey(data.inspections || []).values()].filter(i => i.type !== DRILL_INSPECTION && i.type !== FRA_INSPECTION)
+    .forEach(i => add("Site inspection", `${(INSP_TYPES.find(t => t.id === i.type) || {}).label || "Inspection"}${String(i.location || "").trim() ? ` · ${String(i.location).trim()}` : ""}`, i.nextDue));
+  const fs = data.fireSafety || {};
+  const fire = fireSummary({ fireSafety: fs, extCerts: data.extCerts || {}, staff: data.staff || [], inspections: data.inspections || [], today });
+  if (fire.lastDrill && anyDate(fire.lastDrill.date)) add("Fire drill", "Full evacuation drill (a year after the last one)", plusMonths(anyDate(fire.lastDrill.date), 12));
+  if (fire.fraNext) add("Fire risk assessment review", "Fire Risk Assessment", fire.fraNext);
+  (fs.extinguishers || []).forEach(e => add("Extinguisher service", [e.type, e.location, e.serialNo].filter(Boolean).join(" · ") || "Extinguisher", e.nextServiceDue));
+  const fa = data.firstAid || {};
+  (fa.kits || []).forEach(k => { const last = anyDate(k.lastCheckDate);
+    if (last) add("First aid kit check", k.location || "First aid kit", plusDays(last, 35));
+    else out.push({ what: "First aid kit check", text: k.location || "First aid kit", due: "", days: -1, note: "Never checked" }); });
+  if (fa.assessment && fa.assessment.nextReview) add("First aid needs assessment", "First aid needs assessment", fa.assessment.nextReview);
+  (data.contractors || []).forEach(c => (c.workers || []).forEach(w => Object.entries((data.conCerts || {})[`${c.id}_${w.id}`] || {}).forEach(([type, cert]) =>
+    add("Contractor certificate", `${c.name || "Contractor"} · ${w.name || "worker"} · ${(CONTRACTOR_CERT_TYPES.find(t => t.id === type) || {}).label || type}`, cert && cert.expiryDate))));
+  return out.sort((a, b) => a.days - b.days || a.what.localeCompare(b.what));
+}
+const dueLineFor = x => (x.note ? x.note : x.due === "" ? "Not recorded" : x.days < 0 ? `Overdue — was due ${ukDate(x.due)}` : x.days === 0 ? "Due today" : `Due ${ukDate(x.due)} (${plural(x.days, "day")})`);
 
 // ── High-risk incidents ─────────────────────────────────────────────────────
 const isHospital = o => /hospital|ambulance/i.test(String(o || ""));
@@ -411,6 +479,35 @@ export function planEmails({ data, settings, clock, sent = new Set(), portalUrl 
         button: { label: tr.length ? "Start your training" : "Open your documents", href: link(tr.length ? "#/staff/training" : "#/staff/documents") } }) });
   });
 
+  // 1b. ACTION — a corrective action newly in someone's name. Its own first-run marker, so adding
+  //     this to a site that already sends reminders doesn't email everyone their existing actions.
+  {
+    const actFirst = !sent.has("baseline:act");
+    if (actFirst) baselineKeys.push("baseline:act");
+    people.forEach(u => {
+      const me = norm(u.name);
+      // the person whose name is on it; not a risk assessment's assessor standing in for "nobody named"
+      const mine = openActions.filter(a => me && !a.ownerAssumed && norm(a.owner) === me).map(a => ({ a, key: `act:${u.id}:${a.sid || a.key}` })).filter(x => !sent.has(x.key));
+      if (!mine.length) return;
+      const keys = mine.map(x => x.key);
+      if (actFirst) { baselineKeys.push(...keys); return; }
+      // no email address (or inactive): noted, so they aren't sent old actions as "new" once they have one
+      if (!s.newActions || !reachable(u)) { quietKeys.push(...keys); return; }
+      if (!awake) return;                                   // put in their name at night: wait for the morning
+      const list = mine.map(x => x.a).sort((x, y) => String(x.dueDate || "9999").localeCompare(String(y.dueDate || "9999")));
+      const inv = list.some(a => a.source === "Incident investigation"), other = list.some(a => a.source !== "Incident investigation");
+      const subject = list.length === 1 ? `New action for you: ${clip(actionTitle(list[0]), 70)}` : `${plural(list.length, "new action")} for you in Zeus Protect`;
+      send({ kind: "action", priority: 2, userId: u.id, name: u.name, to: u.email.trim(), subject, keys,
+        ...renderEmail({ preheader: subject, greeting: `Hi ${firstName(u)},`,
+          intro: list.length === 1 ? "An H&S action has been put in your name in Zeus Protect." : "Some H&S actions have been put in your name in Zeus Protect.",
+          sections: [{ title: list.length === 1 ? "Your action" : "Your actions", items: list.map(a => ({ text: actionTitle(a),
+            sub: [a.source, a.source !== "Incident investigation" && ukDates(a.ref), a.dueDate ? actLine(a) : "No due date set"].filter(Boolean).join(" · "), flag: a.daysOverdue > 0 })) }],
+          note: [inv && "Incident investigation actions are under My Actions, where you can add notes and mark them complete.",
+            other && "For inspection and risk assessment actions, tell the H&S team when they're done so they can be closed."].filter(Boolean).join(" "),
+          button: inv ? { label: "Open My Actions", href: link("#/staff/actions") } : { label: "Open Zeus Protect", href: link("#/staff/dashboard") } }) });
+    });
+  }
+
   // 2. EXPIRY — warnings to the person
   // A stage counts as done if it, or any tighter stage, was recorded before (30 → 7 → expired).
   const doneStage = (prefix, stage) => ["expired", ...s.warnDays.map(String)].filter(st => stageRank(st) <= stageRank(stage)).some(st => sent.has(`${prefix}:${st}`));
@@ -514,6 +611,7 @@ export function planEmails({ data, settings, clock, sent = new Set(), portalUrl 
       const renewals = all.flatMap(({ u, items }) => items.renewals.map(x => ({ u, x }))).sort((a, b) => a.x.daysLeft - b.x.daysLeft);
       const actions = openActions.filter(a => a.daysOverdue != null && a.daysOverdue > 0).sort((a, b) => b.daysOverdue - a.daysOverdue);
       const riddor = data.incidents.map(inc => ({ inc, due: riddorDue(inc, today) })).filter(x => x.due);
+      const checks = s.digestReviews ? dueChecks(data, today, s.reviewDays) : [];
       const stats = [
         { label: "Training overdue", value: overdueT.reduce((n, x) => n + x.od.length, 0) },
         { label: "Training outstanding", value: outstanding, warn: false },
@@ -521,11 +619,15 @@ export function planEmails({ data, settings, clock, sent = new Set(), portalUrl 
         { label: "Renewals due or expired", value: renewals.length },
         { label: "Actions overdue", value: actions.length },
         { label: "RIDDOR reports to make", value: riddor.length },
+        ...(s.digestReviews ? [{ label: "Reviews & checks overdue", value: checks.filter(x => x.days < 0).length }] : []),
       ];
       const sections = [
         riddor.length && { title: "RIDDOR reports to make", items: riddor.map(({ inc, due }) => ({ text: incidentLabel(inc), sub: riddorDueText(due), flag: riddorUrgent(due) })) },
         overdueT.length && { title: "Overdue training", items: cap(overdueT.map(({ u, od }) => ({ text: u.name, sub: od.map(t => t.title).join(", "), flag: true }))) },
         renewals.length && { title: `Renewals in the next ${warnMax} days, and expired`, items: cap(renewals.map(({ u, x }) => ({ text: `${u.name} — ${x.title}`, sub: expLine(x), flag: x.daysLeft < 0 }))) },
+        s.digestReviews && (checks.length || (data.skipped || []).length) && { title: `Reviews and checks: overdue, or due in the next ${s.reviewDays} days`, items: [
+          ...((data.skipped || []).length ? [{ text: "Not all registers could be checked this week", sub: `Couldn't read: ${data.skipped.join(", ")}. Check those pages in the portal, and ask whoever looks after the portal to run email_service_access.sql.`, flag: true }] : []),
+          ...cap(checks.map(x => ({ text: `${x.what}: ${x.text}`, sub: dueLineFor(x), flag: x.days < 0 })), 40)] },
         actions.length && { title: "Overdue actions", items: cap(actions.map(a => ({ text: actionTitle(a), sub: `${a.source} · ${a.owner} · was due ${ukDate(a.dueDate)}`, flag: true }))) },
         outstanding && { title: "Training not yet completed", items: cap(all.filter(({ items }) => items.training.length).sort((a, b) => b.items.training.length - a.items.training.length)
           .map(({ u, items }) => ({ text: u.name, sub: `${plural(items.training.length, "module")}: ${items.training.map(t => t.title).join(", ")}` }))) },

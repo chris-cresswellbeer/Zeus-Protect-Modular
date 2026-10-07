@@ -38,6 +38,7 @@ import { progressMap, saveProgress as saveModuleProgress, clearProgress } from "
 import { dueInfo } from "../lib/dueDates";
 import { latestByKey } from "../domains/inspections/inspectionDue";
 import { isPassed } from "../domains/training/completion";
+import { sameName } from "../lib/openActions";
 
 
 const FONT = "'Barlow','Trebuchet MS',system-ui,sans-serif";
@@ -219,7 +220,7 @@ function MobileApp({
 
   const myActions = Object.entries(investigations || {}).flatMap(([invId, inv]) =>
     (inv.actions || [])
-      .filter((a) => a.owner === user.name)
+      .filter((a) => sameName(a.owner, user.name))
       .map((a) => ({ ...a, investigationId: invId, ref: invId }))
   );
   const openActions = myActions.filter((a) => a.status !== "complete" && a.status !== "closed");

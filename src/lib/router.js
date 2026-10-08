@@ -13,7 +13,7 @@
 export const ADMIN_TABS = ["dashboard", "users", "assign", "modules", "create", "reports", "documents", "coshh", "audit",
   "incidents", "investigation", "inspections", "ra", "firesafety", "firstaid", "contractors", "permits", "machinery",
   "equipment", "settings", "account"];
-export const STAFF_TABS = ["dashboard", "training", "history", "documents", "incidents", "dse", "machinery", "actions", "team", "account"];
+export const STAFF_TABS = ["dashboard", "training", "history", "documents", "incidents", "dse", "machinery", "mequip", "actions", "team", "account"];
 
 // Pages that need context which can't be in a link fall back to their list page.
 const ADMIN_FALLBACK = { investigation: "incidents", create: "modules" };
@@ -42,5 +42,7 @@ export function routeAllowed(r, user) {
   if (!r || !user) return false;
   if (r.area === "admin") return user.role === "admin";
   if (r.tab === "team") return user.role === "manager" || user.role === "admin";
+  // Machinery & Equipment page: only people an admin has given that access (not admins: they use the admin pages)
+  if (r.tab === "mequip") return user.role !== "admin" && user.machineryAccess === true;
   return true;
 }

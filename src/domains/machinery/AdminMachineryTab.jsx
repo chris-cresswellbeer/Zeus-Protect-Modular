@@ -473,7 +473,7 @@ function AdminMachineryTab({ allStaff, machineComps, setMachineComps, allMachine
 
       <div data-testid="mt-who" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "10px 14px", borderRadius: 12, background: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.25)", marginBottom: 14, fontSize: 13 }}>
         <span style={{ flex: 1, minWidth: 260, color: Z.white }}>
-          Showing the <b>{operators.length}</b> {operators.length === 1 ? "person" : "people"} marked as warehouse or operational staff. To add someone, open their staff record and tick <b>Is Warehouse Worker?</b>
+          Showing the <b>{operators.length}</b> {operators.length === 1 ? "person" : "people"} marked as warehouse or operational staff. {onOpenStaff ? <>To add someone, open their staff record and tick <b>Is Warehouse Worker?</b></> : <>To add someone, ask an admin to tick <b>Is Warehouse Worker?</b> on their staff record.</>}
         </span>
         {onOpenStaff && <button type="button" onClick={onOpenStaff} style={{ ...btn(Z, font), padding: "6px 12px", fontSize: 12 }}>Open Staff →</button>}
       </div>

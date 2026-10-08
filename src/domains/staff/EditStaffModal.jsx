@@ -6,6 +6,7 @@ import { hashPassword } from "../../lib/supabase";
 /**
  * EditStaffModal — admin edit of one staff record: name, email (must be unique),
  * job title, manager, department, role (staff/manager/admin), warehouse-worker flag,
+ * Machinery & Equipment access (machineryAccess: manage those two pages without being an admin),
  * status (active / inactive / leaver — leavers cannot log in), and an optional
  * password reset.
  * onSaveProfile(updated) → App.jsx saves to users + user_profiles.
@@ -24,6 +25,7 @@ function EditStaffModal({ staffUser, allUsers, setAllUsers, passwords, onSetPass
   const [manager,           setManager]          = useState(staffUser.manager||"");
   const [role,              setRole]             = useState(staffUser.role);
   const [isWarehouse,       setIsWarehouse]      = useState(staffUser.isWarehouseWorker||false);
+  const [machineryAccess,   setMachineryAccess]  = useState(staffUser.machineryAccess===true);
   const [department,        setDepartment]       = useState(staffUser.department||"");
   const [status,            setStatus]           = useState(staffUser.status||"active");
   const [resetPw,           setResetPw]          = useState(false);
@@ -37,7 +39,7 @@ function EditStaffModal({ staffUser, allUsers, setAllUsers, passwords, onSetPass
     if (!email.trim() || !email.includes("@")) { setErr("Valid email is required."); return; }
     if (email !== staffUser.email && allUsers.find(u=>u.email===email.trim())) { setErr("That email is already in use."); return; }
     if (resetPw && newPw.length < minPw) { setErr(`New password must be at least ${minPw} characters.`); return; }
-    const updated = {...staffUser, name:name.trim(), email:email.trim(), jobTitle:jobTitle.trim(), manager:manager.trim(), role, isWarehouseWorker:isWarehouse, department:department.trim(), status};
+    const updated = {...staffUser, name:name.trim(), email:email.trim(), jobTitle:jobTitle.trim(), manager:manager.trim(), role, isWarehouseWorker:isWarehouse, machineryAccess, department:department.trim(), status};
     setAllUsers(p=>p.map(u=>u.id===staffUser.id ? updated : u));
     if (onSaveProfile) onSaveProfile(updated);
     if (resetPw && newPw && onSetTempPassword) {
@@ -127,6 +129,26 @@ function EditStaffModal({ staffUser, allUsers, setAllUsers, passwords, onSetPass
             <div style={{position:"absolute",top:3,left:isWarehouse?22:3,width:18,height:18,borderRadius:"50%",background:"#fff",transition:"left .2s",boxShadow:"0 1px 4px rgba(0,0,0,0.3)"}}/>
           </div>
         </div>
+
+        {/* Machinery & Equipment access toggle (admins have it anyway) */}
+        {role==="admin" ? (
+          <div style={{padding:"12px 16px",borderRadius:12,marginBottom:14,background:Z.overlay,border:`1px solid ${Z.border}`,fontSize:12,color:Z.muted}}>
+            🛠 <b style={{color:Z.white}}>Machinery &amp; Equipment access</b>: admins already have it.
+          </div>
+        ) : (
+        <div role="switch" aria-checked={machineryAccess} aria-label="Machinery and Equipment access" tabIndex={0} data-testid="machinery-access"
+          onClick={()=>{setMachineryAccess(s=>!s);setSaved(false);}}
+          onKeyDown={e=>{ if(e.key===" "||e.key==="Enter"){ e.preventDefault(); setMachineryAccess(s=>!s); setSaved(false); } }}
+          style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 16px",borderRadius:12,marginBottom:14,cursor:"pointer",userSelect:"none",background:machineryAccess?"rgba(37,99,235,0.08)":Z.overlay,border:`2px solid ${machineryAccess?"rgba(37,99,235,0.4)":Z.overlay}`,transition:"all .2s"}}>
+          <div>
+            <div style={{fontWeight:700,fontSize:13,color:Z.white,marginBottom:3}}>🛠 Machinery &amp; Equipment access</div>
+            <div style={{fontSize:11,color:Z.muted,lineHeight:1.4}}>For warehouse managers and similar. Adds a <b>Machinery &amp; Equipment</b> page to their portal where they can record and update everyone's machinery competences and manage the Equipment Register. They don't get any other admin pages.</div>
+          </div>
+          <div style={{flexShrink:0,marginLeft:16,width:44,height:24,borderRadius:12,background:machineryAccess?Z.accent:Z.borderMd,position:"relative",transition:"background .2s"}}>
+            <div style={{position:"absolute",top:3,left:machineryAccess?22:3,width:18,height:18,borderRadius:"50%",background:"#fff",transition:"left .2s",boxShadow:"0 1px 4px rgba(0,0,0,0.3)"}}/>
+          </div>
+        </div>
+        )}
 
         {/* Password reset section */}
         <div style={{background:Z.overlay,borderRadius:12,padding:16,marginBottom:16,border:`1px solid ${Z.border}`}}>

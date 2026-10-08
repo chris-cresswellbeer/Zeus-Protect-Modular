@@ -367,7 +367,7 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPres
                 {overdue>0&&<span style={{fontSize:10,background:"rgba(239,68,68,0.1)",color:"#fca5a5",padding:"2px 8px",borderRadius:99,fontWeight:700}}>⏰ {overdue} overdue</span>}
                 {defects===0&&overdue===0&&<span style={{fontSize:10,background:"rgba(16,185,129,0.1)",color:"#10b981",padding:"2px 8px",borderRadius:99,fontWeight:700}}>✓ All clear</span>}
               </div>
-              {c.id==="fire" && (
+              {c.id==="fire" && onOpenFireSafety && (
                 <button type="button" data-testid="eq-extinguishers-link" onClick={ev=>{ ev.stopPropagation(); onOpenFireSafety&&onOpenFireSafety(); }}
                   style={{marginTop:10,width:"100%",textAlign:"left",background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:8,padding:"7px 10px",color:Z.white,cursor:"pointer",fontFamily:font,fontSize:11.5,lineHeight:1.4}}>
                   {E("🧯 ","")}<b>{(extinguishers||[]).length} extinguisher{(extinguishers||[]).length!==1?"s":""}</b>{extOverdue?<span style={{color:"#f87171",fontWeight:700}}> · {extOverdue} service overdue</span>:""} — kept in Fire Safety → Extinguishers →
@@ -416,7 +416,7 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPres
         <div style={{fontSize:12,color:Z.muted}}>Showing {listed.length} of {equipment.length}</div>
         {catFilter==="fire" && (
           <div role="note" style={{fontSize:12.5,color:Z.white,background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:10,padding:"9px 14px"}}>
-            {E("🧯 ","")}Fire extinguishers are kept in <button type="button" onClick={()=>onOpenFireSafety&&onOpenFireSafety()} style={{background:"none",border:"none",color:Z.accentLt||"#93c5fd",cursor:"pointer",fontFamily:font,fontSize:12.5,fontWeight:700,padding:0}}>Fire Safety → Extinguishers</button>. Use this list for the other fire equipment, such as the alarm panel and hose reels.
+            {E("🧯 ","")}Fire extinguishers are kept in {onOpenFireSafety ? <button type="button" onClick={()=>onOpenFireSafety()} style={{background:"none",border:"none",color:Z.accentLt||"#93c5fd",cursor:"pointer",fontFamily:font,fontSize:12.5,fontWeight:700,padding:0}}>Fire Safety → Extinguishers</button> : <b>Fire Safety → Extinguishers</b>}. Use this list for the other fire equipment, such as the alarm panel and hose reels.
           </div>
         )}
         {listed

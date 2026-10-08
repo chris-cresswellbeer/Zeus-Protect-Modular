@@ -66,7 +66,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { EXT_CERT_TYPES } from "./data/seedExtCerts";
 import { INSP_TYPES } from "./data/seedInspections";
 import { PERMIT_TYPES } from "./data/seedPermits";
-import { isWarehouseWorker, MACHINERY_TYPES, machineState, compsFor } from "./data/seedMachinery";
+import { isWarehouseWorker, hasMachineryAccess, MACHINERY_TYPES, machineState, compsFor } from "./data/seedMachinery";
 import { TRAINING_MODULES } from "./data/seedTraining";
 // ── Domain tabs. `React.lazy` = the tab's code is only downloaded the first time it is
 // opened (code-splitting). Each lazy tab must be rendered inside <React.Suspense>.
@@ -94,6 +94,7 @@ import { uploadEvidence, listSessions, sessionKey, evidenceLabel } from "./domai
 import { teamOf } from "./domains/manager/team";
 import { isPassed, scoreText, recordedText, passMarkOf } from "./domains/training/completion";
 import { DSEAssessment } from "./domains/dse/DSEAssessment";
+import { MachineryEquipmentPage } from "./domains/machinery/MachineryEquipmentPage";
 import { DSE_RENEWAL_MONTHS, DSE_QUESTION_COUNT } from "./data/seedDse";
 const LazyStaffDSETab = React.lazy(() => import("./domains/dse/StaffDSETab").then(m => ({ default: m.StaffDSETab })));
 const LazyEquipmentTrackerTab = React.lazy(() => import("./domains/equipment/EquipmentTrackerTab").then(m => ({ default: m.EquipmentTrackerTab })));
@@ -1128,6 +1129,8 @@ export default function App() {
   // Supabase sign-in: only admins may change shared registers, so other people's
   // browsers don't try to save them back (the database would refuse anyway).
   const writesAll = () => AUTH_MODE !== "supabase" || (user && user.role === "admin");
+  // Machinery Competence + Equipment Register: also people with Machinery & Equipment access.
+  const writesMachinery = () => writesAll() || hasMachineryAccess(user);
 
   useEffect(() => { if (!_ready.current) return;
     Object.entries(dseReports).filter(([uid]) => writesAll() || String(uid) === String(user && user.id)).forEach(([uid, reports]) => {
@@ -1149,13 +1152,22 @@ export default function App() {
 
   useEffect(() => { if (!_ready.current) return;
     if (!writesAll()) {
-      // e.g. an incident report adding a defect: save just that item.
+      // Not an admin: save just the items that changed (e.g. an incident report adding a defect).
       equipment.forEach(e => {
         const k = String(e.id), j = stableJSON(e);
         if (equipmentSavedRef.current.get(k) === j) return;
         equipmentSavedRef.current.set(k, j);
         dbWrite(sb.from("equipment").upsert({ id: e.id, data: e }, { onConflict: "id" }), "equipment");
       });
+      // Machinery & Equipment access: also delete the items THEY removed — only ones this
+      // browser loaded or saved, never rows it simply hasn't seen (added by someone else since).
+      if (hasMachineryAccess(user)) {
+        const now = new Set(equipment.map(e => String(e.id)));
+        [...equipmentSavedRef.current.keys()].filter(k => !now.has(k)).forEach(k => {
+          equipmentSavedRef.current.delete(k);
+          dbWrite(sb.from("equipment").delete().eq("id", k), "equipment delete");
+        });
+      }
       return;
     }
     dbSaveEquipment(equipment);
@@ -1189,7 +1201,7 @@ export default function App() {
     customModules.forEach(m => dbSaveCustomModule(m));
   }, [customModules]); // eslint-disable-line
 
-  useEffect(() => { if (!_ready.current || !writesAll()) return;
+  useEffect(() => { if (!_ready.current || !writesMachinery()) return;
     customMachineTypes.forEach(m => dbSaveCustomMachineType(m));
   }, [customMachineTypes]); // eslint-disable-line
 
@@ -1914,8 +1926,16 @@ export default function App() {
 
   // ⚠ Writes the WHOLE user object into user_profiles.data — this overwrites any saved
   // theme/emojiMode for that user. Only called on create/edit of staff records.
+  // Merge into what's there: the profile also holds the person's own preferences
+  // (theme, emojiMode, an unfinished DSE), which an admin edit must not wipe.
   async function dbSaveUserProfile(user) {
-    await dbWrite(sb.from("user_profiles").upsert({ user_id: String(user.id), data: user }, { onConflict: "user_id" }), "user profile");
+    const sid = String(user.id);
+    const profiles = Array.isArray(window.__userProfiles) ? window.__userProfiles : [];
+    const existing = profiles.find(r => String(r.user_id) === sid);
+    const merged = { ...(existing?.data || {}), ...user };
+    window.__userProfiles = profiles.map(r => String(r.user_id)===sid ? {...r, data:merged} : r);
+    if (!existing) window.__userProfiles.push({ user_id: sid, data: merged });
+    await dbWrite(sb.from("user_profiles").upsert({ user_id: sid, data: merged }, { onConflict: "user_id" }), "user profile");
   }
 
   // Remove (not Leaver): delete everything the portal holds about one person, so
@@ -2387,8 +2407,8 @@ export default function App() {
     const toAdmin = (tab, then) => jump(() => { setMod(null); setViewRaw("admin"); setAtabRaw(tab); if (then) then(); });
     const fmt = d => (d ? String(d).slice(0, 10).split("-").reverse().join("/") : "");
     // pages
-    const STAFF_PAGES = { dashboard: "Dashboard", training: "My Training", history: "Training history & certificates", documents: "Documents", incidents: "Report Incident", dse: "My DSE", machinery: "My Machinery", actions: "My Actions", team: "My Team", account: "My Account" };
-    const staffTabs = ["dashboard", "training", "history", "documents", "incidents", "dse", ...(isWarehouseWorker(user) ? ["machinery"] : []), "actions", ...(user.role === "manager" ? ["team"] : []), "account"];
+    const STAFF_PAGES = { dashboard: "Dashboard", training: "My Training", history: "Training history & certificates", documents: "Documents", incidents: "Report Incident", dse: "My DSE", machinery: "My Machinery", mequip: "Machinery & Equipment", actions: "My Actions", team: "My Team", account: "My Account" };
+    const staffTabs = ["dashboard", "training", "history", "documents", "incidents", "dse", ...(isWarehouseWorker(user) ? ["machinery"] : []), "actions", ...(user.role === "manager" ? ["team"] : []), ...(user.role !== "admin" && hasMachineryAccess(user) ? ["mequip"] : []), "account"];
     staffTabs.forEach(t => items.push({ id: `p:s:${t}`, group: "Pages", icon: "📄", label: STAFF_PAGES[t], sub: isAdmin ? "Your own training view" : "Page", words: t === "history" ? "certificates certificate history" : t === "incidents" ? "report hazard near miss" : "", run: () => toStaff(t) }));
     if (isAdmin) {
       const ADMIN_PAGES = [["dashboard", "Admin dashboard", ""], ["users", "Staff", "staff accounts people users"], ["assign", "Assign Training", "training"], ["modules", "Training Library", "modules training"],
@@ -3115,8 +3135,8 @@ export default function App() {
     // the first name goes, the labels drop "My" and the tabs tighten up. At 1024px and
     // below the ☰ menu takes over (CSS below).
     const sTight = winW < 1700, sTiny = winW < 1400;
-    const STAFF_TAB_LABEL = {dashboard:"Dashboard",training:"My Training",history:"History",documents:"Documents",incidents:"Report Incident",dse:"My DSE",machinery:"My Machinery",actions:"My Actions",team:"My Team"};
-    const STAFF_TAB_SHORT = {dashboard:"Dashboard",training:"Training",history:"History",documents:"Documents",incidents:"Report",dse:"DSE",machinery:"Machinery",actions:"Actions",team:"Team"};
+    const STAFF_TAB_LABEL = {dashboard:"Dashboard",training:"My Training",history:"History",documents:"Documents",incidents:"Report Incident",dse:"My DSE",machinery:"My Machinery",mequip:"Machinery & Equipment",actions:"My Actions",team:"My Team"};
+    const STAFF_TAB_SHORT = {dashboard:"Dashboard",training:"Training",history:"History",documents:"Documents",incidents:"Report",dse:"DSE",machinery:"Machinery",mequip:"Equipment",actions:"Actions",team:"Team"};
     return (
       <EmojiCtx.Provider value={emojiMode}>
       <div style={{minHeight:"100vh",background:T.bg,fontFamily:font,color:T.white}}>
@@ -3128,7 +3148,7 @@ export default function App() {
         <div style={{background:`linear-gradient(90deg,${T.navyDk},${T.navyMd})`,borderBottom:`1px solid ${T.border}`,padding:sTiny?"0 14px":"0 24px",display:"flex",alignItems:"center",position:"relative"}}>
           <div style={{marginRight:sTiny?10:20,padding:"10px 0",flexShrink:0}}><ZeusLogo darkMode={darkMode}/></div>
           <div style={{display:"flex",alignItems:"center",gap:sTiny?0:2,flex:1,minWidth:0,overflowX:"auto"}} className="staff-nav-tabs" data-testid="staff-tabs">
-            {["dashboard","training","history","documents","incidents","dse",...(isWarehouseWorker(user)?["machinery"]:[]),"actions",...(user.role==="manager"?["team"]:[])].map(t=>(
+            {["dashboard","training","history","documents","incidents","dse",...(isWarehouseWorker(user)?["machinery"]:[]),"actions",...(user.role==="manager"?["team"]:[]),...(user.role!=="admin"&&hasMachineryAccess(user)?["mequip"]:[])].map(t=>(
               <button key={t} onClick={()=>setStab(t)} title={STAFF_TAB_LABEL[t]}
                 style={{background:"none",border:"none",borderBottom:stab===t?`2px solid ${T.accent}`:"2px solid transparent",color:stab===t?T.white:T.muted,fontWeight:stab===t?700:400,fontSize:13,cursor:"pointer",padding:sTiny?"14px 8px 12px":sTight?"14px 10px 12px":"14px 14px 12px",fontFamily:font,whiteSpace:"nowrap",letterSpacing:.3,transition:"color .15s"}}>
                 {(sTiny?STAFF_TAB_SHORT:STAFF_TAB_LABEL)[t]}
@@ -3230,10 +3250,10 @@ export default function App() {
       {/* Mobile nav drawer */}
         {mobileMenuOpen && (
           <div className="mobile-nav-drawer" style={{position:"relative"}}>
-            {["dashboard","training","history","documents","incidents","dse",...(isWarehouseWorker(user)?["machinery"]:[]),"actions",...(user.role==="manager"?["team"]:[])].map(t=>(
+            {["dashboard","training","history","documents","incidents","dse",...(isWarehouseWorker(user)?["machinery"]:[]),"actions",...(user.role==="manager"?["team"]:[]),...(user.role!=="admin"&&hasMachineryAccess(user)?["mequip"]:[])].map(t=>(
               <button key={t} onClick={()=>{setStab(t);setMobileMenuOpen(false);}}
                 style={{display:"block",width:"100%",textAlign:"left",padding:"12px 24px",background:stab===t?"rgba(37,99,235,0.15)":"transparent",border:"none",borderBottom:`1px solid rgba(255,255,255,0.05)`,color:stab===t?T.white:T.muted,fontWeight:stab===t?700:400,fontSize:14,cursor:"pointer",fontFamily:font}}>
-                {{dashboard:E("🏠 ","")+"Dashboard",training:E("📚 ","")+"My Training",history:E("📋 ","")+"History",documents:E("📄 ","")+"Documents",incidents:E("🚨 ","")+"Report Incident",dse:"🖥️ My DSE",machinery:"⚙️ My Machinery",actions:"✅ My Actions",team:E("👥 ","")+"My Team"}[t]}
+                {{dashboard:E("🏠 ","")+"Dashboard",training:E("📚 ","")+"My Training",history:E("📋 ","")+"History",documents:E("📄 ","")+"Documents",incidents:E("🚨 ","")+"Report Incident",dse:"🖥️ My DSE",machinery:"⚙️ My Machinery",mequip:"🛠 Machinery & Equipment",actions:"✅ My Actions",team:E("👥 ","")+"My Team"}[t]}
               </button>
             ))}
           </div>
@@ -3804,6 +3824,22 @@ export default function App() {
             />
             </React.Suspense>
           )}
+          {/* Machinery & Equipment for people an admin has given access (Edit Staff): the same
+              Machinery Competence and Equipment Register pages admins use. */}
+          {stab==="mequip" && user.role!=="admin" && hasMachineryAccess(user) && (
+            <MachineryEquipmentPage Z={T} font={font} initial={pagePreset&&pagePreset.tab==="equipment"?"equipment":"machinery"}
+              machinery={
+                <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
+                <LazyAdminMachineryTab allStaff={allUsers.filter(u=>u.id!==1)} machineComps={machineComps} setMachineComps={setMachineComps} allMachineTypes={allMachineTypes} allMachineCategories={allMachineCategories} customMachineTypes={customMachineTypes} preset={pagePreset&&pagePreset.tab==="machinery"?pagePreset:null} clearPreset={()=>setPagePreset(null)} setCustomMachineTypes={setCustomMachineTypes} dbDeleteCustomMachineType={dbDeleteCustomMachineType} dbSaveMachineComp={dbSaveMachineComp} dbDeleteMachineComp={dbDeleteMachineComp} Z={T} font={font}/>
+                </React.Suspense>}
+              equipment={
+                <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
+                <LazyEquipmentTrackerTab equipment={equipment} setEquipment={setEquipment} preset={pagePreset&&pagePreset.tab==="equipment"?pagePreset:null} clearPreset={()=>setPagePreset(null)} staff={allUsers.filter(u=>u.id!==1)}
+                  extinguishers={(fireSafety&&fireSafety.extinguishers)||[]} Z={T} font={font}/>
+                </React.Suspense>}
+            />
+          )}
+
           {stab==="team" && user.role==="manager" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
             <LazyMyTeamTab manager={user} users={allUsers} allModules={allModules} assigns={assigns} comps={comps}

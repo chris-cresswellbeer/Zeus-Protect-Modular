@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { ask } from "../../shared/Feedback";
+import { ask, notify } from "../../shared/Feedback";
+import { buildXlsx, downloadBlob, colName } from "../../lib/xlsxWriter";
 import { useWindowWidth } from "../../shared/hooks";
 import { HelpTip } from "../../shared/HelpTip";
 import { E } from "../../lib/emoji";
@@ -166,14 +167,15 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPres
 
   // ── HEADER ────────────────────────────────────────────────────────────────
   // Excel export (3 sheets: assets, maintenance log, open defects).
-  // ⚠ Loads SheetJS from cdnjs at click time — same caveat as AdminIncidentTab's export.
+  // Built in the browser with the portal's own writer (lib/xlsxWriter.js), so it
+  // works on any network — nothing is downloaded from the internet.
   function exportEquipment() {
-    const today = todayISO();
-    const script = document.createElement("script");
-    script.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
-    script.onload = () => {
-      const XLSX = window.XLSX;
-      const wb = XLSX.utils.book_new();
+    try {
+      const today = todayISO();
+      const HEAD = { bold:true, color:"FFFFFF", fill:"1E3A8A", wrap:true, v:"center" };
+      const head = list => list.map(v => ({ v, s: HEAD }));
+      const sheet = (name, headers, rows, cols) => ({ name, cols, rows:[head(headers), ...rows], freeze:{ row:1 }, rowHeights:{ 0:30 },
+        autoFilter:`A1:${colName(headers.length - 1)}${rows.length + 1}` });
 
       // ── Sheet 1: Asset List ──
       const assetHeaders = [
@@ -193,46 +195,31 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPres
         e.status==="active"?"Active":"Inactive",
         e.lastService||"",
         e.nextService||"",
-        e.defects.filter(d=>d.status==="open").length,
-        e.defects.length,
-        e.serviceHistory.length,
-        e.inspections.length,
+        (e.defects||[]).filter(d=>d.status==="open").length,
+        (e.defects||[]).length,
+        (e.serviceHistory||[]).length,
+        (e.inspections||[]).length,
       ]);
-      const ws1 = XLSX.utils.aoa_to_sheet([assetHeaders, ...assetRows]);
-      ws1["!cols"] = [
-        {wch:12},{wch:16},{wch:36},{wch:14},{wch:16},{wch:18},{wch:6},
-        {wch:22},{wch:10},{wch:14},{wch:14},
-        {wch:12},{wch:14},{wch:14},{wch:16},
-      ];
-      XLSX.utils.book_append_sheet(wb, ws1, "Asset List");
-
       // ── Sheet 2: Maintenance Log (service history across all assets) ──
       const serviceHeaders = [
         "Asset No","Asset Name","Category","Location","Service Date",
         "Service Type","Engineer / Company","Cost","Notes",
       ];
       const serviceRows = equipment.flatMap(e =>
-        e.serviceHistory.map(s => [
+        (e.serviceHistory||[]).map(s => [
           e.assetNo, e.name, cat(e.category).label, e.location||"",
           s.date||"", s.type||"", s.engineer||"",
           s.cost!==""&&s.cost!==undefined ? Number(s.cost) : "",
           s.notes||"",
         ])
       ).sort((a,b) => (b[4]||"").localeCompare(a[4]||""));
-      const ws2 = XLSX.utils.aoa_to_sheet([serviceHeaders, ...serviceRows]);
-      ws2["!cols"] = [
-        {wch:12},{wch:36},{wch:16},{wch:22},{wch:14},
-        {wch:28},{wch:28},{wch:10},{wch:50},
-      ];
-      XLSX.utils.book_append_sheet(wb, ws2, "Maintenance Log");
-
       // ── Sheet 3: Open Defects ──
       const defectHeaders = [
         "Asset No","Asset Name","Category","Location","Status",
         "Defect Date","Reported By","Severity","Defect Status","Description","Resolution",
       ];
       const defectRows = equipment.flatMap(e =>
-        e.defects.map(d => [
+        (e.defects||[]).map(d => [
           e.assetNo, e.name, cat(e.category).label, e.location||"",
           e.status==="active"?"Active":"Inactive",
           d.date||"", d.reportedBy||"",
@@ -244,16 +231,15 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPres
         if (a[8]!=="Open" && b[8]==="Open") return 1;
         return (b[5]||"").localeCompare(a[5]||"");
       });
-      const ws3 = XLSX.utils.aoa_to_sheet([defectHeaders, ...defectRows]);
-      ws3["!cols"] = [
-        {wch:12},{wch:36},{wch:16},{wch:22},{wch:10},
-        {wch:14},{wch:20},{wch:10},{wch:12},{wch:50},{wch:40},
-      ];
-      XLSX.utils.book_append_sheet(wb, ws3, "Defects");
-
-      XLSX.writeFile(wb, `zeus-equipment-register-${today}.xlsx`);
-    };
-    document.head.appendChild(script);
+      const blob = buildXlsx([
+        sheet("Asset List", assetHeaders, assetRows, [12,16,36,14,16,18,6,22,10,14,14,12,14,14,16]),
+        sheet("Maintenance Log", serviceHeaders, serviceRows, [12,36,16,22,14,28,28,10,50]),
+        sheet("Defects", defectHeaders, defectRows, [12,36,16,22,10,14,20,10,12,50,40]),
+      ]);
+      downloadBlob(blob, `zeus-equipment-register-${today}.xlsx`);
+    } catch (e) {
+      notify("The Excel file couldn't be created. Please try again.", { kind:"error" });
+    }
   }
 
   // NB: Header/section components defined inside this component are re-created every

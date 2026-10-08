@@ -11,6 +11,7 @@ import { IncidentChart } from "./IncidentChart";
 import { IncidentTracker } from "./IncidentTracker";
 import { IncidentPhotos } from "../../shared/IncidentPhotos";
 import { INCIDENT_TYPES, ACCIDENT_CODES, NUMBER_CODES } from "../../data/seedIncidents";
+import { buildXlsx, downloadBlob, colName } from "../../lib/xlsxWriter";
 
 /**
  * AdminIncidentTab — admin incident register.
@@ -168,23 +169,18 @@ function AdminIncidentTab({ user, incidents, setIncidents, dbDeleteIncident, sta
   }
 
   // Excel export (2 sheets: Incident Log + Monthly Summary for the last 3 years).
-  // ⚠ SheetJS is loaded on demand from cdnjs.cloudflare.com, so this needs internet
-  // access to that CDN; if it's blocked nothing happens (no onerror handler).
-  // Installing the `xlsx` npm package and importing it would remove that dependency.
+  // Built in the browser with the portal's own writer (lib/xlsxWriter.js), so it
+  // works on any network — nothing is downloaded from the internet.
   function exportIncidentReport() {
-    const today = todayISO();
-
-    // Load SheetJS dynamically then generate workbook
-    const script = document.createElement("script");
-    script.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
-    script.onload = () => {
-      const XLSX = window.XLSX;
-      const wb = XLSX.utils.book_new();
+    try {
+      const today = todayISO();
+      const HEAD = { bold:true, color:"FFFFFF", fill:"1E3A8A", wrap:true, v:"center" };
+      const head = list => list.map(v => ({ v, s: HEAD }));
 
       // ── Sheet 1: Incident Log ──
       const headers = [
         "Incident ID","Date","Time","Type","Location","Description",
-        "Injury Type","RIDDOR","Reported to HSE","HSE Report Date","HSE Reference","Reported By","HSE Notice Attached","RIDDOR Type","HSE Report Due By","Accident Code","Number Code","Status",
+        "Injury Type","RIDDOR","Reported to HSE","HSE Report Date","HSE Reference","Reported to HSE By","HSE Notice Attached","RIDDOR Type","HSE Report Due By","Accident Code","Number Code","Status",
         "Reported By",
         "Equipment Involved","Equipment Asset No","Equipment Name","Equipment Damaged","Damage Description","Damage Severity","Taken Out of Service",
         "Person Involved","Date of Birth","Address","Postcode",
@@ -194,7 +190,7 @@ function AdminIncidentTab({ user, incidents, setIncidents, dbDeleteIncident, sta
       ];
 
       const rows = [...incidents]
-        .sort((a,b)=>b.date.localeCompare(a.date))
+        .sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")))
         .map(inc=>{
           const reporter = staff.find(u=>String(u.id)===String(inc.reportedBy));
           const typeLabel = INCIDENT_TYPES.find(t=>t.id===inc.type)?.label||inc.type;
@@ -244,29 +240,7 @@ function AdminIncidentTab({ user, incidents, setIncidents, dbDeleteIncident, sta
           ];
         });
 
-      const ws1 = XLSX.utils.aoa_to_sheet([headers, ...rows]);
-
-      // Column widths
-      ws1["!cols"] = [
-        {wch:12},{wch:12},{wch:8},{wch:18},{wch:20},{wch:50},
-        {wch:20},{wch:8},{wch:14},{wch:12},{wch:10},
-        {wch:20},
-        {wch:16},{wch:14},{wch:28},{wch:16},{wch:40},{wch:14},{wch:18},
-        {wch:22},{wch:14},{wch:30},{wch:12},
-        {wch:22},{wch:22},{wch:22},{wch:22},
-        {wch:16},{wch:30},{wch:20},
-        {wch:30},{wch:30},{wch:40},{wch:22},
-      ];
-
-      // Bold header row
-      const range = XLSX.utils.decode_range(ws1["!ref"]);
-      for (let c = range.s.c; c <= range.e.c; c++) {
-        const cell = XLSX.utils.encode_cell({r:0, c});
-        if (!ws1[cell]) continue;
-        ws1[cell].s = { font:{bold:true,color:{rgb:"FFFFFF"}}, fill:{fgColor:{rgb:"1E3A8A"}} };
-      }
-
-      XLSX.utils.book_append_sheet(wb, ws1, "Incident Log");
+      const cols1 = [12,12,8,18,20,50, 20,8,14,14,16,20,14,16,22,14,12,10, 20, 12,14,30,12,30,14,14, 22,14,30,12, 22,22,22,22, 14,30,20, 30,30,40,22];
 
       // ── Sheet 2: Monthly Summary ──
       const currentYear = new Date().getFullYear();
@@ -275,7 +249,7 @@ function AdminIncidentTab({ user, incidents, setIncidents, dbDeleteIncident, sta
       for (let yr = currentYear; yr >= currentYear - 2; yr--) {
         for (let m = 1; m <= 12; m++) {
           const key = `${yr}-${String(m).padStart(2,"0")}`;
-          const mi = incidents.filter(i=>i.date.startsWith(key));
+          const mi = incidents.filter(i=>String(i.date||"").startsWith(key));
           if (mi.length === 0 && yr < currentYear) continue;
           summaryRows.push([
             new Date(yr,m-1,1).toLocaleString("default",{month:"long"}),
@@ -289,25 +263,21 @@ function AdminIncidentTab({ user, incidents, setIncidents, dbDeleteIncident, sta
           ]);
         }
       }
-      // Totals row
-      summaryRows.push([
-        "TOTAL","All",
-        `=SUM(C2:C${summaryRows.length+1})`,
-        `=SUM(D2:D${summaryRows.length+1})`,
-        `=SUM(E2:E${summaryRows.length+1})`,
-        `=SUM(F2:F${summaryRows.length+1})`,
-        `=SUM(G2:G${summaryRows.length+1})`,
-        `=SUM(H2:H${summaryRows.length+1})`,
+      const sumCol = i => summaryRows.reduce((t, r) => t + (Number(r[i]) || 0), 0);
+      const last = summaryRows.length + 1;
+      const totalStyle = { bold:true, fill:"E5E7EB" };
+      const totals = [{ v:"TOTAL", s:totalStyle }, { v:"All", s:totalStyle },
+        ...["C","D","E","F","G","H"].map((col, k) => ({ f:`SUM(${col}2:${col}${last})`, v:sumCol(k + 2), s:totalStyle }))];
+
+      const blob = buildXlsx([
+        { name:"Incident Log", cols:cols1, rows:[head(headers), ...rows], freeze:{ row:1 },
+          autoFilter:`A1:${colName(headers.length - 1)}${rows.length + 1}`, rowHeights:{ 0:30 } },
+        { name:"Monthly Summary", cols:[14,6,12,12,18,12,8,8], rows:[head(summaryHeaders), ...summaryRows, totals], freeze:{ row:1 } },
       ]);
-
-      const ws2 = XLSX.utils.aoa_to_sheet([summaryHeaders, ...summaryRows]);
-      ws2["!cols"] = [{wch:14},{wch:6},{wch:12},{wch:12},{wch:18},{wch:12},{wch:8},{wch:8}];
-      XLSX.utils.book_append_sheet(wb, ws2, "Monthly Summary");
-
-      // Save
-      XLSX.writeFile(wb, `zeus-incident-report-${today}.xlsx`);
-    };
-    document.head.appendChild(script);
+      downloadBlob(blob, `zeus-incident-report-${today}.xlsx`);
+    } catch (e) {
+      notify("The Excel file couldn't be created. Please try again.", { kind:"error" });
+    }
   }
 
   // Printable Accident Book (landscape) for the chosen date range — mirrors the

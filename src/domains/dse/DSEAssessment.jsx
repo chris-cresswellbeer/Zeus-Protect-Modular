@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef } from "react";
 import { useFormGuard, DraftBanner, confirmLeave } from "../../lib/unsaved";
 import { ZeusLogo } from "../../shared/Logo";
 import { DSE_SECTIONS } from "../../data/seedDse";
@@ -26,7 +26,7 @@ import { todayISO } from "../../lib/dates";
  *   Responses are keyed by array POSITION, so reports must never be reordered or
  *   deleted from the middle of a user's list. Questions come from data/seedDse.js (DSE_SECTIONS).
  */
-function DSEAssessment({ user, dseAnswers, setDseAnswers, dseComments, setDseComments, dseSection, setDseSection, dseSubmitted, setDseSubmitted, dseReports, setDseReports, adminResponses, darkMode, onClose, Z, font }) {
+function DSEAssessment({ user, dseAnswers, setDseAnswers, dseComments, setDseComments, dseSection, setDseSection, dseSubmitted, setDseSubmitted, dseReports, setDseReports, adminResponses, darkMode, onClose, onSaveProgress, Z, font }) {
   const section = DSE_SECTIONS[dseSection];
   const totalSections = DSE_SECTIONS.length;
   const isLast = dseSection === totalSections - 1;
@@ -36,7 +36,19 @@ function DSEAssessment({ user, dseAnswers, setDseAnswers, dseComments, setDseCom
     value: { answers: dseAnswers, comments: dseComments, section: dseSection },
     changed: !dseSubmitted && (Object.keys(dseAnswers || {}).length > 0 || Object.values(dseComments || {}).some(v => String(v || "").trim())),
     onRestore: v => { setDseAnswers(v.answers || {}); setDseComments(v.comments || {}); setDseSection(v.section || 0); } });
-  const leave = async () => { if (guard.dirty && !(await confirmLeave())) return; guard.done(); onClose(); };
+  // Progress is saved to the person's account (App.jsx saveDseProgress → user_profiles.dseDraft),
+  // so an unfinished assessment shows in My Actions and can be finished later, on any computer.
+  const hasProgress = !dseSubmitted && (Object.keys(dseAnswers || {}).length > 0 || Object.values(dseComments || {}).some(v => String(v || "").trim()));
+  const progress = () => ({ answers: dseAnswers, comments: dseComments, section: dseSection, at: new Date().toISOString() });
+  const firstSection = useRef(true);
+  useEffect(() => {   // moving between sections saves progress (not on opening)
+    if (firstSection.current) { firstSection.current = false; return; }
+    if (hasProgress && onSaveProgress) onSaveProgress(progress());
+  }, [dseSection]); // eslint-disable-line
+  const leave = async () => {
+    if (hasProgress && onSaveProgress) { onSaveProgress(progress()); guard.done(); onClose(); return; }
+    if (guard.dirty && !(await confirmLeave())) return; guard.done(); onClose();
+  };
 
   function setAnswer(qid, val) {
     setDseAnswers(prev => ({ ...prev, [qid]: val }));
@@ -69,6 +81,7 @@ function DSEAssessment({ user, dseAnswers, setDseAnswers, dseComments, setDseCom
       issueCount: issues.length,
     };
     setDseReports(prev => ({ ...prev, [user.id]: [...(prev[user.id] || []), report] }));
+    if (onSaveProgress) onSaveProgress(null);   // finished: no longer "in progress"
     guard.done();
     setDseSubmitted(true);
   }
@@ -172,7 +185,8 @@ function DSEAssessment({ user, dseAnswers, setDseAnswers, dseComments, setDseCom
       <div style={{ background: `linear-gradient(90deg,${Z.navyDk},${Z.navy})`, borderBottom: `1px solid ${Z.border}`, padding: "12px 28px", display: "flex", alignItems: "center", gap: 14 }}>
         <ZeusLogo darkMode={darkMode}/>
         <div style={{ width: 1, height: 28, background: Z.borderMd }} />
-        <button onClick={leave} style={{ background: Z.overlay, border: `1px solid ${Z.borderMd}`, borderRadius: 8, padding: "6px 14px", color: Z.muted, cursor: "pointer", fontFamily: font, fontWeight: 700, fontSize: 12 }}>← Back</button>
+        <button onClick={leave} title={hasProgress ? "Your answers are saved. Finish it later from My Actions or My DSE." : undefined}
+          style={{ background: Z.overlay, border: `1px solid ${Z.borderMd}`, borderRadius: 8, padding: "6px 14px", color: Z.muted, cursor: "pointer", fontFamily: font, fontWeight: 700, fontSize: 12 }}>{hasProgress ? "← Save & finish later" : "← Back"}</button>
         <span style={{ fontWeight: 700, fontSize: 15, color: Z.white }}>DSE Workstation Self-Assessment</span>
         <span style={{ marginLeft: "auto", color: Z.muted, fontSize: 12 }}>Section {dseSection + 1} of {totalSections}</span>
       </div>

@@ -3,12 +3,14 @@ import { getExpiryStatus, todayISO } from "../../lib/dates";
 import { sameName } from "../../lib/openActions";
 import { ACCEPT_IMG_DOCS } from "../../lib/constants";
 import { myIncompleteQuickReports, isQuickReportOverdue, quickReportDueLabel } from "../incidents/quickReportStatus";
+import { DSE_RENEWAL_MONTHS, DSE_QUESTION_COUNT } from "../../data/seedDse";
 
 /**
  * StaffActionsTab — the staff member's "My Actions" to-do list, gathered from:
  *   • assigned training not yet done, or expiring/expired
  *   • assigned documents not yet acknowledged
- *   • open issues on their latest DSE assessment
+ *   • their DSE assessment: in progress (saved, not submitted), never done, or re-assessment
+ *     due/expiring (same rules as the dashboard), and open issues on the latest one
  *   • investigation corrective actions in the user's name (sameName: case and extra spaces ignored,
  *     as in the reminder emails)
  * For corrective actions the user can mark complete, add progress notes and attach
@@ -18,7 +20,7 @@ import { myIncompleteQuickReports, isQuickReportOverdue, quickReportDueLabel } f
  * NB: this sets completedAt on completion, whereas the mobile app (dbCompleteAction)
  * sets completedDate. Reports that show a completion date should check both.
  */
-function StaffActionsTab({ user, onCompleteQuickReport, incidents, investigations, setInvestigations, assigns, comps, allModules, docs, docAssignments, docAcknowledgements, dseReports, adminResponses, setStab, setMod, Z, font }) {
+function StaffActionsTab({ user, onCompleteQuickReport, incidents, investigations, setInvestigations, assigns, comps, allModules, docs, docAssignments, docAcknowledgements, dseReports, adminResponses, dseDraft, onStartDse, setStab, setMod, Z, font }) {
   const today = todayISO();
 
   // ── Outstanding training modules ──────────────────────────────────────────
@@ -44,6 +46,20 @@ function StaffActionsTab({ user, onCompleteQuickReport, incidents, investigation
     !(adminResponses[user.id]||{})[`${ri}_${ii}`]?.resolved && latestDse.issueCount>0
   ) : [];
 
+  // ── The DSE assessment itself (in progress / not done / due) ─────────────
+  const dseEx = latestDse ? getExpiryStatus(latestDse.date, DSE_RENEWAL_MONTHS) : null;
+  const shortDate = iso => { const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }); };
+  const dseTodo = dseDraft
+    ? { tone: Z.amber, badge: "📝 In progress", btn: "Continue →",
+        detail: `${Object.keys(dseDraft.answers || {}).length} of ${DSE_QUESTION_COUNT} questions answered${dseDraft.at ? ` · saved ${shortDate(dseDraft.at)}` : ""}` }
+    : !latestDse
+      ? { tone: "#8b5cf6", badge: "🔴 Required", btn: "Start →", detail: "Not yet completed · DSE Regulations 1992" }
+      : dseEx?.status === "expired"
+        ? { tone: Z.red, badge: "⚠ Re-assessment overdue", btn: "Retake →", detail: `Last completed ${latestDse.date}` }
+        : dseEx?.status === "expiring"
+          ? { tone: Z.amber, badge: `⏳ Due in ${dseEx.daysLeft}d`, btn: "Retake →", detail: `Last completed ${latestDse.date}` }
+          : null;
+
   // ── Investigation corrective actions ─────────────────────────────────────
   const myActions = Object.entries(investigations).flatMap(([incidentId, inv]) => {
     const inc = incidents.find(i=>i.id===incidentId);
@@ -59,7 +75,7 @@ function StaffActionsTab({ user, onCompleteQuickReport, incidents, investigation
   // ── Quick hazard reports still needing the full form ─────────────────────
   const quickToComplete = myIncompleteQuickReports(incidents, user.id);
 
-  const totalOutstanding = quickToComplete.length + pendingModules.length + expiringModules.length + pendingDocs.length + openDseIssues.length + open.length;
+  const totalOutstanding = quickToComplete.length + pendingModules.length + expiringModules.length + pendingDocs.length + (dseTodo ? 1 : 0) + openDseIssues.length + open.length;
 
   const [expandedId, setExpandedId] = useState(null);
   const [noteInputs, setNoteInputs]  = useState({});
@@ -300,6 +316,22 @@ function StaffActionsTab({ user, onCompleteQuickReport, incidents, investigation
                   <button onClick={()=>setStab("documents")} style={{background:`linear-gradient(135deg,#f59e0b,#d97706)`,color:"#fff",border:"none",borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font,whiteSpace:"nowrap",flexShrink:0}}>Read →</button>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* ── DSE Assessment (in progress / not done / due) ── */}
+          {dseTodo && (
+            <div style={{marginBottom:8}} data-testid="dse-todo">
+              <SectionHeader icon="🖥️" title="DSE Assessment" count={1} color={dseTodo.tone}/>
+              <div style={{padding:"12px 16px",borderRadius:12,background:`linear-gradient(135deg,${Z.navyMd},${Z.navy})`,border:`1px solid ${dseTodo.tone}55`,marginBottom:8,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+                <span style={{fontSize:24,flexShrink:0}}>🖥️</span>
+                <div style={{flex:1,minWidth:180}}>
+                  <div style={{fontWeight:700,fontSize:13,color:Z.white,marginBottom:3}}>DSE Workstation Self-Assessment</div>
+                  <div style={{fontSize:11,color:Z.muted}}>{dseTodo.detail}</div>
+                </div>
+                <span style={{fontSize:11,fontWeight:700,color:dseTodo.tone,background:`${dseTodo.tone}1a`,border:`1px solid ${dseTodo.tone}44`,borderRadius:8,padding:"4px 10px",whiteSpace:"nowrap"}}>{dseTodo.badge}</span>
+                <button onClick={()=>onStartDse ? onStartDse() : setStab("dse")} style={{background:dseTodo.tone,color:"#fff",border:"none",borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font,whiteSpace:"nowrap",flexShrink:0}}>{dseTodo.btn}</button>
+              </div>
             </div>
           )}
 

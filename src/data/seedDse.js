@@ -80,4 +80,9 @@ const DSE_SECTIONS = [
 ];
 
 
-export { DSE_SECTIONS };
+/** Re-assessment is due this many months after the last one (matches the dashboard). */
+const DSE_RENEWAL_MONTHS = 12;
+/** How many questions the assessment has in total. */
+const DSE_QUESTION_COUNT = DSE_SECTIONS.reduce((n, s) => n + s.questions.length, 0);
+
+export { DSE_SECTIONS, DSE_RENEWAL_MONTHS, DSE_QUESTION_COUNT };

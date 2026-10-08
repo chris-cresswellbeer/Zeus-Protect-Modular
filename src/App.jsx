@@ -94,6 +94,7 @@ import { uploadEvidence, listSessions, sessionKey, evidenceLabel } from "./domai
 import { teamOf } from "./domains/manager/team";
 import { isPassed, scoreText, recordedText, passMarkOf } from "./domains/training/completion";
 import { DSEAssessment } from "./domains/dse/DSEAssessment";
+import { DSE_RENEWAL_MONTHS, DSE_QUESTION_COUNT } from "./data/seedDse";
 const LazyStaffDSETab = React.lazy(() => import("./domains/dse/StaffDSETab").then(m => ({ default: m.StaffDSETab })));
 const LazyEquipmentTrackerTab = React.lazy(() => import("./domains/equipment/EquipmentTrackerTab").then(m => ({ default: m.EquipmentTrackerTab })));
 const LazyFireSafetyTab = React.lazy(() => import("./domains/fireSafety/FireSafetyTab").then(m => ({ default: m.FireSafetyTab })));
@@ -353,6 +354,9 @@ export default function App() {
   const [dseComments, setDseComments] = useState({});
   const [dseSection, setDseSection] = useState(0);
   const [dseSubmitted, setDseSubmitted] = useState(false);
+  // An unfinished assessment, saved to the person's account (user_profiles.data.dseDraft):
+  // { answers, comments, section, at } or null. Shown in My Actions and resumed by openDse().
+  const [dseDraft, setDseDraft] = useState(null);
   const [dseReports, setDseReports] = useState({});
   const [adminResponses, setAdminResponses] = useState({}); // { userId: { reportIdx_issueIdx: { comment, resolved } } }
   // ── Incidents, investigations and other H&S registers ──
@@ -1859,6 +1863,29 @@ export default function App() {
     await dbWrite(sb.from("user_profiles").upsert({ user_id: sid, data: merged }, { onConflict: "user_id" }), "emoji mode preference");
   }
 
+  // Same merge pattern, for an unfinished DSE assessment (null = none / finished).
+  async function dbSaveDseDraft(userId, draft) {
+    const sid = String(userId);
+    const profiles = Array.isArray(window.__userProfiles) ? window.__userProfiles : [];
+    const existing = profiles.find(r => String(r.user_id) === sid);
+    const merged = { ...(existing?.data || {}) };
+    if (draft) merged.dseDraft = draft; else delete merged.dseDraft;
+    window.__userProfiles = profiles.map(r => String(r.user_id)===sid ? {...r, data:merged} : r);
+    if (!existing) window.__userProfiles.push({ user_id: sid, data: merged });
+    await dbWrite(sb.from("user_profiles").upsert({ user_id: sid, data: merged }, { onConflict: "user_id" }), "DSE progress");
+  }
+  function saveDseProgress(draft) {
+    if (!user) return;
+    setDseDraft(draft);
+    dbSaveDseDraft(user.id, draft);
+  }
+  // Opens the DSE wizard: carries on from saved progress if there is some, otherwise starts fresh.
+  function openDse() {
+    const d = dseDraft;
+    setDseAnswers(d?.answers || {}); setDseComments(d?.comments || {}); setDseSection(d?.section || 0);
+    setDseSubmitted(false); setDseActive(true);
+  }
+
   // users table: { id: TEXT, data: JSON user object }. `user` here shadows the logged-in user — it's the record being saved.
   async function dbSaveUser(user) {
     const ok = await dbWrite(sb.from("users").upsert({ id: String(user.id), data: user }, { onConflict: "id" }), "user", { alertOnError: true });
@@ -2315,6 +2342,7 @@ export default function App() {
     const profile = profiles.find(r => String(r.user_id) === String(u.id));
     // Their saved theme, or the default, so a shared computer doesn't keep the last person's.
     setTheme(profile?.data?.theme || "dark");
+    setDseDraft(profile?.data?.dseDraft || null);
     if (profile?.data?.emojiMode === false) setEmojiMode(false);
     setUser(u); setErr("");
     // Back to the page in the address (refresh / bookmark / link) if this person may see it.
@@ -2338,7 +2366,7 @@ export default function App() {
     clearDrafts(user && user.id);
     hideWelcome(); setWelcomePending(false);
     if (AUTH_MODE === "supabase") { signOut().finally(() => window.location.reload()); return; }
-    setMustChangePw(false); setUser(null); setViewRaw("login"); setMod(null);
+    setMustChangePw(false); setUser(null); setViewRaw("login"); setMod(null); setDseDraft(null); setDseActive(false);
     setAdminReportView("staff"); setShowHiddenModules(false); setStaffFilterManager("all"); setDocFolder("all"); setStaffFilterProgress("all");
     setStaffGroupByTeam(false); setStaffStatusFilter("all"); setBulkTarget("individual"); setBulkManager(""); setStaffFilterSearch(""); setStaffSel([]);
   }
@@ -2634,6 +2662,7 @@ export default function App() {
       adminResponses={adminResponses}
       darkMode={darkMode}
       onClose={()=>{ setDseActive(false); setDseAnswers({}); setDseComments({}); setDseSection(0); setDseSubmitted(false); }}
+      onSaveProgress={saveDseProgress}
       Z={T} font={font}
     />;
   }
@@ -3053,8 +3082,7 @@ export default function App() {
     const lastDseRi      = myDseReports.length-1;
     const myAdminResps   = adminResponses[user.id]||{};
     const dseCompleted   = !!lastDseReport;
-    // DSE renewal — recommended annually
-    const DSE_RENEWAL_MONTHS = 12;
+    // DSE renewal — recommended annually (data/seedDse.js)
     const dseExpiryStatus = dseCompleted ? getExpiryStatus(lastDseReport.date, DSE_RENEWAL_MONTHS) : null;
     const dseExpired  = dseExpiryStatus?.status==="expired";
     const dseExpiring = dseExpiryStatus?.status==="expiring";
@@ -3139,7 +3167,8 @@ export default function App() {
               docs.filter(d=>(docAssignments[String(d.id)]||[]).includes(String(user.id))&&!(docAcknowledgements[user.id]||{})[d.id])
                 .forEach(d=>notifications.push({type:"document",urgent:true,title:`Read & confirm: ${d.title}`,detail:"Required reading — confirmation pending",nav:{tab:"documents"}}));
               // DSE not completed
-              if(!(dseReports[user.id]||[]).length) notifications.push({type:"dse",urgent:false,title:"Complete your DSE workstation assessment",detail:"DSE Regulations 1992 — required for all screen users",nav:{tab:"dse"}});
+              if(dseDraft) notifications.push({type:"dse",urgent:false,title:"Finish your DSE workstation assessment",detail:`In progress — ${Object.keys(dseDraft.answers||{}).length} of ${DSE_QUESTION_COUNT} questions answered`,nav:{tab:"dse"}});
+              else if(!(dseReports[user.id]||[]).length) notifications.push({type:"dse",urgent:false,title:"Complete your DSE workstation assessment",detail:"DSE Regulations 1992 — required for all screen users",nav:{tab:"dse"}});
               // Open DSE issues with no admin response
               const latestDse=(dseReports[user.id]||[])[( dseReports[user.id]||[]).length-1];
               if(latestDse){
@@ -3289,23 +3318,23 @@ export default function App() {
                       </div>
                     ); })}
                     {!dseCompleted && (
-                      <div style={{display:"flex",alignItems:"center",gap:12,background:"rgba(139,92,246,0.1)",borderRadius:8,padding:"8px 12px",cursor:"pointer"}} onClick={()=>{ setDseAnswers({}); setDseComments({}); setDseSection(0); setDseSubmitted(false); setDseActive(true); }}>
+                      <div style={{display:"flex",alignItems:"center",gap:12,background:"rgba(139,92,246,0.1)",borderRadius:8,padding:"8px 12px",cursor:"pointer"}} onClick={openDse}>
                         <span style={{fontSize:20}}>🖥️</span>
                         <div style={{flex:1}}>
                           <div style={{fontSize:13,fontWeight:700,color:T.white}}>DSE Workstation Self-Assessment</div>
-                          <div style={{fontSize:11,color:"#c4b5fd"}}>Required — DSE Regulations 1992 · not yet completed</div>
+                          <div style={{fontSize:11,color:"#c4b5fd"}}>{dseDraft?`In progress — ${Object.keys(dseDraft.answers||{}).length} of ${DSE_QUESTION_COUNT} questions answered`:"Required — DSE Regulations 1992 · not yet completed"}</div>
                         </div>
-                        <button style={{background:"linear-gradient(135deg,#8b5cf6,#7c3aed)",border:"none",borderRadius:8,padding:"5px 14px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,whiteSpace:"nowrap"}}>Start →</button>
+                        <button style={{background:"linear-gradient(135deg,#8b5cf6,#7c3aed)",border:"none",borderRadius:8,padding:"5px 14px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,whiteSpace:"nowrap"}}>{dseDraft?"Continue →":"Start →"}</button>
                       </div>
                     )}
                     {dseExpired && (
-                      <div style={{display:"flex",alignItems:"center",gap:12,background:"rgba(239,68,68,0.08)",borderRadius:8,padding:"8px 12px",cursor:"pointer"}} onClick={()=>{ setDseAnswers({}); setDseComments({}); setDseSection(0); setDseSubmitted(false); setDseActive(true); }}>
+                      <div style={{display:"flex",alignItems:"center",gap:12,background:"rgba(239,68,68,0.08)",borderRadius:8,padding:"8px 12px",cursor:"pointer"}} onClick={openDse}>
                         <span style={{fontSize:20}}>🖥️</span>
                         <div style={{flex:1}}>
                           <div style={{fontSize:13,fontWeight:700,color:T.white}}>DSE Workstation Self-Assessment</div>
-                          <div style={{fontSize:11,color:"#f87171"}}>Annual re-assessment due — last completed {lastDseReport.date}</div>
+                          <div style={{fontSize:11,color:"#f87171"}}>Annual re-assessment due — last completed {lastDseReport.date}{dseDraft?` · in progress, ${Object.keys(dseDraft.answers||{}).length} of ${DSE_QUESTION_COUNT} answered`:""}</div>
                         </div>
-                        <button style={{background:"linear-gradient(135deg,#ef4444,#dc2626)",border:"none",borderRadius:8,padding:"5px 14px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,whiteSpace:"nowrap"}}>Retake →</button>
+                        <button style={{background:"linear-gradient(135deg,#ef4444,#dc2626)",border:"none",borderRadius:8,padding:"5px 14px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,whiteSpace:"nowrap"}}>{dseDraft?"Continue →":"Retake →"}</button>
                       </div>
                     )}
                     {dseExpiring && !dseExpired && (
@@ -3403,9 +3432,9 @@ export default function App() {
                 {/* DSE row */}
                 {(()=>{
                   const dseStatusColor = !dseCompleted?"#8b5cf6":dseExpired?"#ef4444":dseExpiring?"#f59e0b":"#10b981";
-                  const dseStatusLabel = !dseCompleted?"Not completed":dseExpired?"Re-assessment due":dseExpiring?dseExpiryStatus?.label:"Completed";
+                  const dseStatusLabel = dseDraft?"In progress":!dseCompleted?"Not completed":dseExpired?"Re-assessment due":dseExpiring?dseExpiryStatus?.label:"Completed";
                   return (
-                    <div onClick={()=>{ setDseAnswers({}); setDseComments({}); setDseSection(0); setDseSubmitted(false); setDseActive(true); }}
+                    <div onClick={openDse}
                       style={{background:T.overlay,border:`1px solid ${dseExpired?"rgba(239,68,68,0.25)":T.borderMd}`,borderRadius:10,padding:"10px 16px",cursor:"pointer",display:"flex",alignItems:"center",gap:12,transition:"background .15s"}}
                       onMouseEnter={e=>e.currentTarget.style.background=T.navyMd}
                       onMouseLeave={e=>e.currentTarget.style.background=T.overlay}>
@@ -3539,9 +3568,9 @@ export default function App() {
                           <p style={{color:T.muted,fontSize:11,margin:0}}>Last completed: {lastReport.date}</p>
                         </div>
                       )}
-                      <button onClick={()=>{ setDseAnswers({}); setDseComments({}); setDseSection(0); setDseSubmitted(false); setDseActive(true); }}
+                      <button onClick={openDse}
                         style={{width:"100%",background:lastReport?T.overlay:`linear-gradient(135deg,#8b5cf6,#7c3aed)`,color:lastReport?"#8b5cf6":"#fff",border:lastReport?`1px solid ${T.borderMd}`:"none",borderRadius:10,padding:"10px",fontWeight:700,cursor:"pointer",fontSize:13,fontFamily:font}}>
-                        {lastReport?"Retake Assessment →":"Start Assessment →"}
+                        {dseDraft?"Continue Assessment →":lastReport?"Retake Assessment →":"Start Assessment →"}
                       </button>
                     </div>
                   );
@@ -3770,6 +3799,7 @@ export default function App() {
               setDseSection={setDseSection}
               setDseSubmitted={setDseSubmitted}
               setDseActive={setDseActive}
+              dseDraft={dseDraft} onStartDse={openDse}
               Z={T} font={font}
             />
             </React.Suspense>
@@ -3806,6 +3836,7 @@ export default function App() {
               docAcknowledgements={docAcknowledgements}
               dseReports={dseReports}
               adminResponses={adminResponses}
+              dseDraft={dseDraft} onStartDse={openDse}
               setStab={setStab} setMod={setMod}
               Z={T} font={font}
             />

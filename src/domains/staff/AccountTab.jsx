@@ -1,11 +1,13 @@
 import React, { useState } from "react";
 import { useWindowWidth } from "../../shared/hooks";
 import { Avatar } from "../../shared/primitives";
+import ThemePicker from "../../shared/ThemePicker";
 import { hashPassword, DEFAULT_HASH } from "../../lib/supabase";
 
 /**
  * AccountTab — "My Account" for any logged-in user (staff or admin):
- * profile summary, change password (with strength meter), theme picker and
+ * profile summary, change password (with strength meter), theme picker
+ * (shared/ThemePicker.jsx — themes come from theme/tokens.js) and
  * emoji on/off. Preferences are saved via onSaveTheme / onSaveEmojiMode
  * (→ user_profiles in App.jsx).
  *
@@ -136,32 +138,8 @@ function AccountTab({ user, passwords, onSetPassword, authMode, onChangeOwnPassw
           {/* Theme toggle — spans full width of grid */}
         <div style={{...card,gridColumn:isMobile?"1":"1 / -1",padding:24}}>
           <h3 style={{fontSize:13,fontWeight:700,letterSpacing:.5,color:Z.muted,margin:"0 0 16px",textTransform:"uppercase"}}>Display Theme</h3>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:10}}>
-            {[
-              {key:"dark",     label:"🌙 Dark Mode",      desc:"Default navy",       preview:["#060d2e","#0d1f5c","#2563eb"]},
-              {key:"light",    label:"☀️ Light Mode",     desc:"Clean & bright",     preview:["#e8edf7","#ffffff","#2563eb"]},
-              {key:"slate",    label:"◼ Midnight Slate",  desc:"Charcoal + teal",    preview:["#0d1117","#1a1f2e","#0d9488"]},
-              {key:"forest",   label:"🌲 Deep Forest",    desc:"Dark green + amber", preview:["#0a150a","#1a2e1a","#16a34a"]},
-              {key:"graphite", label:"⬛ Graphite & Gold", desc:"Near-black + gold",  preview:["#0a0a0a","#1c1c1e","#f59e0b"]},
-              {key:"arctic",   label:"🌌 Aurora",          desc:"Deep purple + cyan",  preview:["#0a0718","#1a1033","#06b6d4"]},
-              {key:"sand",     label:"🏜 Warm Sand",      desc:"Cream & terracotta", preview:["#f0e6d3","#fdf8f0","#c2522a"]},
-              {key:"rose",     label:"🌸 Rose",             desc:"Blush & deep rose",   preview:["#fce7ed","#fff0f3","#e11d48"]},
-            ].map(opt=>{
-              const isActive = theme===opt.key;
-              return (
-                <button key={opt.key} onClick={()=>{ setTheme(opt.key); setDarkMode(opt.key==="dark"||opt.key==="slate"||opt.key==="forest"||opt.key==="graphite"||opt.key==="arctic"); if(onSaveTheme) onSaveTheme(opt.key); }}
-                  style={{padding:"12px 14px",borderRadius:12,border:`2px solid ${isActive?Z.accent:Z.border}`,background:isActive?`rgba(37,99,235,0.12)`:Z.overlay,cursor:"pointer",textAlign:"left",fontFamily:font,transition:"all .2s"}}>
-                  {/* Colour swatch */}
-                  <div style={{display:"flex",gap:4,marginBottom:8}}>
-                    {opt.preview.map((c,i)=><div key={i} style={{width:18,height:18,borderRadius:4,background:c,border:"1px solid rgba(255,255,255,0.15)"}}/>)}
-                  </div>
-                  <div style={{fontWeight:700,fontSize:13,color:isActive?Z.accentLt:Z.white,marginBottom:2}}>{opt.label}</div>
-                  <div style={{fontSize:11,color:Z.muted}}>{opt.desc}</div>
-                  {isActive && <div style={{marginTop:5,fontSize:10,color:Z.accentLt,fontWeight:700,letterSpacing:.5}}>✓ ACTIVE</div>}
-                </button>
-              );
-            })}
-          </div>
+          <ThemePicker theme={theme} Z={Z} font={font}
+            onPick={key=>{ setTheme(key); if(onSaveTheme) onSaveTheme(key); }}/>
         </div>
 
         {/* Professional Mode toggle — spans full width */}

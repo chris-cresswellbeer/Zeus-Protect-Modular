@@ -4,7 +4,7 @@
 // actions, training history, and appearance.
 
 import React from "react";
-import { ALL_THEMES } from "../../theme/tokens";
+import { THEMES } from "../../theme/tokens";
 import { Screen, SectionLabel, Row, StatusChip, PrimaryButton } from "../ui";
 import { promptInstall, isStandalone } from "../registerSW";
 import { WelcomeReplay } from "../../shared/WelcomeVideo";
@@ -354,16 +354,6 @@ function TrainingHistory({ entries, stats, Z, font }) {
 
 // ─── Appearance ──────────────────────────────────────────────────────────────
 
-const THEME_PREVIEWS = {
-  dark:     ["#060d2e", "#0d1f5c", "#2563eb"],
-  light:    ["#e8edf7", "#ffffff", "#2563eb"],
-  slate:    ["#0d1117", "#1a1f2e", "#0d9488"],
-  forest:   ["#0a150a", "#1a2e1a", "#16a34a"],
-  graphite: ["#0a0a0a", "#1c1c1e", "#f59e0b"],
-  arctic:   ["#0a0718", "#1a1033", "#06b6d4"],
-  sand:     ["#f0e6d3", "#fdf8f0", "#c2522a"],
-  rose:     ["#fce7ed", "#fff0f3", "#e11d48"],
-};
 
 // Theme picker (same theme keys as desktop), follow-system-dark toggle and text size.
 // Theme is saved to the user's profile; the other prefs are per-device (localStorage).
@@ -382,7 +372,7 @@ function Appearance({
             width: "100%", textAlign: "left", display: "flex", alignItems: "center", gap: 13,
             minHeight: 60, padding: 15, borderRadius: 15, cursor: "pointer", fontFamily: font,
             border: followSystem ? `2px solid ${Z.accent}` : `1px solid ${Z.border}`,
-            background: followSystem ? "rgba(37,99,235,0.16)" : Z.overlay,
+            background: followSystem ? `${Z.accent}1f` : Z.overlay,
           }}
         >
           <div style={{ display: "flex", gap: 3, flexShrink: 0 }}>
@@ -391,16 +381,21 @@ function Appearance({
           </div>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 14.5, fontWeight: 800, color: Z.white }}>Follow system</div>
-            <div style={{ fontSize: 11.5, color: followSystem ? "#a5b4fc" : Z.muted, marginTop: 1 }}>
-              Dark at night, light in the office
+            <div style={{ fontSize: 11.5, color: followSystem ? Z.accentLt : Z.muted, marginTop: 1 }}>
+              Matches your phone's light or dark setting
             </div>
           </div>
           {followSystem && <span style={{ color: Z.accentLt, fontSize: 17 }}>✓</span>}
         </button>
 
-        {Object.values(ALL_THEMES).map((t) => {
+        {["light", "dark"].map((mode) => (
+          <React.Fragment key={mode}>
+          <div style={{ fontSize: 12, fontWeight: 800, color: Z.muted, margin: "8px 2px 0" }}>
+            {mode === "light" ? "Light" : "Dark"}
+          </div>
+        {THEMES.filter((t) => t.mode === mode).map((t) => {
           const on = !followSystem && theme === t.key;
-          const swatches = THEME_PREVIEWS[t.key] || [];
+          const swatches = t.preview;
           return (
             <button
               key={t.key}
@@ -409,12 +404,12 @@ function Appearance({
                 width: "100%", textAlign: "left", display: "flex", alignItems: "center", gap: 13,
                 minHeight: 60, padding: 15, borderRadius: 15, cursor: "pointer", fontFamily: font,
                 border: on ? `2px solid ${Z.accent}` : `1px solid ${Z.border}`,
-                background: on ? "rgba(37,99,235,0.16)" : Z.overlay,
+                background: on ? `${Z.accent}1f` : Z.overlay,
               }}
             >
               <div style={{ display: "flex", gap: 3, flexShrink: 0 }}>
-                {swatches.map((c) => (
-                  <span key={c} style={{
+                {swatches.map((c, i) => (
+                  <span key={i} style={{
                     width: 9, height: 28, borderRadius: 3, background: c,
                     border: "1px solid rgba(255,255,255,0.12)",
                   }} />
@@ -428,6 +423,8 @@ function Appearance({
             </button>
           );
         })}
+          </React.Fragment>
+        ))}
       </div>
 
       <SectionLabel Z={Z}>Reading</SectionLabel>

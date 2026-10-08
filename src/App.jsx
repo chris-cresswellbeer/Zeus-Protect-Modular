@@ -135,7 +135,7 @@ import { ZeusLogo, ZeusProtectLogo, ZEUS_LOGO_LIGHT_SRC } from "./shared/Logo";
 import { NotificationBell } from "./shared/NotificationBell";
 import { useWindowWidth, MobileCard, MobileCardRow } from "./shared/hooks";
 import { Pill, Avatar, Bar } from "./shared/primitives";
-import { Z, getThemeTokens } from "./theme/tokens";
+import { Z, getThemeTokens, getTheme, isDarkTheme, rememberTheme, oppositeTheme } from "./theme/tokens";
 import MobileApp from "./mobile/MobileApp.jsx";
 import { NewVersionModal } from "./shared/NewVersionModal";
 import { CertificateModal } from "./domains/training/CertificateModal";
@@ -286,12 +286,16 @@ const INCIDENT_CORE_KEYS = new Set([
 // what is in the database. The demo data now lives in demo/ for the test scripts.
 
 export default function App() {
-  const [darkMode, setDarkMode] = useState(true); // kept for backward compat
-  const [theme, setTheme] = useState("dark"); // "dark"|"light"|"slate"|"forest"|"graphite"|"arctic"|"sand"
+  const [theme, setTheme] = useState("dark"); // a key from THEMES in theme/tokens.js
   const T = getThemeTokens(theme); // active theme tokens
-  // Light themes: darken the pale dark-theme text colours so admin text stays readable.
-  useEffect(() => { applyLightThemeFix(isLightTheme(theme)); }, [theme]);
+  // darkMode (logo artwork, a few older screens) follows the theme's mode.
+  const darkMode = isDarkTheme(theme);
+  const setDarkMode = () => {}; // kept for older callers; darkMode now follows the theme
   const [user,    setUser]    = useState(null);
+  // Remember this person's last light and last dark theme (for the header ☀/🌙 button).
+  // Not before sign-in, or the starting "dark" would overwrite what they last chose.
+  const signedIn = !!user;
+  useEffect(() => { if (signedIn) rememberTheme(theme); }, [theme, signedIn]);
   const [view,    setViewRaw] = useState("login");
   const [allUsers,setAllUsers]= useState([]); // loaded from the Supabase users table
   // ── Auth & users ──
@@ -498,6 +502,10 @@ export default function App() {
   // sets forceDesktop and returns the user here.
   const isPhone = winW <= 700;
   const [forceDesktop, setForceDesktop] = useState(false);
+  // Light themes: darken the pale dark-theme text colours so admin text stays readable.
+  // The phone layout does this itself, because "Follow system" can show a different theme.
+  const phoneLayout = isPhone && !!user && !forceDesktop;
+  useEffect(() => { if (!phoneLayout) applyLightThemeFix(isLightTheme(theme)); }, [theme, phoneLayout]);
   const routerOn = !!user && (view === "admin" || view === "staff") && !(isPhone && !forceDesktop);
   // Keep the address in step with the page; each page change is a new Back/Forward step.
   // (After Back/Forward the address already matches, so nothing is added.)
@@ -2305,10 +2313,8 @@ export default function App() {
     // Restore saved theme for this user
     const profiles = Array.isArray(window.__userProfiles) ? window.__userProfiles : [];
     const profile = profiles.find(r => String(r.user_id) === String(u.id));
-    if (profile?.data?.theme) {
-      setTheme(profile.data.theme);
-      setDarkMode(["dark","slate","forest","graphite"].includes(profile.data.theme));
-    }
+    // Their saved theme, or the default, so a shared computer doesn't keep the last person's.
+    setTheme(profile?.data?.theme || "dark");
     if (profile?.data?.emojiMode === false) setEmojiMode(false);
     setUser(u); setErr("");
     // Back to the page in the address (refresh / bookmark / link) if this person may see it.
@@ -3163,15 +3169,13 @@ export default function App() {
             })()}
             <QuickSearch getItems={quickItems} Z={T} font={font} compact={isMobile||sTight}/>
             <div style={{width:1,height:20,background:T.headerBgMd,margin:"0 4px"}}/>
-            <button title={`Theme: ${theme} — click to cycle`} onClick={()=>{
-              const order=["dark","light","slate","forest","graphite","arctic","sand","rose"];
-              const next=order[(order.indexOf(theme)+1)%order.length];
+            {(()=>{ const next=oppositeTheme(theme); const lbl=`Switch to ${getTheme(next).label} (${darkMode?"light":"dark"}). More themes in My Account.`; return (
+            <button title={lbl} aria-label={lbl} data-zp-theme-toggle="" onClick={()=>{
               setTheme(next);
-              setDarkMode(["dark","slate","forest","graphite"].includes(next));
               dbSaveTheme(user.id,next);
             }} style={{background:T.overlay,border:`1px solid ${T.borderMd}`,borderRadius:8,padding:"5px 10px",color:T.muted,cursor:"pointer",fontSize:14,fontFamily:font,display:"flex",alignItems:"center",gap:4,transition:"all .15s"}}>
-              {theme==="dark"?"🌙":theme==="light"?"☀️":theme==="slate"?"◼":theme==="forest"?"🌲":theme==="graphite"?"⬛":theme==="arctic"?"🌌":theme==="sand"?"🏜":"🌸"}
-            </button>
+              {darkMode?"☀️":"🌙"}
+            </button>); })()}
             {user.role==="admin" && (<>
               <button onClick={()=>setView("admin")}
                 title="Back to the admin panel"
@@ -4258,16 +4262,14 @@ export default function App() {
             </button>
             {!navCompact && <div style={{width:1,height:20,background:T.headerBgMd,margin:"0 4px"}}/>}
             {/* Quick theme cycle button */}
-            {!navTiny && <button onClick={()=>{
-              const order=["dark","light","slate","forest","graphite","arctic","sand","rose"];
-              const next=order[(order.indexOf(theme)+1)%order.length];
+            {!navTiny && (()=>{ const next=oppositeTheme(theme); const lbl=`Switch to ${getTheme(next).label} (${darkMode?"light":"dark"}). More themes in My Account.`; return (
+            <button onClick={()=>{
               setTheme(next);
-              setDarkMode(["dark","slate","forest","graphite","aurora"].includes(next));
               dbSaveTheme(user.id,next);
             }} style={{background:T.overlay,border:`1px solid ${T.borderMd}`,borderRadius:8,padding:"5px 10px",color:T.muted,cursor:"pointer",fontSize:14,fontFamily:font,display:"flex",alignItems:"center",gap:4,transition:"all .15s"}}
-              title={`Theme: ${theme} — click to cycle`}>
-              {theme==="dark"?"🌙":theme==="light"?"☀️":theme==="slate"?"◼":theme==="forest"?"🌲":theme==="graphite"?"⬛":theme==="arctic"?"🌌":theme==="sand"?"🏜":"🌸"}
-            </button>}
+              title={lbl} aria-label={lbl} data-zp-theme-toggle="">
+              {darkMode?"☀️":"🌙"}
+            </button>); })()}
             {!navCompact && <div style={{width:1,height:20,background:T.headerBgMd,margin:"0 4px"}}/>}
             <button type="button" onClick={()=>setAtab(atab==="account"?"users":"account")}
               title={`My Account (${user.name})`} aria-label={`My Account (${user.name})`}

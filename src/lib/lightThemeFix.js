@@ -1,10 +1,12 @@
+import { isLightTheme } from "../theme/tokens";
+
 /**
  * ═══════════════════════════════════════════════════════════════════════════
  * lib/lightThemeFix.js — keep text readable in the light themes
  * ═══════════════════════════════════════════════════════════════════════════
  * Many admin screens colour text with fixed "pale" accents that were chosen for
  * dark backgrounds (e.g. #f87171 red, #6ee7b7 green, #93c5fd blue). On the light
- * themes (Light, Warm Sand, Rose) those are too faint to read.
+ * themes (every theme with mode "light" in theme/tokens.js) those are too faint to read.
  *
  * Rather than edit several hundred inline colours, applyLightThemeFix(true)
  * adds ONE stylesheet that — only while a light theme is active — swaps each
@@ -69,8 +71,7 @@ function buildCss() {
   return out.join("\n");
 }
 
-const LIGHT_THEMES = new Set(["light", "sand", "rose"]);
-const isLightTheme = key => LIGHT_THEMES.has(key);
+// Which themes are light comes from the theme list (theme/tokens.js, `mode`).
 
 /** Turn the light-theme text fixes on/off. Safe to call on every theme change. */
 function applyLightThemeFix(isLight) {

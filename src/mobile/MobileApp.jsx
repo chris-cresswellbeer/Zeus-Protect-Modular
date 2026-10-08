@@ -16,7 +16,8 @@
 // See src/mobile/README.md for the full prop wiring.
 
 import React from "react";
-import { getThemeTokens } from "../theme/tokens";
+import { getThemeTokens, themeForMode, isLightTheme } from "../theme/tokens";
+import { applyLightThemeFix } from "../lib/lightThemeFix";
 import { getExpiryStatus, todayISO } from "../lib/dates";
 import { useOnline } from "./lib/useOnline";
 import { enqueue, listQueue, drainQueue } from "./lib/syncQueue";
@@ -111,8 +112,12 @@ function MobileApp({
   const [systemDark, setSystemDark] = React.useState(
     () => !window.matchMedia || window.matchMedia("(prefers-color-scheme: dark)").matches
   );
-  const effectiveTheme = followSystem ? (systemDark ? "dark" : "light") : theme;
+  // Follow system: the phone's light/dark setting picks the mode; the theme is
+  // the person's saved one if it's that mode, else the last one they used in it.
+  const effectiveTheme = followSystem ? themeForMode(systemDark ? "dark" : "light", theme) : theme;
   const T = getThemeTokens(effectiveTheme);
+  // Pale-text fix follows the theme actually on screen (App.jsx leaves this to us on phones).
+  React.useEffect(() => { applyLightThemeFix(isLightTheme(effectiveTheme)); }, [effectiveTheme]);
 
   const isAdmin = user.role === "admin";
   const [tab, setTab] = React.useState("today");
@@ -336,7 +341,6 @@ function MobileApp({
     setFollowSystem(false);
     savePrefs({ ...prefs, followSystem: false });
     setTheme(key);
-    setDarkMode(["dark", "slate", "forest", "graphite"].includes(key));
     write("theme", { userId: user.id, theme: key }, "Theme preference");
   }
 

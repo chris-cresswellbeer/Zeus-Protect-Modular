@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { ask, notify } from "../../shared/Feedback";
 import { buildXlsx, downloadBlob, colName } from "../../lib/xlsxWriter";
+import { useTicks, Tick, TickAll, BulkBar } from "../../shared/BulkBar";
 import { useWindowWidth } from "../../shared/hooks";
 import { HelpTip } from "../../shared/HelpTip";
 import { E } from "../../lib/emoji";
@@ -75,6 +76,29 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPres
   const q = search.trim().toLowerCase();
   const matchesSearch = e => !q || [e.assetNo,e.name,e.location,e.make,e.model,e.serial].some(v=>String(v||"").toLowerCase().includes(q));
   const listed = equipment.filter(e=>(catFilter==="all"||e.category===catFilter)&&(statusFilter==="all"||e.status===statusFilter)&&matchesShow(e)&&matchesSearch(e));
+  // Tick boxes for bulk actions on the list (ticks survive filtering)
+  const ticks = useTicks(listed.map(e=>e.id), equipment.map(e=>e.id));
+  const updateMany = (ids, fn) => setEquipment(p => p.map(e => ids.includes(String(e.id)) ? fn(e) : e));
+  const STATUS_LABEL = { active: "Active (in service)", inactive: "Out of service", retired: "Retired" };
+  const bulkActions = [
+    { label: "Set status…", run: async ids => {
+        const v = await ask({ title: `Status for ${ids.length} item${ids.length!==1?"s":""}`, ok: "Set status",
+          fields: [{ id: "status", label: "Status", required: true, options: Object.entries(STATUS_LABEL).map(([value, label]) => ({ value, label })) }] });
+        if (!v) return false;
+        updateMany(ids, e => ({ ...e, status: v.status })); saveFlash(`✓ ${ids.length} item${ids.length!==1?"s":""} set to ${STATUS_LABEL[v.status].toLowerCase()}`); } },
+    { label: "Move to location…", run: async ids => {
+        const places = [...new Set(equipment.map(e => (e.location || "").trim()).filter(Boolean))].sort();
+        const v = await ask({ title: `Move ${ids.length} item${ids.length!==1?"s":""}`, ok: "Move",
+          fields: [{ id: "location", label: "New location", required: true, suggestions: places, placeholder: "e.g. Warehouse Bay 2" }] });
+        if (!v || !String(v.location).trim()) return false;
+        updateMany(ids, e => ({ ...e, location: String(v.location).trim() })); saveFlash(`✓ Moved to ${String(v.location).trim()}`); } },
+    { label: "Next service date…", run: async ids => {
+        const v = await ask({ title: `Next service for ${ids.length} item${ids.length!==1?"s":""}`, ok: "Set date",
+          fields: [{ id: "date", label: "Next service due", type: "date", required: true }] });
+        if (!v || !v.date) return false;
+        updateMany(ids, e => ({ ...e, nextService: v.date })); saveFlash(`✓ Next service set to ${v.date}`); } },
+    { label: "⬇ Export ticked to Excel", run: ids => { exportEquipment(equipment.filter(e => ids.includes(String(e.id)))); return false; } },
+  ];
   const openList = show => { setCatFilter("all"); setStatusFilter("all"); setShowFilter(show); setSearch(""); setView("list"); };
   const CAP = 5;   // the dashboard lists show this many, then "Show all"
 
@@ -169,8 +193,10 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPres
   // Excel export (3 sheets: assets, maintenance log, open defects).
   // Built in the browser with the portal's own writer (lib/xlsxWriter.js), so it
   // works on any network — nothing is downloaded from the internet.
-  function exportEquipment() {
+  // exportEquipment(list): just those items (the ticked ones); otherwise the whole register.
+  function exportEquipment(list) {
     try {
+      const all = Array.isArray(list) ? list : equipment;
       const today = todayISO();
       const HEAD = { bold:true, color:"FFFFFF", fill:"1E3A8A", wrap:true, v:"center" };
       const head = list => list.map(v => ({ v, s: HEAD }));
@@ -183,7 +209,7 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPres
         "Location","Status","Last Service","Next Service",
         "Open Defects","Total Defects","Total Services","Total Inspections",
       ];
-      const assetRows = equipment.map(e => [
+      const assetRows = all.map(e => [
         e.assetNo,
         cat(e.category).label,
         e.name,
@@ -205,7 +231,7 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPres
         "Asset No","Asset Name","Category","Location","Service Date",
         "Service Type","Engineer / Company","Cost","Notes",
       ];
-      const serviceRows = equipment.flatMap(e =>
+      const serviceRows = all.flatMap(e =>
         (e.serviceHistory||[]).map(s => [
           e.assetNo, e.name, cat(e.category).label, e.location||"",
           s.date||"", s.type||"", s.engineer||"",
@@ -218,7 +244,7 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPres
         "Asset No","Asset Name","Category","Location","Status",
         "Defect Date","Reported By","Severity","Defect Status","Description","Resolution",
       ];
-      const defectRows = equipment.flatMap(e =>
+      const defectRows = all.flatMap(e =>
         (e.defects||[]).map(d => [
           e.assetNo, e.name, cat(e.category).label, e.location||"",
           e.status==="active"?"Active":"Inactive",
@@ -236,7 +262,7 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPres
         sheet("Maintenance Log", serviceHeaders, serviceRows, [12,36,16,22,14,28,28,10,50]),
         sheet("Defects", defectHeaders, defectRows, [12,36,16,22,10,14,20,10,12,50,40]),
       ]);
-      downloadBlob(blob, `zeus-equipment-register-${today}.xlsx`);
+      downloadBlob(blob, `zeus-equipment-register-${today}${all === equipment ? "" : "-selected"}.xlsx`);
     } catch (e) {
       notify("The Excel file couldn't be created. Please try again.", { kind:"error" });
     }
@@ -399,7 +425,11 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPres
       </div>
 
       <div style={{display:"grid",gap:10}}>
-        <div style={{fontSize:12,color:Z.muted}}>Showing {listed.length} of {equipment.length}</div>
+        <div style={{display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
+          <TickAll ticks={ticks} label={`Tick all ${listed.length}`} T={Z} font={font}/>
+          <div style={{fontSize:12,color:Z.muted}}>Showing {listed.length} of {equipment.length}</div>
+        </div>
+        <BulkBar ticks={ticks} actions={bulkActions} T={Z} font={font}/>
         {catFilter==="fire" && (
           <div role="note" style={{fontSize:12.5,color:Z.white,background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:10,padding:"9px 14px"}}>
             {E("🧯 ","")}Fire extinguishers are kept in {onOpenFireSafety ? <button type="button" onClick={()=>onOpenFireSafety()} style={{background:"none",border:"none",color:Z.accentLt||"#93c5fd",cursor:"pointer",fontFamily:font,fontSize:12.5,fontWeight:700,padding:0}}>Fire Safety → Extinguishers</button> : <b>Fire Safety → Extinguishers</b>}. Use this list for the other fire equipment, such as the alarm panel and hose reels.
@@ -414,6 +444,7 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPres
             const svcSoon = e.nextService && e.nextService >= today && e.nextService <= localISO(new Date(Date.now()+60*86400000)) && e.status==="active";
             return (
               <div key={e.id} style={{background:`linear-gradient(135deg,${Z.navyMd},${Z.navy})`,borderRadius:14,border:`1px solid ${openDef||svcOverdue?"rgba(239,68,68,0.3)":Z.border}`,padding:"14px 18px",display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
+                <Tick ticks={ticks} id={e.id} label={`Tick ${e.assetNo} ${e.name}`}/>
                 <span style={{fontSize:28,flexShrink:0}}>{c.icon}</span>
                 <div style={{flex:1,minWidth:180}}>
                   <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:4,flexWrap:"wrap"}}>

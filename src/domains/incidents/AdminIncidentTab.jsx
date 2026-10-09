@@ -12,6 +12,7 @@ import { IncidentTracker } from "./IncidentTracker";
 import { IncidentPhotos } from "../../shared/IncidentPhotos";
 import { INCIDENT_TYPES, ACCIDENT_CODES, NUMBER_CODES } from "../../data/seedIncidents";
 import { buildXlsx, downloadBlob, colName } from "../../lib/xlsxWriter";
+import { useTicks, Tick, TickAll, BulkBar } from "../../shared/BulkBar";
 
 /**
  * AdminIncidentTab — admin incident register.
@@ -171,8 +172,10 @@ function AdminIncidentTab({ user, incidents, setIncidents, dbDeleteIncident, sta
   // Excel export (2 sheets: Incident Log + Monthly Summary for the last 3 years).
   // Built in the browser with the portal's own writer (lib/xlsxWriter.js), so it
   // works on any network — nothing is downloaded from the internet.
-  function exportIncidentReport() {
+  // exportIncidentReport(list): just those incidents (the ticked ones); otherwise all of them.
+  function exportIncidentReport(list) {
     try {
+      const source = Array.isArray(list) ? list : incidents;
       const today = todayISO();
       const HEAD = { bold:true, color:"FFFFFF", fill:"1E3A8A", wrap:true, v:"center" };
       const head = list => list.map(v => ({ v, s: HEAD }));
@@ -189,7 +192,7 @@ function AdminIncidentTab({ user, incidents, setIncidents, dbDeleteIncident, sta
         "Post-Incident Outcome","Immediate Measures","Corrective Actions","Corrective Actions By",
       ];
 
-      const rows = [...incidents]
+      const rows = [...source]
         .sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")))
         .map(inc=>{
           const reporter = staff.find(u=>String(u.id)===String(inc.reportedBy));
@@ -249,7 +252,7 @@ function AdminIncidentTab({ user, incidents, setIncidents, dbDeleteIncident, sta
       for (let yr = currentYear; yr >= currentYear - 2; yr--) {
         for (let m = 1; m <= 12; m++) {
           const key = `${yr}-${String(m).padStart(2,"0")}`;
-          const mi = incidents.filter(i=>String(i.date||"").startsWith(key));
+          const mi = source.filter(i=>String(i.date||"").startsWith(key));
           if (mi.length === 0 && yr < currentYear) continue;
           summaryRows.push([
             new Date(yr,m-1,1).toLocaleString("default",{month:"long"}),
@@ -274,7 +277,7 @@ function AdminIncidentTab({ user, incidents, setIncidents, dbDeleteIncident, sta
           autoFilter:`A1:${colName(headers.length - 1)}${rows.length + 1}`, rowHeights:{ 0:30 } },
         { name:"Monthly Summary", cols:[14,6,12,12,18,12,8,8], rows:[head(summaryHeaders), ...summaryRows, totals], freeze:{ row:1 } },
       ]);
-      downloadBlob(blob, `zeus-incident-report-${today}.xlsx`);
+      downloadBlob(blob, `zeus-incident-report-${today}${source === incidents ? "" : "-selected"}.xlsx`);
     } catch (e) {
       notify("The Excel file couldn't be created. Please try again.", { kind:"error" });
     }
@@ -404,6 +407,13 @@ function AdminIncidentTab({ user, incidents, setIncidents, dbDeleteIncident, sta
   const expandedAt = expandedId ? filtered.findIndex(i=>i.id===expandedId) : -1;
   const limit = Math.max(shown, expandedAt + 1);
   const visible = filtered.slice(0, limit);
+  // Tick boxes for bulk actions (ticks survive filtering)
+  const ticks = useTicks(filtered.map(i=>i.id), incidents.map(i=>i.id));
+  const setClosedFor = (ids, closed) => {
+    const n = incidents.filter(i => ids.includes(String(i.id)) && !!i.closed !== closed).length;
+    setIncidents(p => p.map(i => ids.includes(String(i.id)) ? { ...i, closed } : i));
+    notify(n ? `${n} incident${n !== 1 ? "s" : ""} ${closed ? "closed" : "re-opened"}.` : `They were all ${closed ? "closed" : "open"} already.`, { kind: n ? "success" : "info" });
+  };
 
   const selStyle = {background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:10,padding:"8px 14px",color:Z.white,fontSize:13,outline:"none",fontFamily:font,cursor:"pointer"};
 
@@ -592,8 +602,17 @@ function AdminIncidentTab({ user, incidents, setIncidents, dbDeleteIncident, sta
             color:filterRiddor?"#f87171":Z.muted,cursor:"pointer",fontFamily:font,fontSize:13,fontWeight:filterRiddor?700:400}}>
           🏥 RIDDOR only
         </button>
-        <span style={{color:Z.muted,fontSize:12,marginLeft:"auto",whiteSpace:"nowrap"}}>{filtered.length} of {incidents.length}</span>
+        <span style={{marginLeft:"auto"}}><TickAll ticks={ticks} label={`Tick all ${filtered.length}`} T={Z} font={font}/></span>
+        <span style={{color:Z.muted,fontSize:12,whiteSpace:"nowrap"}}>{filtered.length} of {incidents.length}</span>
       </div>
+
+      <BulkBar ticks={ticks} T={Z} font={font} actions={[
+        { label: "✓ Mark as closed", run: async ids => {
+            if (!(await ask({ title: `Close ${ids.length} incident${ids.length!==1?"s":""}?`, message: "Only close incidents whose investigation and actions are finished. You can re-open any of them later.", ok: "Close them" }))) return false;
+            setClosedFor(ids, true); } },
+        { label: "↩ Re-open", run: ids => setClosedFor(ids, false) },
+        { label: "⬇ Export ticked to Excel", run: ids => { exportIncidentReport(incidents.filter(i => ids.includes(String(i.id)))); return false; } },
+      ]}/>
 
       {/* Incident list */}
       {filtered.length===0 ? (
@@ -616,6 +635,7 @@ function AdminIncidentTab({ user, incidents, setIncidents, dbDeleteIncident, sta
                 <div onClick={()=>setExpandedId(isOpen?null:inc.id)}
                   style={{padding:"14px 18px",background:isOpen?`rgba(37,99,235,0.07)`:`linear-gradient(135deg,${Z.navyMd},${Z.navy})`,
                     display:"flex",alignItems:"center",gap:12,cursor:"pointer",userSelect:"none",flexWrap:"wrap"}}>
+                  <Tick ticks={ticks} id={inc.id} label={`Tick incident ${inc.date} ${inc.location}`}/>
                   <span style={{fontSize:20,flexShrink:0}}>{ti.icon}</span>
                   <div style={{flex:1,minWidth:160}}>
                     <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:4,flexWrap:"wrap"}}>

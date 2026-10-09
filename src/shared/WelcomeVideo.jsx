@@ -2,7 +2,7 @@ import React from "react";
 import { sb, SUPABASE_URL } from "../lib/supabase";
 import { SlideVideo } from "./SlideVideo";
 import { parseVideoLink } from "../lib/videoLink";
-import { MAX_UPLOAD_MB } from "../domains/training/slideImport";
+import { MAX_UPLOAD_MB } from "../lib/uploadLimits";
 import { notify, ask } from "./Feedback";
 import { auditEvent } from "../lib/audit";
 

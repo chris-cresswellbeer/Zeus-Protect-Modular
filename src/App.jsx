@@ -21,7 +21,7 @@
  *      src/domains/* (most are lazy-loaded to keep the first download small).
  *
  * FILE MAP (search for these banners)
- *   SortableStatCard ............ draggable dashboard tile wrapper
+ *   SortableStatGrid ............ draggable dashboard cards (shared/SortableStatGrid.jsx, lazy)
  *   ── state declarations ....... top of App()
  *   ── Load all persisted data .. loadAll() — the big Promise.allSettled
  *   ── Auto-sync watchers ....... useEffects that save whole collections
@@ -43,7 +43,7 @@
  *   ABOVE the `if (!dbReady) return` early return (≈ the "Show loading screen"
  *   banner). Adding a hook below it will crash with "Rendered more hooks than
  *   during the previous render". Never call hooks inside .map(), IIFEs or
- *   conditionals — extract a module-level component instead (see SortableStatCard).
+ *   conditionals — extract a module-level component instead (see shared/SortableStatGrid.jsx).
  *
  * KNOWN TECHNICAL DEBT (documented, not yet addressed)
  *   • Auto-sync effects re-save the ENTIRE collection on any change (e.g. every
@@ -51,17 +51,14 @@
  *     refactor is planned.
  *   • No protection against two admins editing the same record at once
  *     (last write wins).
- *   • A few save helpers still use delete-then-insert (dbSaveAssigns,
- *     dbSaveDocAssignments, dbSaveDseReport) — a failure between the two
- *     calls can leave rows missing.
+ *   • Saves never clear a person's rows and write them back: training and document
+ *     assignments and DSE assessments compare with what's stored and add, change or
+ *     remove only the differences, so a dropped connection can't lose records.
  *   • This file is very large (~4,000 lines). Staff/admin tab bodies that are
  *     still inline here are good candidates for extraction into src/domains/.
  * ═══════════════════════════════════════════════════════════════════════════
  */
 import React, { useState, useEffect, useRef } from "react";
-import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
-import { SortableContext, rectSortingStrategy, arrayMove, useSortable } from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
 // ── Seed / reference data (src/data). Used as defaults until Supabase has rows. ──
 import { EXT_CERT_TYPES } from "./data/seedExtCerts";
 import { INSP_TYPES } from "./data/seedInspections";
@@ -71,12 +68,39 @@ import { TRAINING_MODULES } from "./data/seedTraining";
 // ── Domain tabs. `React.lazy` = the tab's code is only downloaded the first time it is
 // opened (code-splitting). Each lazy tab must be rendered inside <React.Suspense>.
 // The `.then(m => ({ default: m.X }))` adapts a NAMED export to what React.lazy expects.
+// ── Parts of the portal loaded only when first shown ─────────────────────────
+// Each is a normal component name, so the code that uses it doesn't change; the file
+// itself is downloaded the first time it appears. Keeps the first download small
+// (most people never open most of these on a given day). Hooks: none here.
+const LAZY_PAGE  = <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif", color: "#94a3b8", background: "#060d2e" }}>Loading…</div>;
+const LAZY_BLOCK = <div style={{ padding: 40, textAlign: "center", color: "#94a3b8" }}>Loading…</div>;
+function lazyPart(loader, fallback = null) {
+  const L = React.lazy(loader);
+  const Part = props => <React.Suspense fallback={fallback}><L {...props}/></React.Suspense>;
+  return Part;
+}
+const RecordCompletionModal = lazyPart(() => import("./domains/training/RecordCompletion").then(m => ({ default: m.RecordCompletionModal })), null);
+const ImportPriorTrainingModal = lazyPart(() => import("./domains/training/RecordCompletion").then(m => ({ default: m.ImportPriorTrainingModal })), null);
+const GroupSessionModal = lazyPart(() => import("./domains/training/RecordCompletion").then(m => ({ default: m.GroupSessionModal })), null);
+const DSEAssessment = lazyPart(() => import("./domains/dse/DSEAssessment").then(m => ({ default: m.DSEAssessment })), LAZY_PAGE);
+const MachineryEquipmentPage = lazyPart(() => import("./domains/machinery/MachineryEquipmentPage").then(m => ({ default: m.MachineryEquipmentPage })), LAZY_BLOCK);
+const QuickReportModal = lazyPart(() => import("./domains/incidents/QuickReportModal").then(m => ({ default: m.QuickReportModal })), null);
+const EditStaffModal = lazyPart(() => import("./domains/staff/EditStaffModal").then(m => ({ default: m.EditStaffModal })), null);
+const ModulePreviewModal = lazyPart(() => import("./domains/training/ModulePreviewModal").then(m => ({ default: m.ModulePreviewModal })), null);
+const HotspotActivity = lazyPart(() => import("./domains/training/HotspotActivity").then(m => ({ default: m.HotspotActivity })), LAZY_BLOCK);
+const TempPasswordsModal = lazyPart(() => import("./shared/TempPasswordsModal").then(m => ({ default: m.TempPasswordsModal })), null);
+const SignInAccountsPanel = lazyPart(() => import("./domains/staff/SignInAccountsPanel").then(m => ({ default: m.SignInAccountsPanel })), LAZY_BLOCK);
+const MobileApp = lazyPart(() => import("./mobile/MobileApp.jsx").then(m => ({ default: m.default })), LAZY_PAGE);
+const CertificateModal = lazyPart(() => import("./domains/training/CertificateModal").then(m => ({ default: m.CertificateModal })), null);
+const DocBundles = lazyPart(() => import("./domains/documents/DocBundles").then(m => ({ default: m.DocBundles })), LAZY_BLOCK);
+const MyBundles = lazyPart(() => import("./domains/documents/DocBundles").then(m => ({ default: m.MyBundles })));
+const LazySortableStatGrid = React.lazy(() => import("./shared/SortableStatGrid"));
+
 const LazyContractorsTab = React.lazy(() => import("./domains/contractors/ContractorsTab").then(m => ({ default: m.ContractorsTab })));
 const LazyMyTeamTab = React.lazy(() => import("./domains/manager/MyTeamTab").then(m => ({ default: m.MyTeamTab })));
 const LazyAuditTrailTab = React.lazy(() => import("./domains/audit/AuditTrailTab").then(m => ({ default: m.AuditTrailTab })));
 const LazyCoshhTab = React.lazy(() => import("./domains/coshh/CoshhTab").then(m => ({ default: m.CoshhTab })));
 import { DocCard } from "./domains/documents/DocCard";
-import { DocBundles, MyBundles } from "./domains/documents/DocBundles";
 import { SlideVideo } from "./shared/SlideVideo";
 import { parseRoute, routeHash, routeAllowed } from "./lib/router";
 import { notify, ask, notifyAfterReload, setFeedbackTheme } from "./shared/Feedback";
@@ -88,13 +112,10 @@ import { openFile } from "./lib/fileAccess";
 import { ScrollNav } from "./shared/ScrollNav";
 import { BackupPanel, BACKUP_DUE_DAYS } from "./domains/audit/BackupPanel";
 import { lastBackupAt } from "./lib/backup";
-import { RecordCompletionModal, ImportPriorTrainingModal, GroupSessionModal } from "./domains/training/RecordCompletion";
 import { EvidenceLinks, AttachEvidenceModal, SessionsModal } from "./domains/training/TrainingEvidence";
 import { uploadEvidence, listSessions, sessionKey, evidenceLabel } from "./domains/training/evidence";
 import { teamOf } from "./domains/manager/team";
 import { isPassed, scoreText, recordedText, passMarkOf } from "./domains/training/completion";
-import { DSEAssessment } from "./domains/dse/DSEAssessment";
-import { MachineryEquipmentPage } from "./domains/machinery/MachineryEquipmentPage";
 import { DSE_RENEWAL_MONTHS, DSE_QUESTION_COUNT } from "./data/seedDse";
 const LazyStaffDSETab = React.lazy(() => import("./domains/dse/StaffDSETab").then(m => ({ default: m.StaffDSETab })));
 const LazyEquipmentTrackerTab = React.lazy(() => import("./domains/equipment/EquipmentTrackerTab").then(m => ({ default: m.EquipmentTrackerTab })));
@@ -103,7 +124,6 @@ const LazyFirstAidRegisterTab = React.lazy(() => import("./domains/firstAid/Firs
 const LazyAdminIncidentTab = React.lazy(() => import("./domains/incidents/AdminIncidentTab").then(m => ({ default: m.AdminIncidentTab })));
 const LazyIncidentTracker = React.lazy(() => import("./domains/incidents/IncidentTracker").then(m => ({ default: m.IncidentTracker })));
 const LazyInvestigationTab = React.lazy(() => import("./domains/incidents/InvestigationTab").then(m => ({ default: m.InvestigationTab })));
-import { QuickReportModal } from "./domains/incidents/QuickReportModal";
 import { isIncompleteQuickReport, myIncompleteQuickReports, isQuickReportOverdue, quickReportDueLabel } from "./domains/incidents/quickReportStatus";
 const LazySiteInspectionsTab = React.lazy(() => import("./domains/inspections/SiteInspectionsTab").then(m => ({ default: m.SiteInspectionsTab })));
 const LazySiteSettingsTab = React.lazy(() => import("./domains/settings/SiteSettingsTab").then(m => ({ default: m.SiteSettingsTab })));
@@ -113,15 +133,12 @@ const LazyPermitsTab = React.lazy(() => import("./domains/permits/PermitsTab").t
 const LazyRiskAssessmentTab = React.lazy(() => import("./domains/riskAssessments/RiskAssessmentTab").then(m => ({ default: m.RiskAssessmentTab })));
 import { generateRAHtml } from "./domains/riskAssessments/generateRAHtml";
 const LazyAccountTab = React.lazy(() => import("./domains/staff/AccountTab").then(m => ({ default: m.AccountTab })));
-import { EditStaffModal } from "./domains/staff/EditStaffModal";
 const LazyStaffActionsTab = React.lazy(() => import("./domains/staff/StaffActionsTab").then(m => ({ default: m.StaffActionsTab })));
 const LazyCreateModuleTab = React.lazy(() => import("./domains/training/CreateModuleTab").then(m => ({ default: m.CreateModuleTab })));
-import { ModulePreviewModal } from "./domains/training/ModulePreviewModal";
 const LazyReportsTab = React.lazy(() => import("./domains/training/ReportsTab").then(m => ({ default: m.ReportsTab })));
-import { generateStaffPDF } from "./domains/training/generateStaffPDF";
 import { isHtmlContent, ensureRteStyles } from "./domains/training/slideTextUtils";
-import { HotspotActivity } from "./domains/training/HotspotActivity";
 // ── Core libraries, shared UI and theme ──
+import { generateStaffPDF } from "./domains/training/generateStaffPDF";   // kept up front: it opens a window, which must happen straight from the click
 import { sanitizeHtml } from "./lib/sanitizeHtml";
 import { EXPIRY_WARNING_DAYS, getExpiryStatus, localISO, todayISO, localDateTime } from "./lib/dates";
 import { EmojiCtx, E, syncEmojiMode } from "./lib/emoji";
@@ -129,8 +146,6 @@ import { startPlainSymbols, stopPlainSymbols } from "./lib/plainSymbols";
 import { sb, hashPassword, DEFAULT_HASH, dbWrite } from "./lib/supabase";
 import { AUTH_MODE, signIn, signOut, meta as authMeta, adminCall, makeTempPassword, checkPassword as authCheckPassword, changeOwnPassword } from "./lib/auth";
 import { ForcePasswordChange } from "./shared/ForcePasswordChange";
-import { TempPasswordsModal } from "./shared/TempPasswordsModal";
-import { SignInAccountsPanel } from "./domains/staff/SignInAccountsPanel";
 import { uploadPhotos, PHOTO_BUCKET } from "./lib/photos";
 import { HelpTip } from "./shared/HelpTip";
 import { ZeusLogo, ZeusProtectLogo, ZEUS_LOGO_LIGHT_SRC } from "./shared/Logo";
@@ -138,12 +153,11 @@ import { NotificationBell } from "./shared/NotificationBell";
 import { useWindowWidth, MobileCard, MobileCardRow } from "./shared/hooks";
 import { Pill, Avatar, Bar } from "./shared/primitives";
 import { Z, getThemeTokens, getTheme, isDarkTheme, rememberTheme, oppositeTheme } from "./theme/tokens";
-import MobileApp from "./mobile/MobileApp.jsx";
-import { NewVersionModal } from "./shared/NewVersionModal";
-import { CertificateModal } from "./domains/training/CertificateModal";
 import { applyLightThemeFix, isLightTheme } from "./lib/lightThemeFix";
 import { mergeInvestigation, changedSince } from "./domains/incidents/investigationMerge";
 import { QuickSearch } from "./shared/QuickSearch";
+import { NewVersionModal } from "./shared/NewVersionModal";   // also used by DocCard, so it can't load separately
+import { ticksFrom, Tick, TickAll, BulkBar } from "./shared/BulkBar";
 import { NavMenu } from "./shared/NavMenu";
 import { useSort, sortRows, SortButton } from "./shared/Sortable";
 import { getProgress, saveProgress, clearProgress, resumeLabel } from "./lib/moduleProgress";
@@ -158,31 +172,6 @@ import { setAuditUser, primeAudit, primeAuditList, primeAuditMap, auditRecord, a
 import { pingIncidentAlert } from "./lib/incidentAlert";
 import { sameName } from "./lib/openActions";
 
-// Wraps a dashboard stat card to make it draggable. Only the small handle in
-// the corner starts a drag — the rest of the card keeps its own onClick
-// (navigating to the relevant tab) working exactly as before. Defined at
-// module scope (not inside a .map()) so useSortable is called consistently
-// once per rendered instance, per the Rules of Hooks.
-function SortableStatCard({ id, children }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.4 : 1,
-    zIndex: isDragging ? 20 : "auto",
-    position: "relative",
-  };
-  return (
-    <div ref={setNodeRef} style={style} {...attributes}>
-      <span
-        {...listeners}
-        title="Drag to reorder"
-        style={{ position: "absolute", top: 10, right: 10, zIndex: 5, cursor: "grab", fontSize: 13, color: "var(--zp-drag-handle, rgba(255,255,255,0.35))", userSelect: "none", touchAction: "none", padding: "4px 6px", lineHeight: 1 }}
-      >⠿⠿</span>
-      {children}
-    </div>
-  );
-}
 
 /**
  * The whole application. See the file header for the render order and conventions.
@@ -211,6 +200,13 @@ const mapIncidentRow = (r) => ({
 });
 
 // Key-order-independent JSON, used to tell whether a record really changed.
+/** A short fingerprint of a history table: its row ids, plus `recorded` (attached evidence),
+ *  which can change on an existing row. null if any row has no id (then always re-read). */
+function idsKey(rows) {
+  if (!Array.isArray(rows) || rows.some(r => r == null || r.id == null)) return null;
+  return rows.map(r => `${r.id}:${r.recorded == null ? "" : stableJSON(r.recorded)}`).sort().join(",");
+}
+
 function stableJSON(v) {
   if (v === undefined) return "null";
   if (v === null || typeof v !== "object") return JSON.stringify(v);
@@ -320,7 +316,6 @@ export default function App() {
   // ── Navigation: atab = active ADMIN tab key, stab = active STAFF tab key (see the render sections) ──
   const [atab,    setAtabRaw] = useState("dashboard");
   const [dashboardLayouts, setDashboardLayouts] = useState({}); // { [userId]: [cardId, ...] } — admin's saved stat-card order
-  const statDragSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
   const [adminReportView, setAdminReportView] = useRemembered("admin.reportView", "staff");
   const [focusIncidentId, setFocusIncidentId] = useState(null);
   const [focusContractorId, setFocusContractorId] = useState(null); // quick search → open this contractor
@@ -423,6 +418,7 @@ export default function App() {
   const [staffFilterManager,  setStaffFilterManager]  = useRemembered("staff.manager", "all");
   const [staffFilterSearch,   setStaffFilterSearch]   = useState("");
   const [staffSel, setStaffSel] = useState([]); // Staff list: ticked people (string ids) for bulk actions
+  const [docSel, setDocSel] = useState([]);     // H&S Documents: ticked documents for bulk actions
   const [staffSort, setStaffSortBy] = useSort("staff", { by: "name", dir: "asc" }); // Staff list column sort (shared/Sortable.jsx)
   // Due dates on assigned training (lib/dueDates.js): { uid: { mid: "YYYY-MM-DD" } }, from training_assigns.due_date
   const [dueDates, setDueDates] = useState({});
@@ -649,9 +645,10 @@ export default function App() {
           sb.from("custom_machine_types").select("*"),
           sb.from("dashboard_layout").select("*"),
           sb.from("coshh_assessments").select("*"),
-          sb.from("doc_ack_history").select("*"),
-          sb.from("training_completion_history").select("*"),
-          sb.from("module_versions").select("*"),
+          // history tables load just AFTER the first screen (loadHistory below) — they grow fastest
+          Promise.resolve({ data: null, error: null }),
+          Promise.resolve({ data: null, error: null }),
+          Promise.resolve({ data: null, error: null }),
           sb.from("doc_bundles").select("*"),
         ]);
 
@@ -873,10 +870,8 @@ export default function App() {
         }
 
         // Custom chemicals
-        // Versioning history (read-only lists; appended to as people complete/read things)
-        const dahRows = rows(dahRes); if (dahRows && dahRows.length) setDocAckHistory(dahRows);
-        const chRows  = rows(chRes);  if (chRows && chRows.length) setCompHistory(chRows);
-        const mvRows  = rows(mvRes);  if (mvRows && mvRows.length) setModuleVersions(mvRows);
+        // Versioning history: loaded by loadHistory() once the first screen is showing.
+        void dahRes; void chRes; void mvRes;
 
         // COSHH assessments (one per substance code)
         const caRows = rows(caRes);
@@ -920,7 +915,22 @@ export default function App() {
         console.error("Supabase load error:", e);
       } finally {
         setDbReady(true);
+        loadHistory();   // not awaited: the portal is usable while this arrives
       }
+    }
+    // Stage 2: the history tables (every quiz result and every "I've read this", and old
+    // module versions). They only grow, aren't needed for the first screen, and on a busy
+    // site are the biggest tables. Anything added in this browser meanwhile is kept.
+    async function loadHistory() {
+      const [dah, ch, mv] = await Promise.all([
+        sb.from("doc_ack_history").select("*"), sb.from("training_completion_history").select("*"), sb.from("module_versions").select("*"),
+      ]);
+      const ok = r => r && !r.error && Array.isArray(r.data);
+      const keep = (fresh, cur, key) => { const have = new Set(fresh.map(key)); return [...fresh, ...cur.filter(x => !have.has(key(x)))]; };
+      if (ok(dah)) setDocAckHistory(cur => keep(dah.data, cur, h => `${h.user_id}|${h.doc_id}|${h.version}|${h.date}`));
+      if (ok(ch)) { setCompHistory(cur => keep(ch.data, cur, h => `${h.user_id}|${h.module_id}|${h.date}|${h.score}`)); historyIdsRef.current = idsKey(ch.data); }
+      if (ok(mv)) setModuleVersions(cur => keep(mv.data, cur, v => String(v.id)));
+      historyReadyRef.current = true;
     }
     loadAllRef.current = loadAll;
     if (AUTH_MODE !== "supabase") loadAll();
@@ -984,6 +994,9 @@ export default function App() {
   // saved in between, the two sets of changes are combined (investigationMerge.js)
   // instead of the last save silently wiping out the other.
   const investigationBaseRef = useRef(new Map());
+  const dseSavedRef = useRef(new Map());
+  const historyReadyRef = useRef(false);   // stage-2 history tables loaded (loadHistory)
+  const historyIdsRef = useRef(null);      // ids of the training history rows last read (refresh skips it if unchanged)   // last saved copy of each person's DSE assessments
   const equipmentSavedRef = useRef(new Map());   // non-admin sessions: last saved copy of each equipment item
   const refreshBusyRef = useRef(false);
   // Training/reading records this browser just changed: key → time ("c:uid:mid", "k:uid:docId", "a:uid").
@@ -1003,6 +1016,7 @@ export default function App() {
     incidents.forEach(i => incidentSavedRef.current.set(String(i.id), stableJSON(i)));
     Object.entries(investigations).forEach(([id, d]) => { investigationSavedRef.current.set(String(id), stableJSON(d)); investigationBaseRef.current.set(String(id), d); });
     equipment.forEach(e => equipmentSavedRef.current.set(String(e.id), stableJSON(e)));
+    Object.entries(dseReports).forEach(([uid, reps]) => dseSavedRef.current.set(String(uid), stableJSON(reps)));
     _ready.current = true;
   }, [dbReady]); // eslint-disable-line
 
@@ -1039,9 +1053,22 @@ export default function App() {
     if (!_ready.current || refreshBusyRef.current) return;
     refreshBusyRef.current = true;
     try {
+      // Training history only grows, and can be the biggest table: read just its row ids,
+      // and the full rows only when they changed (or the table has no ids to compare).
+      const historyRead = async () => {
+        if (!historyReadyRef.current) return { data: null, error: "not loaded yet" };
+        const ids = await sb.from("training_completion_history").select("id,recorded");   // every page; recorded = evidence, which can change
+        if (!ids.error && Array.isArray(ids.data)) {
+          const k = idsKey(ids.data);
+          if (k !== null && k === historyIdsRef.current) return { data: null, error: "unchanged" };
+        }
+        const full = await sb.from("training_completion_history").select("*");
+        if (!full.error && Array.isArray(full.data)) historyIdsRef.current = idsKey(full.data);
+        return full;
+      };
       const [iRes, invRes, cRes, ackRes, aRes, hRes, daRes, bdRes] = await Promise.all([sb.from("incidents").select("*"), sb.from("investigations").select("*"),
         sb.from("training_completions").select("*"), sb.from("doc_acknowledgements").select("*"), sb.from("training_assigns").select("*"),
-        sb.from("training_completion_history").select("*"), sb.from("doc_assignments").select("*"), sb.from("doc_bundles").select("*")]);
+        historyRead(), sb.from("doc_assignments").select("*"), sb.from("doc_bundles").select("*")]);
       // Training completions, assignments and document confirmations made elsewhere
       // (a member of staff finishing a module, a manager assigning one) appear here
       // without a reload. With the old sign-in an empty table means "use the demo data".
@@ -1134,8 +1161,12 @@ export default function App() {
 
   useEffect(() => { if (!_ready.current) return;
     Object.entries(dseReports).filter(([uid]) => writesAll() || String(uid) === String(user && user.id)).forEach(([uid, reports]) => {
+      // only people whose assessments changed since the last save (not everyone, every time)
+      const j = stableJSON(reports);
+      if (dseSavedRef.current.get(String(uid)) === j) return;
+      dseSavedRef.current.set(String(uid), j);
       auditRecord("dse_report", uid, reports, auditNameOf(uid));
-      dbSaveDseReport(Number(uid), reports);
+      dbSaveDseReport(Number(uid), reports).then(ok => { if (ok === false) dseSavedRef.current.delete(String(uid)); });   // retried on the next change
     });
   }, [dseReports]); // eslint-disable-line
 
@@ -1530,10 +1561,32 @@ export default function App() {
   }
 
   // Replaces the full list of staff a document is assigned to (delete-then-insert).
-  async function dbSaveDocAssignments(docId, userIds) {
+  // Saves for the same document / person run one after another (quick tick-untick
+  // clicks can't overlap and leave the database different from the screen).
+  const saveQueueRef = useRef(new Map());
+  const inTurn = (key, fn) => {
+    const q = saveQueueRef.current;
+    const next = (q.get(key) || Promise.resolve()).catch(() => {}).then(fn);
+    q.set(key, next);
+    next.finally(() => { if (q.get(key) === next) q.delete(key); });
+    return next;
+  };
+  // Compare with what's stored and change only the differences (never clear and rewrite,
+  // which could lose everyone's assignment if the connection dropped in between).
+  function dbSaveDocAssignments(docId, userIds) { return inTurn(`d:${docId}`, () => saveDocAssignmentsNow(docId, userIds)); }
+  async function saveDocAssignmentsNow(docId, userIds) {
     markWrite(`d:${docId}`);
-    await dbWrite(sb.from("doc_assignments").delete().eq("doc_id", String(docId)), "doc assignments clear");
-    if (userIds.length) await dbWrite(sb.from("doc_assignments").insert(userIds.map(uid => ({ doc_id: String(docId), user_id: String(uid) }))), "doc assignments");
+    const sid = String(docId);
+    const want = [...new Set((userIds || []).map(String))];
+    const { data, error } = await sb.from("doc_assignments").query(`select=user_id&doc_id=eq.${encodeURIComponent(sid)}`);
+    if (error) { notify("Document assignments weren't saved. Please try again.", { kind: "error" }); return false; }
+    const have = new Set((data || []).map(r => String(r.user_id)));
+    const add = want.filter(u => !have.has(u));
+    const drop = [...have].filter(u => !want.includes(u));
+    let ok = true;
+    if (add.length) ok = (await dbWrite(sb.from("doc_assignments").insert(add.map(u => ({ doc_id: sid, user_id: u }))), "doc assignments")) !== false && ok;
+    for (const u of drop) ok = (await dbWrite(sb.from("doc_assignments").delete().match({ doc_id: sid, user_id: u }), "doc assignments remove")) !== false && ok;
+    return ok;
   }
 
   // Saves document metadata, uploading the file first if one is supplied.
@@ -1671,11 +1724,25 @@ export default function App() {
 
   // Rewrites ALL of a user's DSE reports; report_idx = position in the array (so order matters —
   // admin responses reference reports by this index).
-  async function dbSaveDseReport(userId, reports) {
-    await dbWrite(sb.from("dse_reports").delete().eq("user_id", userId), "DSE reports clear");
-    if (reports.length) {
-      await dbWrite(sb.from("dse_reports").insert(reports.map((r, i) => ({ user_id: String(userId), report_idx: i, data: r }))), "DSE reports");
+  // One row per assessment (report_idx = position). Compare with what's stored: add new
+  // assessments, update changed ones, remove only rows past the end — never clear first.
+  function dbSaveDseReport(userId, reports) { return inTurn(`dse:${userId}`, () => saveDseReportNow(userId, reports)); }
+  async function saveDseReportNow(userId, reports) {
+    const sid = String(userId);
+    const { data, error } = await sb.from("dse_reports").query(`select=report_idx,data&user_id=eq.${encodeURIComponent(sid)}`);
+    if (error) { notify("The DSE assessment wasn't saved. Please try again.", { kind: "error" }); return false; }
+    const stored = new Map((data || []).map(r => [Number(r.report_idx), r.data]));
+    const list = reports || [];
+    let ok = true;
+    const add = list.map((r, i) => [r, i]).filter(([, i]) => !stored.has(i));
+    if (add.length) ok = (await dbWrite(sb.from("dse_reports").insert(add.map(([r, i]) => ({ user_id: sid, report_idx: i, data: r }))), "DSE reports")) !== false && ok;
+    for (const [r, i] of list.map((r, i) => [r, i]).filter(([, i]) => stored.has(i))) {
+      if (stableJSON(stored.get(i)) === stableJSON(r)) continue;
+      ok = (await dbWrite(sb.from("dse_reports").update({ data: r }).match({ user_id: sid, report_idx: i }), "DSE report")) !== false && ok;
     }
+    const extra = [...stored.keys()].filter(i => i >= list.length);
+    for (const i of extra) ok = (await dbWrite(sb.from("dse_reports").delete().match({ user_id: sid, report_idx: i }), "DSE reports remove")) !== false && ok;
+    return ok;
   }
 
   async function dbSaveDseAdminResponse(userId, reportIdx, issueIdx, rec) {
@@ -2715,7 +2782,7 @@ export default function App() {
       <>
       {/* Certificate from "View Certificate" after a pass — this screen must render it
           itself, because the staff views (which also show it) aren't on screen here. */}
-      <CertificateModal cert={cert} user={user} onClose={() => setCert(null)} T={T} font={font}/>
+      {cert && <CertificateModal cert={cert} user={user} onClose={() => setCert(null)} T={T} font={font}/>}
       <div style={{minHeight:"100vh",background:T.bg,fontFamily:font,color:T.white,overflowX:"hidden"}}>
 
         {/* Celebration Overlay */}
@@ -3066,7 +3133,7 @@ export default function App() {
   }
   // Certificate viewer / print: domains/training/CertificateModal.jsx. Shown whenever
   // `cert` is set — in the staff views AND in the module player (see below).
-  const CertModal = () => <CertificateModal cert={cert} user={user} onClose={() => setCert(null)} T={T} font={font}/>;
+  const CertModal = () => cert ? <CertificateModal cert={cert} user={user} onClose={() => setCert(null)} T={T} font={font}/> : null;
 
   // ══════════════════════════════════════════════════════════════════════════
   // STAFF PORTAL
@@ -4585,24 +4652,16 @@ export default function App() {
                   const order = [...savedOrder, ...defaultOrder.filter(id => !savedOrder.includes(id))];
                   const nodeById = Object.fromEntries(statCardDefs.map(c => [c.id, c.node]));
 
-                  const handleStatDragEnd = (event) => {
-                    const { active, over } = event;
-                    if (!over || active.id === over.id) return;
-                    const newOrder = arrayMove(order, order.indexOf(active.id), order.indexOf(over.id));
+                  const onReorder = newOrder => {
                     setDashboardLayouts(prev => ({ ...prev, [String(user.id)]: newOrder }));
                     dbWrite(sb.from("dashboard_layout").upsert({ user_id: String(user.id), card_order: newOrder }, { onConflict: "user_id" }), "dashboard layout");
                   };
-
+                  const gridStyle = {display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,1fr)",gap:14,marginBottom:28};
+                  // the drag-and-drop grid loads separately; until then the same cards show without handles
                   return (
-                    <DndContext sensors={statDragSensors} collisionDetection={closestCenter} onDragEnd={handleStatDragEnd}>
-                      <SortableContext items={order} strategy={rectSortingStrategy}>
-                        <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,1fr)",gap:14,marginBottom:28}}>
-                          {order.map(id => (
-                            <SortableStatCard key={id} id={id}>{nodeById[id]}</SortableStatCard>
-                          ))}
-                        </div>
-                      </SortableContext>
-                    </DndContext>
+                    <React.Suspense fallback={<div style={gridStyle}>{order.map(id => <div key={id}>{nodeById[id]}</div>)}</div>}>
+                      <LazySortableStatGrid order={order} nodeById={nodeById} onReorder={onReorder} gridStyle={gridStyle}/>
+                    </React.Suspense>
                   );
                 })()}
 
@@ -5735,6 +5794,34 @@ export default function App() {
               {/* Document list: folder + search */}
               {(()=>{ const q=String(docSearch||"").trim().toLowerCase(); const inFolder=docs.filter(d=>docFolder==="all"||(d.type||"Document")===docFolder);
                 const shownDocs=q?inFolder.filter(d=>[d.title,d.description,d.fileName,d.type].some(v=>String(v||"").toLowerCase().includes(q))):inFolder;
+                // tick boxes + bulk actions (no bulk delete: deleting also removes read confirmations)
+                const docTicks = ticksFrom(docSel, setDocSel, shownDocs.map(d=>d.id), docs.map(d=>d.id));
+                const DOC_FOLDERS = ["Policy","Procedure","Guidance","User Manual","Risk Assessment","COSHH","Report","Presentation","Document"];
+                const ticked = ids => docs.filter(d=>ids.includes(String(d.id)));
+                const saveDocsMeta = async (ids, change, msg) => {
+                  const list = ticked(ids).filter(d=>!d.raId).map(d=>({ ...d, ...change }));
+                  const skipped = ids.length - list.length;
+                  setDocs(p=>p.map(d=>list.find(x=>x.id===d.id)||d));
+                  await Promise.all(list.map(d=>dbSaveDoc(d, null)));   // a failed save shows its own message
+                  notify(`${msg} (${list.length} document${list.length!==1?"s":""})${skipped?`. ${skipped} made from a risk assessment ${skipped===1?"was":"were"} left as ${skipped===1?"it is":"they are"}.`:"."}`, { kind:"success" });
+                };
+                const docActions = [
+                  { label: "📁 Move to folder…", run: async ids => {
+                      const v = await ask({ title:`Move ${ids.length} document${ids.length!==1?"s":""}`, ok:"Move", fields:[{ id:"type", label:"Folder", required:true, options: DOC_FOLDERS.map(f=>({ value:f, label:f })) }] });
+                      if (!v) return false; await saveDocsMeta(ids, { type: v.type }, `Moved to ${v.type}`); } },
+                  { label: "📅 Set review date…", run: async ids => {
+                      const v = await ask({ title:`Review date for ${ids.length} document${ids.length!==1?"s":""}`, ok:"Set date", fields:[{ id:"date", label:"Next review", type:"date", required:true }] });
+                      if (!v || !v.date) return false; await saveDocsMeta(ids, { reviewDate: v.date }, `Review date set to ${v.date}`); } },
+                  ...(docBundles.length ? [{ label: "📦 Add to bundle…", run: async ids => {
+                      const v = await ask({ title:`Add ${ids.length} document${ids.length!==1?"s":""} to a bundle`, ok:"Add", message:"Anyone the bundle has been given to is assigned the added documents too.",
+                        fields:[{ id:"bundle", label:"Bundle", required:true, options: docBundles.map(b=>({ value:b.id, label:b.name })) }] });
+                      if (!v) return false;
+                      const b = docBundles.find(x=>x.id===v.bundle); if (!b) return false;
+                      const add = ids.filter(id=>!b.docIds.map(String).includes(id));
+                      if (!add.length) { notify(`They're all in "${b.name}" already.`, { kind:"info" }); return; }
+                      if (await saveBundle({ ...b, docIds:[...b.docIds, ...add] }) !== false) notify(`${add.length} document${add.length!==1?"s":""} added to "${b.name}".`, { kind:"success" });
+                    } }] : []),
+                ];
                 return docs.length===0
                 ? <div style={{textAlign:"center",padding:40,color:T.muted,fontSize:14}}>No documents uploaded yet.</div>
                 : (
@@ -5742,9 +5829,11 @@ export default function App() {
                     <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
                       <input aria-label="Search documents" value={docSearch} onChange={e=>setDocSearch(e.target.value)} placeholder="🔍 Search documents by title, description or file name…"
                         style={{flex:1,minWidth:240,background:T.overlay,border:`1px solid ${T.borderMd}`,borderRadius:10,padding:"9px 14px",color:T.white,fontSize:13,outline:"none",fontFamily:font}}/>
+                      <TickAll ticks={docTicks} label={`Tick all ${shownDocs.length}`} T={T} font={font}/>
                       <span style={{fontSize:12,color:T.muted,whiteSpace:"nowrap"}}>{shownDocs.length} of {docs.length}</span>
                       {q && <button type="button" onClick={()=>setDocSearch("")} style={{background:"none",border:"none",color:T.accentLt,cursor:"pointer",fontFamily:font,fontSize:12,fontWeight:700}}>Clear</button>}
                     </div>
+                    <BulkBar ticks={docTicks} actions={docActions} T={T} font={font}/>
                     {shownDocs.length===0 && <div style={{textAlign:"center",padding:24,color:T.muted,fontSize:13}}>No documents match.</div>}
                     {shownDocs.map(d=>{
                       const extIcons={PDF:"📕",DOCX:"📘",DOC:"📘",XLSX:"📗",XLS:"📗",PPTX:"📙",PPT:"📙",PNG:"🖼️",JPG:"🖼️",JPEG:"🖼️",TXT:"📄",CSV:"📊"};
@@ -5755,7 +5844,7 @@ export default function App() {
                       const unreadCount = assignedStaff.length - readCount;
 
                       return (
-                        <DocCard key={d.id} d={d} staff={staff} assignedIds={assignedIds} assignedStaff={assignedStaff} readCount={readCount} unreadCount={unreadCount} icon={icon} docAcknowledgements={docAcknowledgements} setDocAcknowledgements={setDocAcknowledgements} setDocAssignments={setDocAssignments} dbSaveDocAssignments={dbSaveDocAssignments} setDocs={setDocs} dbDeleteDoc={dbDeleteDoc} dbSaveDoc={dbSaveDoc} setPreviewDoc={setPreviewDoc} docAckHistory={docAckHistory} bundleNames={bundleNamesOf(docBundles, d.id)} T={T} font={font}/>
+                        <DocCard key={d.id} tick={<Tick ticks={docTicks} id={d.id} label={`Tick ${d.title}`}/>} d={d} staff={staff} assignedIds={assignedIds} assignedStaff={assignedStaff} readCount={readCount} unreadCount={unreadCount} icon={icon} docAcknowledgements={docAcknowledgements} setDocAcknowledgements={setDocAcknowledgements} setDocAssignments={setDocAssignments} dbSaveDocAssignments={dbSaveDocAssignments} setDocs={setDocs} dbDeleteDoc={dbDeleteDoc} dbSaveDoc={dbSaveDoc} setPreviewDoc={setPreviewDoc} docAckHistory={docAckHistory} bundleNames={bundleNamesOf(docBundles, d.id)} T={T} font={font}/>
                       );
                     })}
                   </div>

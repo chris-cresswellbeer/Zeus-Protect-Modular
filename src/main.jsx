@@ -23,19 +23,23 @@ import { startPrivateFiles } from "./lib/fileAccess";
 import { FeedbackHost } from "./shared/Feedback";
 import { WelcomeHost } from "./shared/WelcomeVideo";
 import { SessionWarningHost } from "./shared/SessionTimeout";
+import { registerServiceWorker, listenForInstall } from "./mobile/registerSW";
+import { watchStaleBuild } from "./lib/staleBuild";
+import { UpdateBar } from "./shared/UpdateBar";
 
 // New sign-in only: swap links to private files (documents, fire safety,
 // incident photos) for short-lived signed links as they appear on screen.
 // Does nothing with the old sign-in. See lib/fileAccess.js.
 startPrivateFiles();
 
-// ⚠ PWA NOTE: src/mobile/registerSW.js exports registerServiceWorker(), and its
-// comments say to call it from here — but it is NOT currently called anywhere.
-// Until it is, public/sw.js never registers, so the offline shell, media cache,
-// background-sync wake-ups and the "Install app" prompt won't work. To enable:
-//     import { registerServiceWorker } from "./mobile/registerSW";
-//     registerServiceWorker();
-// (It only runs in production builds.) Remember to bump CACHE_VERSION in sw.js on deploys.
+// Offline copy of the portal for phones (public/sw.js): opens with no signal, keeps
+// module pictures, wakes queued saves, and offers "Install app". Production builds only.
+// A page left open across a new release reloads itself if a part fails to download
+// (lib/staleBuild.jsx), and gets a "New version — Reload" bar (UpdateBar below).
+registerServiceWorker();
+listenForInstall();
+watchStaleBuild();
+
 // Keyboard focus outlines: many buttons and boxes set outline:none in their inline styles,
 // which hid where you were when using Tab. :focus-visible only shows the outline for
 // keyboard use (not mouse clicks), so the look for mouse users doesn't change.
@@ -57,5 +61,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
     <WelcomeHost />
     {/* "Still there?" countdown before the 30-minute sign-out (shared/SessionTimeout.jsx) */}
     <SessionWarningHost />
+    {/* "A new version is ready — Reload" after a release (shared/UpdateBar.jsx) */}
+    <UpdateBar />
   </React.StrictMode>
 );

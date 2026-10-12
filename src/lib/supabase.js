@@ -290,4 +290,27 @@ async function dbWrite(promise, label, opts = {}) {
   return !error;
 }
 
-export { SUPABASE_URL, SUPABASE_ANON, sb, hashPassword, DEFAULT_HASH, dbWrite, setAccessToken, bearer };
+// ─── Insert rows that may already be there ────────────────────────────────────
+// For tables with a "one row per pair" rule (unique_keys.sql: doc_assignments,
+// dse_reports). If someone else added the same row at the same moment the database
+// refuses the insert as a duplicate (code 23505) — that is not a failure: the row is
+// there. The rows are then added one at a time, skipping (or, with onDuplicate,
+// updating) the ones that already exist. Works the same before unique_keys.sql is run.
+// @returns {Promise<boolean>} true if every row is now saved.
+async function insertNew(table, rows, label, onDuplicate = null) {
+  if (!rows.length) return true;
+  const isDup = e => /23505|duplicate key/i.test(String(e || ""));
+  const r = await sb.from(table).insert(rows);
+  if (!r.error) return true;
+  if (!isDup(r.error)) return dbWrite(Promise.resolve(r), label);
+  let ok = true;
+  for (const row of rows) {
+    const one = await sb.from(table).insert(row);
+    if (!one.error) continue;
+    if (!isDup(one.error)) { ok = (await dbWrite(Promise.resolve(one), label)) && ok; continue; }
+    if (onDuplicate) ok = (await onDuplicate(row)) !== false && ok;
+  }
+  return ok;
+}
+
+export { SUPABASE_URL, SUPABASE_ANON, sb, hashPassword, DEFAULT_HASH, dbWrite, insertNew, setAccessToken, bearer };

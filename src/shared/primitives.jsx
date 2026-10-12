@@ -6,9 +6,9 @@
  *   <Bar pct={75} color={Z.green}/>           thin progress bar (0–100)
  *   <StatCard icon="📚" val={12} label="Modules" accent="#2563eb" Z={T}/>  dashboard number tile
  *
- * ⚠ THEME: this file imports the DEFAULT dark tokens (`Z`) directly, so Pill's
- * navy/gray variants and Bar's track ignore the user's chosen theme. StatCard
- * accepts a `Z` prop to use the active theme — pass it.
+ * THEME: Pill and Bar follow the chosen theme through CSS variables set by
+ * applyThemeVars() (theme/tokens.js); the default dark colours are only the fallback.
+ * StatCard accepts a `Z` prop to use the active theme — pass it.
  */
 import { Z } from "../theme/tokens";
 
@@ -20,8 +20,8 @@ function Pill({ label, col }) {
     red:    {bg:"#fee2e2",c:"#991b1b"},
     blue:   {bg:"#dbeafe",c:"#1e40af"},
     // CSS variables let the light themes swap these (lib/lightThemeFix.js); dark themes use the fallbacks.
-    navy:   {bg:`var(--zp-pill-navy-bg, ${Z.borderMd})`,c:"var(--zp-pill-navy-fg, #fff)"},
-    gray:   {bg:`var(--zp-pill-gray-bg, ${Z.overlay})`,c:"var(--zp-pill-gray-fg, #94a3b8)"},
+    navy:   {bg:`var(--zp-pill-navy-bg, var(--zp-border-md, ${Z.borderMd}))`,c:`var(--zp-pill-navy-fg, var(--zp-text, ${Z.white}))`},
+    gray:   {bg:`var(--zp-pill-gray-bg, var(--zp-overlay, ${Z.overlay}))`,c:`var(--zp-pill-gray-fg, var(--zp-muted, ${Z.muted}))`},
   };
   const s = map[col] || map.gray;
   return <span style={{background:s.bg,color:s.c,borderRadius:99,padding:"2px 10px",fontSize:11,fontWeight:700,letterSpacing:.5,whiteSpace:"nowrap"}}>{label}</span>;
@@ -41,11 +41,12 @@ function Avatar({ name, size=36 }) {
   );
 }
 
-/** Horizontal progress bar. `pct` is 0–100 (not clamped — pass sane values). */
-function Bar({ pct, color=Z.green }) {
+/** Horizontal progress bar. `pct` is 0–100 (kept within 0–100). */
+function Bar({ pct, color=`var(--zp-green, ${Z.green})` }) {
+  const w = Math.max(0, Math.min(100, Number(pct) || 0));
   return (
-    <div style={{background:Z.overlay,borderRadius:99,height:6,overflow:"hidden",flex:1}}>
-      <div style={{width:`${pct}%`,background:color,height:"100%",borderRadius:99,transition:"width .6s ease"}}/>
+    <div style={{background:`var(--zp-overlay, ${Z.overlay})`,borderRadius:99,height:6,overflow:"hidden",flex:1}}>
+      <div style={{width:`${w}%`,background:color,height:"100%",borderRadius:99,transition:"width .6s ease"}}/>
     </div>
   );
 }

@@ -9,6 +9,9 @@ import { mergeInvestigation, changedSince } from "./investigationMerge";
 import { useFormGuard, DraftBanner } from "../../lib/unsaved";
 
 import { todayISO } from "../../lib/dates";
+import { photosFromFiles, toStoredPhotos } from "../../lib/photos";
+import { embedFiles } from "../../lib/fileAccess";
+import { isActionDone, actionDoneDate, completeAction, reopenAction } from "../../lib/actionStatus";
 /**
  * InvestigationTab — admin incident investigations (root cause + corrective actions).
  *
@@ -18,7 +21,7 @@ import { todayISO } from "../../lib/dates";
  * DATA: investigations = { [incidentId]: {
  *          summary, rootCause, contributingFactors, immediateActions, recommendations,
  *          investigator, investigationDate, status: open|in_progress|pending_actions|closed,
- *          photos:[{name,type,data(base64),uploaded}],
+ *          photos:[{name,type,url,uploaded}]  (older records: data = base64 instead of url),
  *          actions:[{ id, description, owner(NAME), dueDate, priority, status, notes?,
  *                     attachments?, completedDate?, completedBy?, chasedOn?,
  *                     managerSignOff?: { by, date, note } (line manager, My Team tab) }] } }
@@ -34,14 +37,12 @@ import { todayISO } from "../../lib/dates";
  * changes / overwrite with mine / discard mine and load theirs / cancel.
  * A banner also appears while editing if the live refresh brings in their change.
  *
- * ⚠ Action status values are inconsistent across the app: this tab toggles
- *   "open"/"complete" (and mobile sets "complete"), but the printed report and some
- *   filters look for "closed". Treat both as done when writing new code, or
- *   standardise on one value with a one-off data fix.
- * ⚠ Photos are stored as base64 inside the investigation JSON (≤5 MB each), which
- *   makes rows large. Uploading to Storage (lib/photos.js) would be lighter.
+ * Action "done": always use lib/actionStatus.js (isActionDone / completeAction /
+ *   reopenAction) — status "complete" + completedDate + completedBy everywhere.
+ * Photos go to storage as soon as they're picked (lib/photos.js photosFromFiles); the
+ *   record keeps only the link. Older base64 photos move to storage on the next save.
  */
-function InvestigationTab({ incidents, setIncidents, staff, investigations, setInvestigations, fetchInvestigation, acceptInvestigationBase, focusedId, setFocusedId, onBack, Z, font }) {
+function InvestigationTab({ userName = "", incidents, setIncidents, staff, investigations, setInvestigations, fetchInvestigation, acceptInvestigationBase, focusedId, setFocusedId, onBack, Z, font }) {
   const isMobile = useWindowWidth() <= 1024;
   const [view, setView] = useState(focusedId ? "detail" : "dashboard"); // "dashboard" | "list" | "detail"
   const [activeId, setActiveId] = useState(focusedId || null);
@@ -49,6 +50,7 @@ function InvestigationTab({ incidents, setIncidents, staff, investigations, setI
   const [actionForm, setActionForm] = useState(null);
   const [editActionIdx, setEditActionIdx] = useState(null);
   const [photoError, setPhotoError] = useState("");
+  const [photoBusy, setPhotoBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   const baseRef = useRef(undefined);              // the version this person opened (see header)
   const [conflict, setConflict] = useState(null); // { theirs, merged, theirChanges, conflicts } while the prompt is open
@@ -121,15 +123,19 @@ function InvestigationTab({ incidents, setIncidents, staff, investigations, setI
   // Save: first re-read the database copy. If someone else saved since this
   // person opened the investigation, show the "changed since you opened it" prompt.
   async function saveInvestigation() {
-    if (checking) return;
+    if (checking || photoBusy) return;
     setChecking(true);
     let theirs = investigations[activeId];
+    let mine = invForm;
     try {
+      // older photos kept inside the record (base64) move to storage now
+      const photos = await toStoredPhotos(invForm.photos, activeId);
+      if (photos !== invForm.photos) { mine = { ...invForm, photos }; setInvForm(mine); }
       if (fetchInvestigation) { const r = await fetchInvestigation(activeId); if (r && r.ok) theirs = r.data; }
     } finally { setChecking(false); }
-    if (!changedSince(baseRef.current, theirs) || !changedSince(invForm, theirs)) { commitInvestigation(invForm, theirs); return; }
-    if (baseRef.current !== undefined && !changedSince(baseRef.current, invForm)) { loadTheirVersion(theirs); return; }   // nothing of mine to lose
-    setConflict({ theirs, ...mergeInvestigation(baseRef.current, invForm, theirs) });
+    if (!changedSince(baseRef.current, theirs) || !changedSince(mine, theirs)) { commitInvestigation(mine, theirs); return; }
+    if (baseRef.current !== undefined && !changedSince(baseRef.current, mine)) { loadTheirVersion(theirs); return; }   // nothing of mine to lose
+    setConflict({ theirs, ...mergeInvestigation(baseRef.current, mine, theirs) });
   }
 
   // Throw away this person's edits and show the latest saved version.
@@ -144,12 +150,12 @@ function InvestigationTab({ incidents, setIncidents, staff, investigations, setI
 
   // Builds an HTML investigation report and downloads it as a .html file (Blob + <a download>),
   // rather than opening a print window.
-  function generateInvestigationReport() {
+  async function generateInvestigationReport() {
     if(!inc||!invForm) return;
     const today = new Date().toLocaleDateString("en-GB");
     const statusLabel = {open:E("⏳ ","")+"Open",in_progress:E("🔄 ","")+"In Progress",pending_actions:E("📋 ","")+"Pending Actions",closed:E("✅ ","")+"Closed"}[invForm.status]||invForm.status;
-    const openActions  = (invForm.actions||[]).filter(a=>a.status!=="closed");
-    const closedActions= (invForm.actions||[]).filter(a=>a.status==="closed");
+    const openActions  = (invForm.actions||[]).filter(a=>!isActionDone(a));
+    const closedActions= (invForm.actions||[]).filter(a=>isActionDone(a));
 
     const html = `<!DOCTYPE html><html><head><title>Investigation Report — ${inc.date}</title>
     <style>
@@ -209,16 +215,18 @@ function InvestigationTab({ incidents, setIncidents, staff, investigations, setI
       <h2>Corrective Actions (${(invForm.actions||[]).length})</h2>
       ${(invForm.actions||[]).map((a,i)=>{
         const today2=todayISO();
-        const overdue=a.status!=="closed"&&a.dueDate&&a.dueDate<today2;
-        const cls=overdue?"overdue":a.status==="closed"?"closed":"open";
+        const done=isActionDone(a);
+        const overdue=!done&&a.dueDate&&a.dueDate<today2;
+        const cls=overdue?"overdue":done?"closed":"open";
         return `<div class="action ${cls}">
           <div class="action-title">${i+1}. ${a.description}</div>
           <div class="action-meta">
             <span>Owner: ${a.owner||"Unassigned"}</span>
             <span>Due: ${a.dueDate||"TBD"}</span>
             <span>Priority: ${a.priority||"medium"}</span>
-            <span class="badge ${cls}">${overdue?"⚠ Overdue":a.status==="closed"?"✓ Closed":"⏳ Open"}</span>
-            ${a.completedBy?`<span>Completed by: ${a.completedBy}${a.completedAt?" on "+a.completedAt:""}</span>`:""}
+            <span class="badge ${cls}">${overdue?"⚠ Overdue":done?"✓ Complete":"⏳ Open"}</span>
+            ${done&&(a.completedBy||actionDoneDate(a))?`<span>Completed${a.completedBy?" by: "+a.completedBy:""}${actionDoneDate(a)?" on "+actionDoneDate(a):""}</span>`:""}
+            ${a.managerSignOff?`<span>Signed off by ${a.managerSignOff.by} ${a.managerSignOff.date||""}</span>`:""}
           </div>
           ${a.note?`<div style="margin-top:8px;padding:8px 12px;background:#f0f7ff;border-radius:6px;font-size:12px;color:#1e293b;white-space:pre-wrap;line-height:1.5"><strong>📝 Staff Notes:</strong><br/>${a.note}</div>`:""}
           ${(a.attachments||[]).length>0?`<div style="margin-top:6px;font-size:11px;color:#64748b">📎 Evidence: ${a.attachments.map(att=>att.name).join(", ")}</div>`:""}
@@ -230,7 +238,7 @@ function InvestigationTab({ incidents, setIncidents, staff, investigations, setI
       <div class="photo-grid">
         ${invForm.photos.map(p=>`
           <div>
-            <img src="${p.data}" alt="${p.name}"/>
+            <img src="${p.url || p.data}" alt="${p.name}"/>
             <div class="photo-caption">${p.name} · ${p.uploaded}</div>
           </div>
         `).join("")}
@@ -242,33 +250,30 @@ function InvestigationTab({ incidents, setIncidents, staff, investigations, setI
     </div>
     </body></html>`;
 
-    const blob = new Blob([html], {type:"text/html"});
+    // private photo links (new sign-in) are copied into the file so they still show later
+    const blob = new Blob([await embedFiles(html)], {type:"text/html"});
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement("a");
     a.href=url; a.download=`investigation-report-${inc.id}-${inc.date}.html`; a.click();
     URL.revokeObjectURL(url);
   }
 
-  // Reads selected images as base64 (max 5 MB each) and appends them to invForm.photos.
-  function handlePhotoUpload(e) {
-    const files = Array.from(e.target.files);
+  // Shrinks the picked images, uploads them to storage and adds their links to invForm.photos
+  // (lib/photos.js). One that can't be uploaded right now is kept and sent on save.
+  async function handlePhotoUpload(e) {
+    const files = Array.from(e.target.files || []);
+    e.target.value = "";
     setPhotoError("");
-    const maxSizeMB = 5;
+    const maxSizeMB = 15;   // phone photos are shrunk before uploading
     const tooBig = files.filter(f=>f.size > maxSizeMB*1024*1024);
     if (tooBig.length) { setPhotoError(`File(s) too large (max ${maxSizeMB}MB each): ${tooBig.map(f=>f.name).join(", ")}`); return; }
-    let loaded = 0;
-    const newPhotos = [];
-    files.forEach(f => {
-      const reader = new FileReader();
-      reader.onload = ev => {
-        newPhotos.push({ name:f.name, type:f.type, data:ev.target.result, uploaded:todayISO() });
-        loaded++;
-        if (loaded===files.length) {
-          setInvForm(p=>({...p, photos:[...(p.photos||[]), ...newPhotos]}));
-        }
-      };
-      reader.readAsDataURL(f);
-    });
+    if (!files.length) return;
+    setPhotoBusy(true);
+    try {
+      const newPhotos = await photosFromFiles(files, activeId, todayISO());
+      if (newPhotos.some(p => !p.url)) setPhotoError("Some photos couldn't be uploaded just now — they'll be sent when you save.");
+      setInvForm(p=>({...p, photos:[...(p.photos||[]), ...newPhotos]}));
+    } finally { setPhotoBusy(false); }
   }
 
   function removePhoto(idx) {
@@ -295,7 +300,7 @@ function InvestigationTab({ incidents, setIncidents, staff, investigations, setI
   function toggleActionStatus(idx) {
     setInvForm(p=>{
       const actions=[...p.actions];
-      actions[idx]={...actions[idx], status:actions[idx].status==="complete"?"open":"complete"};
+      actions[idx]=isActionDone(actions[idx]) ? reopenAction(actions[idx]) : completeAction(actions[idx], userName, todayISO());
       return {...p, actions};
     });
   }
@@ -340,8 +345,8 @@ function InvestigationTab({ incidents, setIncidents, staff, investigations, setI
           <div style={{display:"grid",gap:10}}>
             {incidents.filter(i=>i.riddor||!i.closed||investigations[i.id]).sort((a,b)=>b.date.localeCompare(a.date)).map(inc=>{
               const inv = investigations[inc.id];
-              const openActs = (inv?.actions||[]).filter(a=>a.status!=="complete").length;
-              const overdueActs = (inv?.actions||[]).filter(a=>a.status!=="complete"&&a.dueDate&&a.dueDate<today).length;
+              const openActs = (inv?.actions||[]).filter(a=>!isActionDone(a)).length;
+              const overdueActs = (inv?.actions||[]).filter(a=>!isActionDone(a)&&a.dueDate&&a.dueDate<today).length;
               const INCIDENT_TYPES_MAP = {accident:{icon:"🚑",col:"#f87171"},near_miss:{icon:"⚠️",col:"#fbbf24"},unsafe_condition:{icon:"🏗",col:"#fb923c"},unsafe_act:{icon:"🚫",col:"#a78bfa"}};
               const ti = INCIDENT_TYPES_MAP[inc.type]||{icon:"📋",col:Z.muted};
               return (
@@ -477,15 +482,15 @@ function InvestigationTab({ incidents, setIncidents, staff, investigations, setI
           <div style={{marginBottom:24,background:`linear-gradient(135deg,${Z.navyMd},${Z.navy})`,borderRadius:14,padding:"16px 18px",border:`1px solid ${Z.border}`}}>
             <div style={{fontSize:12,fontWeight:700,letterSpacing:.5,color:Z.muted,textTransform:"uppercase",marginBottom:12}}>📸 Investigation Photos</div>
             <label style={{display:"inline-flex",alignItems:"center",gap:8,background:`linear-gradient(135deg,${Z.accent},${Z.blue})`,color:Z.white,borderRadius:10,padding:"9px 18px",cursor:"pointer",fontFamily:font,fontSize:12,fontWeight:700,marginBottom:12,boxShadow:"0 4px 14px rgba(37,99,235,0.3)"}}>
-              📎 Upload Photos
-              <input type="file" accept={ACCEPT_IMAGES} multiple onChange={handlePhotoUpload} style={{display:"none"}}/>
+              {photoBusy ? "Uploading…" : "📎 Upload Photos"}
+              <input type="file" accept={ACCEPT_IMAGES} multiple disabled={photoBusy} onChange={handlePhotoUpload} style={{display:"none"}}/>
             </label>
             {photoError && <p style={{color:"#f87171",fontSize:12,margin:"0 0 10px"}}>{photoError}</p>}
             {(invForm.photos||[]).length > 0 ? (
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:10}}>
                 {invForm.photos.map((p,i)=>(
                   <div key={i} style={{position:"relative",borderRadius:10,overflow:"hidden",border:`1px solid ${Z.border}`,background:Z.overlay}}>
-                    <img src={p.data} alt={p.name} style={{width:"100%",height:100,objectFit:"cover",display:"block"}}/>
+                    <img src={p.url || p.data} alt={p.name} style={{width:"100%",height:100,objectFit:"cover",display:"block"}}/>
                     <div style={{padding:"6px 8px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                       <span style={{fontSize:10,color:Z.muted,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:80}}>{p.name}</span>
                       <button onClick={()=>removePhoto(i)} style={{background:"rgba(239,68,68,0.2)",color:"#f87171",border:"none",borderRadius:5,padding:"2px 6px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font,flexShrink:0}}>✕</button>
@@ -558,23 +563,24 @@ function InvestigationTab({ incidents, setIncidents, staff, investigations, setI
             {(invForm.actions||[]).length > 0 ? (
               <div style={{display:"grid",gap:8}}>
                 {invForm.actions.map((a,i)=>{
-                  const overdue = a.status!=="complete" && a.dueDate && a.dueDate < today;
+                  const done = isActionDone(a);
+                  const overdue = !done && a.dueDate && a.dueDate < today;
                   const attachments = a.attachments||[];
                   return (
-                    <div key={i} style={{borderRadius:10,background:a.status==="complete"?"rgba(16,185,129,0.06)":overdue?"rgba(239,68,68,0.06)":Z.overlay,border:`1px solid ${a.status==="complete"?"rgba(16,185,129,0.2)":overdue?"rgba(239,68,68,0.25)":Z.border}`,overflow:"hidden"}}>
+                    <div key={i} style={{borderRadius:10,background:done?"rgba(16,185,129,0.06)":overdue?"rgba(239,68,68,0.06)":Z.overlay,border:`1px solid ${done?"rgba(16,185,129,0.2)":overdue?"rgba(239,68,68,0.25)":Z.border}`,overflow:"hidden"}}>
                       {/* Main row */}
                       <div style={{padding:"10px 14px",display:"flex",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
                         <button onClick={()=>toggleActionStatus(i)}
-                          style={{width:20,height:20,borderRadius:"50%",border:`2px solid ${a.status==="complete"?"#10b981":priCol(a.priority)}`,background:a.status==="complete"?"#10b981":"transparent",cursor:"pointer",flexShrink:0,marginTop:2,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:10,fontWeight:900}}>
-                          {a.status==="complete"?"✓":""}
+                          style={{width:20,height:20,borderRadius:"50%",border:`2px solid ${done?"#10b981":priCol(a.priority)}`,background:done?"#10b981":"transparent",cursor:"pointer",flexShrink:0,marginTop:2,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:10,fontWeight:900}}>
+                          {done?"✓":""}
                         </button>
                         <div style={{flex:1,minWidth:120}}>
-                          <div style={{fontSize:13,fontWeight:600,color:a.status==="complete"?Z.muted:Z.white,textDecoration:a.status==="complete"?"line-through":"none",lineHeight:1.4,marginBottom:4}}>{a.description}</div>
+                          <div style={{fontSize:13,fontWeight:600,color:done?Z.muted:Z.white,textDecoration:done?"line-through":"none",lineHeight:1.4,marginBottom:4}}>{a.description}</div>
                           <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
                             <span style={{fontSize:10,background:`${priCol(a.priority)}22`,color:priCol(a.priority),padding:"1px 8px",borderRadius:99,fontWeight:700,border:`1px solid ${priCol(a.priority)}44`}}>{a.priority}</span>
                             {a.owner && <span style={{fontSize:10,color:Z.muted}}>👤 {a.owner}</span>}
                             {a.dueDate && <span style={{fontSize:10,color:overdue?"#f87171":Z.muted}}>{overdue?"🚨 Overdue: ":"📅 "}{a.dueDate}</span>}
-                            {a.status==="complete" && <span style={{fontSize:10,color:"#10b981",fontWeight:700}}>✓ Complete{a.completedBy?` — ${a.completedBy}`:""}{a.completedAt?` · ${a.completedAt}`:""}</span>}
+                            {done && <span style={{fontSize:10,color:"#10b981",fontWeight:700}}>✓ Complete{a.completedBy?` — ${a.completedBy}`:""}{actionDoneDate(a)?` · ${actionDoneDate(a)}`:""}</span>}
                             {a.managerSignOff && <span style={{fontSize:10,color:Z.gold,fontWeight:700}}>✓ Signed off by {a.managerSignOff.by} {a.managerSignOff.date}{a.managerSignOff.note?` — ${a.managerSignOff.note}`:""}</span>}
                             {attachments.length>0 && <span style={{fontSize:10,color:Z.muted}}>📎 {attachments.length} file{attachments.length!==1?"s":""}</span>}
                           </div>

@@ -99,8 +99,16 @@ function mergeActions(baseList, mineList, theirsList, theirChanges, conflicts) {
   return out;
 }
 
-function photoKey(p) { return p ? `${p.name || ""}|${p.uploaded || ""}|${String(p.data || p.url || "").length}` : ""; }
+// A stored photo is known by its link; an older base64 one by its name, date and size.
+function photoKey(p) { return p ? (p.url ? `u|${p.url}` : `${p.name || ""}|${p.uploaded || ""}|${String(p.data || "").length}`) : ""; }
 function mergePhotos(base, mine, theirs, theirChanges) {
+  // photos untouched here: keep the stored list exactly as it is (same order — staff
+  // completing an action must not appear to change anything else in the investigation)
+  if (same(base, mine)) {
+    const n = (theirs || []).filter(p => !new Set((base || []).map(photoKey)).has(photoKey(p))).length;
+    if (n) theirChanges.push(`Added ${n} photo${n !== 1 ? "s" : ""}`);
+    return theirs || [];
+  }
   const keys = l => new Set((l || []).map(photoKey));
   const B = keys(base), M = keys(mine);
   const T = keys(theirs);

@@ -9,7 +9,7 @@
 // records also carry `nextDue` (not set by desktop) and ids prefixed
 // si_local_/nc_local_ (desktop uses si<ts>/nc_<ts>). Keep this in mind when reporting across both.
 //
-// Scoring follows the desktop convention in src/domains/inspections: each
+// Scoring follows the shared rules in src/domains/inspections/inspectionScore.js: each
 // question scores 2 (compliant) or 0 (non-conformance); N/A questions are
 // excluded from both overallScore and maxScore so a skipped item cannot drag
 // the score down. Anything answered "Issue" becomes a nonConformance on the
@@ -19,6 +19,7 @@
 // The whole flow works with no signal. The submitted record goes out through
 // onSubmit, which MobileApp wraps in the offline queue.
 
+import { answerPoints } from "../../domains/inspections/inspectionScore";
 import React from "react";
 import { INSP_TYPES, INSP_SECTIONS } from "../../data/seedInspections";
 import { Screen, SectionLabel, Card, Row, StatusChip, PrimaryButton, GhostButton } from "../ui";
@@ -168,8 +169,8 @@ function InspectionRun({ typeId, location, user, onSubmit, onExit, Z, font }) {
       sectionScores[s.id] = {};
       s.questions.forEach((q) => {
         const a = answers[q.id];
-        if (!a || a === NA) return;
-        const score = a === PASS ? 2 : 0;
+        const score = answerPoints(a === PASS ? 2 : a === ISSUE ? 0 : null);   // inspectionScore.js — N/A / unanswered left out
+        if (score === null) return;
         sectionScores[s.id][q.id] = score;
         overallScore += score;
         maxScore += 2;

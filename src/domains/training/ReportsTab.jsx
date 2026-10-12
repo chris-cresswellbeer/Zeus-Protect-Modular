@@ -16,6 +16,8 @@ import { TrainingMatrixView } from "./TrainingMatrixView";
 import { MonthlyReportView } from "../reports/MonthlyReportView";
 import { useRemembered } from "../../lib/remembered";
 import { useSort, sortRows, SortButton } from "../../shared/Sortable";
+import { isActionDone } from "../../lib/actionStatus";
+import { trainingCompliance, complianceBand, staffTraining, PRINT_COLOR, moduleState, isInDateState } from "./compliance";
 
 /**
  * ReportsTab — admin "Training → Reports" area. One component, many report views,
@@ -68,8 +70,8 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
 
   // ── Manager performance calculations ──────────────────────────────────────
   // Groups staff by their `manager` text field and computes team totals for ManagerRow.
-  // NB: totalCompleted counts ALL completions (including modules no longer assigned),
-  // hence the Math.min(100, …) cap on the percentage.
+  // "Completed" = assigned modules passed and still in date (expired ones count as pending),
+  // the same rule as the Training Matrix and My Team.
   const managerData = (() => {
     const map = {};
     staff.forEach(u => {
@@ -78,22 +80,16 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
       map[mgr].members.push(u);
     });
     return Object.values(map).map(m => {
-      const totalAssigned   = m.members.reduce((s,u)=>(assigns[u.id]||[]).length+s, 0);
-      const totalCompleted  = m.members.reduce((s,u)=>Object.keys(comps[u.id]||{}).length+s, 0);
+      // portal-wide rules (training/compliance.js): a module counts while it is passed and in date
+      const per = m.members.map(u => trainingCompliance(allModules.filter(x => (assigns[u.id]||[]).includes(x.id)), comps[u.id]||{}));
+      const totalAssigned   = per.reduce((s,p)=>s+p.total, 0);
+      const totalCompleted  = per.reduce((s,p)=>s+p.good, 0);
       const totalPending    = totalAssigned - totalCompleted;
-      const compliancePct   = totalAssigned ? Math.min(100, Math.round(totalCompleted / totalAssigned * 100)) : 0;
-      const fullyCompliant  = m.members.filter(u=>{
-        const a=(assigns[u.id]||[]).length;
-        const c=Object.keys(comps[u.id]||{}).length;
-        return a > 0 && c === a;
-      }).length;
-      const nonCompliant    = m.members.filter(u=>{
-        const a=(assigns[u.id]||[]).length;
-        const c=Object.keys(comps[u.id]||{}).length;
-        return a > 0 && c < a;
-      }).length;
-      const noModules       = m.members.filter(u=>(assigns[u.id]||[]).length===0).length;
-      const status = compliancePct === 100 ? "green" : compliancePct >= 50 ? "amber" : "red";
+      const compliancePct   = totalAssigned ? Math.round(totalCompleted / totalAssigned * 100) : 0;
+      const fullyCompliant  = per.filter(p => p.total > 0 && p.good === p.total).length;
+      const nonCompliant    = per.filter(p => p.total > 0 && p.good < p.total).length;
+      const noModules       = per.filter(p => p.total === 0).length;
+      const status = totalAssigned ? complianceBand(compliancePct).key : "red";
       return { ...m, totalAssigned, totalCompleted, totalPending, compliancePct, fullyCompliant, nonCompliant, noModules, status };
     }).sort((a,b) => a.compliancePct - b.compliancePct);
   })();
@@ -126,13 +122,12 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
     staff.forEach(u => {
       const assignedIds = assigns[u.id]||[];
       const userComps   = comps[u.id]||{};
-      const a = assignedIds.length;
-      const d = assignedIds.filter(mid => userComps[mid]).length;
-      const pct = a ? Math.min(100, Math.round(d/a*100)) : 0;
-      const pending = allModules.filter(m=>assignedIds.includes(m.id)&&!userComps[m.id]).map(m=>m.title).join("; ");
+      const tr = staffTraining(u.id, assigns, comps, allModules);   // portal-wide rules (training/compliance.js)
+      const a = tr.total, d = tr.good, pct = tr.pct;
+      const pending = allModules.filter(m=>assignedIds.includes(m.id)&&!m._hidden&&!isInDateState(moduleState(m, userComps[m.id]))).map(m=>m.title).join("; ");
       const certs = allModules.filter(m=>assignedIds.includes(m.id)&&userComps[m.id]?.certId).map(m=>`${m.title}: ${userComps[m.id].certId}`).join("; ");
       const expiredMods = allModules.filter(m=>assignedIds.includes(m.id)&&userComps[m.id]&&m.renewalMonths&&getExpiryStatus(userComps[m.id].date,m.renewalMonths)?.status==="expired").map(m=>m.title).join("; ");
-      const status = pct===100?"Compliant":pct>=50?"In Progress":"Overdue";
+      const status = tr.status;
       const lastLogin = (lastLoginMap&&lastLoginMap[u.id]) || "Never";
       const userExtCerts = (extCerts||{})[u.id] || {};
       const firstAid = userExtCerts["first_aid"];
@@ -145,7 +140,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
         fireMarshalStatus, fireMarshal?.expiryDate||""]);
     });
     rows.push([]);
-    rows.push([`Total Staff: ${staff.length}`, `Total Completions: ${staff.reduce((s,u)=>s+Object.keys(comps[u.id]||{}).length,0)}`, `Average Compliance: ${staff.length?Math.min(100, Math.round(staff.reduce((s,u)=>{const a=(assigns[u.id]||[]).length;const c=Object.keys(comps[u.id]||{}).length;return s+(a?c/a:0);},0)/staff.length*100)):0}%`]);
+    rows.push([`Total Staff: ${staff.length}`, `Total Completions: ${staff.reduce((s,u)=>s+Object.keys(comps[u.id]||{}).length,0)}`, `Average Compliance: ${staff.length?Math.min(100, Math.round(staff.reduce((s,u)=>{const t=staffTraining(u.id, assigns, comps, allModules);return s+(t.total?t.good/t.total:0);},0)/staff.length*100)):0}%`]);
     downloadCsv(`zeus-staff-report-${today}.csv`, rows);
   }
 
@@ -171,10 +166,9 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
       mgr.members.forEach(u => {
         const assignedIds = assigns[u.id]||[];
         const userComps   = comps[u.id]||{};
-        const a = assignedIds.length;
-        const d = (assigns[u.id]||[]).filter(mid => userComps[mid]).length;
-        const pct = a ? Math.min(100, Math.round(d/a*100)) : 0;
-        const pending = allModules.filter(m=>assignedIds.includes(m.id)&&!userComps[m.id]).map(m=>m.title).join("; ");
+        const tr = staffTraining(u.id, assigns, comps, allModules);   // training/compliance.js
+        const a = tr.total, d = tr.good, pct = tr.pct;
+        const pending = allModules.filter(m=>assignedIds.includes(m.id)&&!m._hidden&&!isInDateState(moduleState(m, userComps[m.id]))).map(m=>m.title).join("; ");
         const userExtCerts = (extCerts||{})[u.id] || {};
         const certValues = EXT_CERT_TYPES.map(ct => {
           const cert = userExtCerts[ct.id];
@@ -260,12 +254,10 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
                     const allHtml = teamStaff.map(u=>{
                       const assignedIds = assigns[u.id]||[];
                       const userComps = comps[u.id]||{};
-                      const a = assignedIds.length;
-                      const d = assignedIds.filter(mid=>userComps[mid]).length;
-                      const pct = a ? Math.min(100,Math.round(d/a*100)) : 0;
-                      const status = pct===100?"Compliant":pct>=50?"In Progress":"Overdue";
+                      const tr = staffTraining(u.id, assigns, comps, allModules);   // training/compliance.js
+                      const a = tr.total, d = tr.good, pct = tr.pct, status = tr.status;
                       const today = new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"long",year:"numeric"});
-                      const statusColor = pct===100?"#15803d":pct>=50?"#b45309":"#dc2626";
+                      const statusColor = PRINT_COLOR[tr.band.key];
                       const trainingRows = assignedIds.map(mid=>{
                         const m = allModules.find(x=>x.id===mid); if(!m) return "";
                         const c = userComps[mid];
@@ -377,7 +369,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
             <StatCard icon={E("👥","👥")} val={staff.length} label="Total Staff" accent={Z.accentLt} Z={Z}/>
             <StatCard icon="📚" val={allModules.length} label="Modules Available" accent="#a78bfa" Z={Z}/>
             <StatCard icon="✅" val={staff.reduce((s,u)=>s+Object.keys(comps[u.id]||{}).length,0)} label="Total Completions" accent={Z.green} Z={Z}/>
-            <StatCard icon={E("📊","📊")} val={staff.length?`${Math.min(100, Math.round(staff.reduce((s,u)=>{const a=(assigns[u.id]||[]).length;const c=Object.keys(comps[u.id]||{}).length;return s+(a?c/a:0);},0)/staff.length*100))}%`:"—"} label="Avg Compliance" accent={Z.gold} Z={Z}/>
+            <StatCard icon={E("📊","📊")} val={staff.length?`${Math.min(100, Math.round(staff.reduce((s,u)=>{const t=staffTraining(u.id, assigns, comps, allModules);return s+(t.total?t.good/t.total:0);},0)/staff.length*100))}%`:"—"} label="Avg Compliance" accent={Z.gold} Z={Z}/>
           </div>
           {(()=>{
             const managers = ["all", ...Array.from(new Set(staff.map(u=>u.manager||"").filter(Boolean))).sort()];
@@ -389,9 +381,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
                 if (!u.name.toLowerCase().includes(q) && !u.email.toLowerCase().includes(q) && !(u.jobTitle||"").toLowerCase().includes(q)) return false;
               }
               if (rptFilterProgress!=="all") {
-                const a=(assigns[u.id]||[]).length;
-                const d=(assigns[u.id]||[]).filter(mid=>(comps[u.id]||{})[mid]).length;
-                const pct=a?Math.min(100,Math.round(d/a*100)):0;
+                const _tr=staffTraining(u.id, assigns, comps, allModules), a=_tr.total, d=_tr.good, pct=_tr.pct;   // training/compliance.js
                 if (rptFilterProgress==="compliant" && pct!==100) return false;
                 if (rptFilterProgress==="inprogress" && (pct===100||pct===0)) return false;
                 if (rptFilterProgress==="overdue" && (a===0 || pct!==0)) return false;
@@ -452,11 +442,10 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
             }).map((u,i)=>{
               const assignedIds = assigns[u.id]||[];
               const userComps = comps[u.id]||{};
-              const a = assignedIds.length;
-              const d = (assigns[u.id]||[]).filter(mid => userComps[mid]).length;
-              const p = a ? Math.min(100, Math.round(d/a*100)) : 0;
+              const _tr = staffTraining(u.id, assigns, comps, allModules);   // training/compliance.js
+              const a = _tr.total, d = _tr.good, p = _tr.pct;
               const isOpen = expandedStaff === u.id;
-              const notDone = allModules.filter(m => assignedIds.includes(m.id) && !userComps[m.id]);
+              const notDone = allModules.filter(m => assignedIds.includes(m.id) && !m._hidden && !isInDateState(moduleState(m, userComps[m.id])));
               const doneModules = allModules.filter(m => assignedIds.includes(m.id) && userComps[m.id]);
 
               return (
@@ -937,7 +926,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
           const inv = investigations[inc.id];
           if (!inv?.actions?.length) return;
           inv.actions.forEach((a,i)=>{
-            if (a.status==="complete") return;
+            if (isActionDone(a)) return;
             const daysOld = inv.investigationDate ? Math.floor((new Date()-new Date(inv.investigationDate))/86400000) : null;
             allActions.push({
               id: `inc_${inc.id}_${i}`,

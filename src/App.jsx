@@ -59,6 +59,8 @@
  * ═══════════════════════════════════════════════════════════════════════════
  */
 import React, { useState, useEffect, useRef } from "react";
+import { lazyFresh } from "./lib/staleBuild";   // a part that can't be downloaded shows a note instead of an error
+import { isActionDone, completeAction } from "./lib/actionStatus";   // one meaning of "done" for corrective actions
 // ── Seed / reference data (src/data). Used as defaults until Supabase has rows. ──
 import { EXT_CERT_TYPES } from "./data/seedExtCerts";
 import { INSP_TYPES } from "./data/seedInspections";
@@ -75,7 +77,7 @@ import { TRAINING_MODULES } from "./data/seedTraining";
 const LAZY_PAGE  = <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif", color: "#94a3b8", background: "#060d2e" }}>Loading…</div>;
 const LAZY_BLOCK = <div style={{ padding: 40, textAlign: "center", color: "#94a3b8" }}>Loading…</div>;
 function lazyPart(loader, fallback = null) {
-  const L = React.lazy(loader);
+  const L = lazyFresh(loader);
   const Part = props => <React.Suspense fallback={fallback}><L {...props}/></React.Suspense>;
   return Part;
 }
@@ -94,12 +96,12 @@ const MobileApp = lazyPart(() => import("./mobile/MobileApp.jsx").then(m => ({ d
 const CertificateModal = lazyPart(() => import("./domains/training/CertificateModal").then(m => ({ default: m.CertificateModal })), null);
 const DocBundles = lazyPart(() => import("./domains/documents/DocBundles").then(m => ({ default: m.DocBundles })), LAZY_BLOCK);
 const MyBundles = lazyPart(() => import("./domains/documents/DocBundles").then(m => ({ default: m.MyBundles })));
-const LazySortableStatGrid = React.lazy(() => import("./shared/SortableStatGrid"));
+const LazySortableStatGrid = lazyFresh(() => import("./shared/SortableStatGrid"));
 
-const LazyContractorsTab = React.lazy(() => import("./domains/contractors/ContractorsTab").then(m => ({ default: m.ContractorsTab })));
-const LazyMyTeamTab = React.lazy(() => import("./domains/manager/MyTeamTab").then(m => ({ default: m.MyTeamTab })));
-const LazyAuditTrailTab = React.lazy(() => import("./domains/audit/AuditTrailTab").then(m => ({ default: m.AuditTrailTab })));
-const LazyCoshhTab = React.lazy(() => import("./domains/coshh/CoshhTab").then(m => ({ default: m.CoshhTab })));
+const LazyContractorsTab = lazyFresh(() => import("./domains/contractors/ContractorsTab").then(m => ({ default: m.ContractorsTab })));
+const LazyMyTeamTab = lazyFresh(() => import("./domains/manager/MyTeamTab").then(m => ({ default: m.MyTeamTab })));
+const LazyAuditTrailTab = lazyFresh(() => import("./domains/audit/AuditTrailTab").then(m => ({ default: m.AuditTrailTab })));
+const LazyCoshhTab = lazyFresh(() => import("./domains/coshh/CoshhTab").then(m => ({ default: m.CoshhTab })));
 import { DocCard } from "./domains/documents/DocCard";
 import { SlideVideo } from "./shared/SlideVideo";
 import { parseRoute, routeHash, routeAllowed } from "./lib/router";
@@ -115,27 +117,29 @@ import { lastBackupAt } from "./lib/backup";
 import { EvidenceLinks, AttachEvidenceModal, SessionsModal } from "./domains/training/TrainingEvidence";
 import { uploadEvidence, listSessions, sessionKey, evidenceLabel } from "./domains/training/evidence";
 import { teamOf } from "./domains/manager/team";
-import { isPassed, scoreText, recordedText, passMarkOf } from "./domains/training/completion";
+import { isPassed, scoreText, recordedText, passMarkOf, PASS_MARK } from "./domains/training/completion";
+import { personalCompliance, complianceBand, staffTraining } from "./domains/training/compliance";
+import { firstAidSummary } from "./domains/firstAid/firstAidLogic";
 import { DSE_RENEWAL_MONTHS, DSE_QUESTION_COUNT } from "./data/seedDse";
-const LazyStaffDSETab = React.lazy(() => import("./domains/dse/StaffDSETab").then(m => ({ default: m.StaffDSETab })));
-const LazyEquipmentTrackerTab = React.lazy(() => import("./domains/equipment/EquipmentTrackerTab").then(m => ({ default: m.EquipmentTrackerTab })));
-const LazyFireSafetyTab = React.lazy(() => import("./domains/fireSafety/FireSafetyTab").then(m => ({ default: m.FireSafetyTab })));
-const LazyFirstAidRegisterTab = React.lazy(() => import("./domains/firstAid/FirstAidRegisterTab").then(m => ({ default: m.FirstAidRegisterTab })));
-const LazyAdminIncidentTab = React.lazy(() => import("./domains/incidents/AdminIncidentTab").then(m => ({ default: m.AdminIncidentTab })));
-const LazyIncidentTracker = React.lazy(() => import("./domains/incidents/IncidentTracker").then(m => ({ default: m.IncidentTracker })));
-const LazyInvestigationTab = React.lazy(() => import("./domains/incidents/InvestigationTab").then(m => ({ default: m.InvestigationTab })));
+const LazyStaffDSETab = lazyFresh(() => import("./domains/dse/StaffDSETab").then(m => ({ default: m.StaffDSETab })));
+const LazyEquipmentTrackerTab = lazyFresh(() => import("./domains/equipment/EquipmentTrackerTab").then(m => ({ default: m.EquipmentTrackerTab })));
+const LazyFireSafetyTab = lazyFresh(() => import("./domains/fireSafety/FireSafetyTab").then(m => ({ default: m.FireSafetyTab })));
+const LazyFirstAidRegisterTab = lazyFresh(() => import("./domains/firstAid/FirstAidRegisterTab").then(m => ({ default: m.FirstAidRegisterTab })));
+const LazyAdminIncidentTab = lazyFresh(() => import("./domains/incidents/AdminIncidentTab").then(m => ({ default: m.AdminIncidentTab })));
+const LazyIncidentTracker = lazyFresh(() => import("./domains/incidents/IncidentTracker").then(m => ({ default: m.IncidentTracker })));
+const LazyInvestigationTab = lazyFresh(() => import("./domains/incidents/InvestigationTab").then(m => ({ default: m.InvestigationTab })));
 import { isIncompleteQuickReport, myIncompleteQuickReports, isQuickReportOverdue, quickReportDueLabel } from "./domains/incidents/quickReportStatus";
-const LazySiteInspectionsTab = React.lazy(() => import("./domains/inspections/SiteInspectionsTab").then(m => ({ default: m.SiteInspectionsTab })));
-const LazySiteSettingsTab = React.lazy(() => import("./domains/settings/SiteSettingsTab").then(m => ({ default: m.SiteSettingsTab })));
-const LazyAdminMachineryTab = React.lazy(() => import("./domains/machinery/AdminMachineryTab").then(m => ({ default: m.AdminMachineryTab })));
-const LazyMachineryCompetenceTab = React.lazy(() => import("./domains/machinery/MachineryCompetenceTab").then(m => ({ default: m.MachineryCompetenceTab })));
-const LazyPermitsTab = React.lazy(() => import("./domains/permits/PermitsTab").then(m => ({ default: m.PermitsTab })));
-const LazyRiskAssessmentTab = React.lazy(() => import("./domains/riskAssessments/RiskAssessmentTab").then(m => ({ default: m.RiskAssessmentTab })));
+const LazySiteInspectionsTab = lazyFresh(() => import("./domains/inspections/SiteInspectionsTab").then(m => ({ default: m.SiteInspectionsTab })));
+const LazySiteSettingsTab = lazyFresh(() => import("./domains/settings/SiteSettingsTab").then(m => ({ default: m.SiteSettingsTab })));
+const LazyAdminMachineryTab = lazyFresh(() => import("./domains/machinery/AdminMachineryTab").then(m => ({ default: m.AdminMachineryTab })));
+const LazyMachineryCompetenceTab = lazyFresh(() => import("./domains/machinery/MachineryCompetenceTab").then(m => ({ default: m.MachineryCompetenceTab })));
+const LazyPermitsTab = lazyFresh(() => import("./domains/permits/PermitsTab").then(m => ({ default: m.PermitsTab })));
+const LazyRiskAssessmentTab = lazyFresh(() => import("./domains/riskAssessments/RiskAssessmentTab").then(m => ({ default: m.RiskAssessmentTab })));
 import { generateRAHtml } from "./domains/riskAssessments/generateRAHtml";
-const LazyAccountTab = React.lazy(() => import("./domains/staff/AccountTab").then(m => ({ default: m.AccountTab })));
-const LazyStaffActionsTab = React.lazy(() => import("./domains/staff/StaffActionsTab").then(m => ({ default: m.StaffActionsTab })));
-const LazyCreateModuleTab = React.lazy(() => import("./domains/training/CreateModuleTab").then(m => ({ default: m.CreateModuleTab })));
-const LazyReportsTab = React.lazy(() => import("./domains/training/ReportsTab").then(m => ({ default: m.ReportsTab })));
+const LazyAccountTab = lazyFresh(() => import("./domains/staff/AccountTab").then(m => ({ default: m.AccountTab })));
+const LazyStaffActionsTab = lazyFresh(() => import("./domains/staff/StaffActionsTab").then(m => ({ default: m.StaffActionsTab })));
+const LazyCreateModuleTab = lazyFresh(() => import("./domains/training/CreateModuleTab").then(m => ({ default: m.CreateModuleTab })));
+const LazyReportsTab = lazyFresh(() => import("./domains/training/ReportsTab").then(m => ({ default: m.ReportsTab })));
 import { isHtmlContent, ensureRteStyles } from "./domains/training/slideTextUtils";
 // ── Core libraries, shared UI and theme ──
 import { generateStaffPDF } from "./domains/training/generateStaffPDF";   // kept up front: it opens a window, which must happen straight from the click
@@ -143,7 +147,7 @@ import { sanitizeHtml } from "./lib/sanitizeHtml";
 import { EXPIRY_WARNING_DAYS, getExpiryStatus, localISO, todayISO, localDateTime } from "./lib/dates";
 import { EmojiCtx, E, syncEmojiMode } from "./lib/emoji";
 import { startPlainSymbols, stopPlainSymbols } from "./lib/plainSymbols";
-import { sb, hashPassword, DEFAULT_HASH, dbWrite } from "./lib/supabase";
+import { sb, hashPassword, DEFAULT_HASH, dbWrite, insertNew } from "./lib/supabase";
 import { AUTH_MODE, signIn, signOut, meta as authMeta, adminCall, makeTempPassword, checkPassword as authCheckPassword, changeOwnPassword } from "./lib/auth";
 import { ForcePasswordChange } from "./shared/ForcePasswordChange";
 import { uploadPhotos, PHOTO_BUCKET } from "./lib/photos";
@@ -152,10 +156,11 @@ import { ZeusLogo, ZeusProtectLogo, ZEUS_LOGO_LIGHT_SRC } from "./shared/Logo";
 import { NotificationBell } from "./shared/NotificationBell";
 import { useWindowWidth, MobileCard, MobileCardRow } from "./shared/hooks";
 import { Pill, Avatar, Bar } from "./shared/primitives";
-import { Z, getThemeTokens, getTheme, isDarkTheme, rememberTheme, oppositeTheme } from "./theme/tokens";
+import { Z, getThemeTokens, getTheme, isDarkTheme, rememberTheme, oppositeTheme, applyThemeVars } from "./theme/tokens";
 import { applyLightThemeFix, isLightTheme } from "./lib/lightThemeFix";
 import { mergeInvestigation, changedSince } from "./domains/incidents/investigationMerge";
 import { QuickSearch } from "./shared/QuickSearch";
+import { createKeyed, primeKeyed, saveKeyed, diffKeyed, mergeKeyed, savedCopy, markSaved } from "./lib/keyedSync";
 import { NewVersionModal } from "./shared/NewVersionModal";   // also used by DocCard, so it can't load separately
 import { ticksFrom, Tick, TickAll, BulkBar } from "./shared/BulkBar";
 import { NavMenu } from "./shared/NavMenu";
@@ -200,6 +205,10 @@ const mapIncidentRow = (r) => ({
 });
 
 // Key-order-independent JSON, used to tell whether a record really changed.
+/** Fire safety lists (state key → table). */
+const FIRE_TABLES = { wardens: "fire_wardens", drills: "fire_drills", alarmTests: "fire_alarm_tests",
+  extinguishers: "fire_extinguishers", emergLighting: "fire_emerg_lighting", fraReviews: "fire_fra_reviews" };
+
 /** A short fingerprint of a history table: its row ids, plus `recorded` (attached evidence),
  *  which can change on an existing row. null if any row has no id (then always re-read). */
 function idsKey(rows) {
@@ -229,7 +238,7 @@ function mapAssignRows(rows) {
 }
 function mapDocAssignRows(rows) {
   const map = {};
-  (rows || []).forEach(r => { const did = String(r.doc_id); (map[did] = map[did] || []).push(String(r.user_id)); });
+  (rows || []).forEach(r => { const did = String(r.doc_id), uid = String(r.user_id); const l = (map[did] = map[did] || []); if (!l.includes(uid)) l.push(uid); });   // a doubled row counts once
   return map;
 }
 function mapCompRows(rows) {
@@ -237,7 +246,7 @@ function mapCompRows(rows) {
   (rows || []).forEach(r => {
     // Older versions also saved FAILED attempts here (no certificate, under 70%). A
     // failed attempt isn't a completion — those are listed under Quiz Failures.
-    if (!r.recorded && !r.cert_id && r.score !== null && r.score !== undefined && Number(r.score) < 70) return;
+    if (!r.recorded && !r.cert_id && r.score !== null && r.score !== undefined && Number(r.score) < PASS_MARK) return;
     const uid = String(r.user_id); map[uid] = map[uid] || {};
     map[uid][String(r.module_id)] = { score: r.score, date: r.date, certId: r.cert_id, answers: r.answers, moduleVersion: r.module_version || 1, ...(r.recorded ? { recorded: r.recorded } : {}) };
   });
@@ -506,7 +515,7 @@ export default function App() {
   // Light themes: darken the pale dark-theme text colours so admin text stays readable.
   // The phone layout does this itself, because "Follow system" can show a different theme.
   const phoneLayout = isPhone && !!user && !forceDesktop;
-  useEffect(() => { if (!phoneLayout) applyLightThemeFix(isLightTheme(theme)); }, [theme, phoneLayout]);
+  useEffect(() => { if (!phoneLayout) { applyLightThemeFix(isLightTheme(theme)); applyThemeVars(theme); } }, [theme, phoneLayout]);
   const routerOn = !!user && (view === "admin" || view === "staff") && !(isPhone && !forceDesktop);
   // Keep the address in step with the page; each page change is a new Back/Forward step.
   // (After Back/Forward the address already matches, so nothing is added.)
@@ -997,7 +1006,21 @@ export default function App() {
   const dseSavedRef = useRef(new Map());
   const historyReadyRef = useRef(false);   // stage-2 history tables loaded (loadHistory)
   const historyIdsRef = useRef(null);      // ids of the training history rows last read (refresh skips it if unchanged)   // last saved copy of each person's DSE assessments
-  const equipmentSavedRef = useRef(new Map());   // non-admin sessions: last saved copy of each equipment item
+  // Registers kept as lists of records: what was last saved/loaded, per record (lib/keyedSync.js),
+  // so only changed records are written and other people's changes are never overwritten.
+  const regRef = useRef(null);
+  if (!regRef.current) {
+    const noFile = r => { const { _fileObj, ...rest } = r || {}; return rest; };
+    const noFra  = r => { const { _fileObj, fileData, ...rest } = r || {}; return rest; };
+    regRef.current = {
+      equipment: createKeyed(), inspections: createKeyed(), modules: createKeyed(), machineTypes: createKeyed(),
+      fire: { wardens: createKeyed(noFile), drills: createKeyed(noFile), alarmTests: createKeyed(noFile),
+              extinguishers: createKeyed(noFile), emergLighting: createKeyed(noFile), fraReviews: createKeyed(noFra) },
+    };
+  }
+  const firstAidSavedRef = useRef(null);         // last saved/loaded first aid register (JSON)
+  const firstAidWroteRef = useRef(0);            // when this browser last saved the first aid register
+  const dseRespSavedRef = useRef(new Map());     // last saved copy of each DSE response ("uid|ri|ii")
   const refreshBusyRef = useRef(false);
   // Training/reading records this browser just changed: key → time ("c:uid:mid", "k:uid:docId", "a:uid").
   const recentWriteRef = useRef(new Map());
@@ -1015,7 +1038,12 @@ export default function App() {
     primeAuditList("inspection", siteInspections);
     incidents.forEach(i => incidentSavedRef.current.set(String(i.id), stableJSON(i)));
     Object.entries(investigations).forEach(([id, d]) => { investigationSavedRef.current.set(String(id), stableJSON(d)); investigationBaseRef.current.set(String(id), d); });
-    equipment.forEach(e => equipmentSavedRef.current.set(String(e.id), stableJSON(e)));
+    const R = regRef.current;
+    primeKeyed(R.equipment, equipment); primeKeyed(R.inspections, siteInspections);
+    primeKeyed(R.modules, customModules); primeKeyed(R.machineTypes, customMachineTypes);
+    Object.keys(R.fire).forEach(k => primeKeyed(R.fire[k], (fireSafety || {})[k] || []));
+    firstAidSavedRef.current = stableJSON(firstAidData);
+    Object.entries(adminResponses).forEach(([uid, keys]) => Object.entries(keys || {}).forEach(([key, rec]) => dseRespSavedRef.current.set(`${uid}|${key}`, stableJSON(rec))));
     Object.entries(dseReports).forEach(([uid, reps]) => dseSavedRef.current.set(String(uid), stableJSON(reps)));
     _ready.current = true;
   }, [dbReady]); // eslint-disable-line
@@ -1049,10 +1077,59 @@ export default function App() {
   // actions completed on the phone). Re-read both tables every 30 s while the tab is
   // visible, when the window regains focus, and when an incidents screen is opened.
   // Records with a save still in flight from THIS browser are kept as they are.
+  // Registers people edit on their own pages (equipment, inspections, fire safety, first aid,
+  // custom modules, machine types): take in other people's changes. Only for those who can
+  // edit them; records with an unsaved or in-flight change here are left alone (lib/keyedSync.js).
+  async function refreshRegisters() {
+    // by role (with the old sign-in everyone "can write", but only these people edit registers)
+    const admin = !!user && user.role === "admin", machinery = !!user && hasMachineryAccess(user);
+    if (!machinery) return;
+    const R = regRef.current;
+    const ok = r => r && !r.error && Array.isArray(r.data);
+    const data = r => r.data.map(x => x.data).filter(Boolean);
+    const reads = { equipment: sb.from("equipment").select("*"), machineTypes: sb.from("custom_machine_types").select("*") };
+    if (admin) {
+      Object.assign(reads, { inspections: sb.from("site_inspections").select("*"), modules: sb.from("custom_modules").select("*"),
+        firstAid: sb.from("first_aid_register").select("*").eq("id", "singleton") });
+      Object.entries(FIRE_TABLES).forEach(([k, table]) => { reads[`fire.${k}`] = sb.from(table).select("*"); });
+    }
+    const keys = Object.keys(reads);
+    const readAt = Date.now();   // anything this browser saves after this moment is newer than what comes back
+    const res = Object.fromEntries((await Promise.all(keys.map(k => reads[k]))).map((r, i) => [keys[i], r]));
+    if (ok(res.equipment)) { const fresh = data(res.equipment); setEquipment(cur => mergeKeyed(R.equipment, cur, fresh, readAt)); }
+    if (ok(res.machineTypes)) { const fresh = data(res.machineTypes); setCustomMachineTypes(cur => mergeKeyed(R.machineTypes, cur, fresh, readAt)); }
+    if (!admin) return;
+    const freshInsp = ok(res.inspections) ? data(res.inspections) : null;
+    if (freshInsp) setSiteInspections(cur => {
+      const next = mergeKeyed(R.inspections, cur, freshInsp, readAt);
+      if (next !== cur) primeAuditList("inspection", next);   // changes made elsewhere aren't logged as ours
+      return next;
+    });
+    if (ok(res.modules)) { const fresh = data(res.modules); setCustomModules(cur => mergeKeyed(R.modules, cur, fresh, readAt)); }
+    const fireFresh = {};
+    Object.keys(FIRE_TABLES).forEach(k => { if (ok(res[`fire.${k}`])) fireFresh[k] = data(res[`fire.${k}`]); });
+    const NONE = [];
+    if (Object.keys(fireFresh).length) setFireSafety(cur => {
+      let changed = false; const next = { ...(cur || {}) };
+      Object.entries(fireFresh).forEach(([k, fresh]) => { const was = (cur || {})[k] || NONE; const m = mergeKeyed(R.fire[k], was, fresh, readAt); if (m !== was) { next[k] = m; changed = true; } });
+      return changed ? next : cur;
+    });
+    // first aid is one document: take theirs only if nothing is unsaved here and we haven't saved since the read
+    if (ok(res.firstAid) && res.firstAid.data[0] && firstAidWroteRef.current < readAt) {
+      const fresh = res.firstAid.data[0].data, fj = stableJSON(fresh), prev = firstAidSavedRef.current;
+      if (prev !== null && fj !== prev) setFirstAidData(cur => {
+        if (stableJSON(cur) !== prev) return cur;   // unsaved change here: keep it (same answer if React runs this twice)
+        firstAidSavedRef.current = fj;
+        return fresh;
+      });
+    }
+  }
+
   async function refreshSharedRecords() {
     if (!_ready.current || refreshBusyRef.current) return;
     refreshBusyRef.current = true;
     try {
+      const registers = refreshRegisters().catch(e => console.error("Register refresh failed:", e));   // awaited below
       // Training history only grows, and can be the biggest table: read just its row ids,
       // and the full rows only when they changed (or the table has no ids to compare).
       const historyRead = async () => {
@@ -1129,6 +1206,7 @@ export default function App() {
           return next;
         });
       }
+      await registers;
     } finally {
       refreshBusyRef.current = false;
     }
@@ -1172,68 +1250,96 @@ export default function App() {
 
   useEffect(() => { if (!_ready.current) return;
     // Admins save any response; line managers only their team's (sign-offs); staff none.
+    // Only responses that changed here are written (an old page can't undo someone's sign-off).
     Object.entries(adminResponses).filter(([uid]) => writesAll() || (user && user.role === "manager" && String(uid) !== String(user.id))).forEach(([uid, keys]) => {
+      const changed = Object.entries(keys || {}).filter(([key, rec]) => dseRespSavedRef.current.get(`${uid}|${key}`) !== stableJSON(rec));
+      if (!changed.length) return;
       auditRecord("dse_response", uid, keys, auditNameOf(uid));
-      Object.entries(keys).forEach(([key, rec]) => {
+      changed.forEach(([key, rec]) => {
+        dseRespSavedRef.current.set(`${uid}|${key}`, stableJSON(rec));
         const [ri, ii] = key.split("_").map(Number);
         dbSaveDseAdminResponse(Number(uid), ri, ii, rec);
       });
     });
   }, [adminResponses]); // eslint-disable-line
 
+  // Equipment: only changed items are written. People who manage equipment (admins, Machinery &
+  // Equipment access) save the item and may delete ones they removed. Everyone else (e.g. an
+  // incident report adding a defect) adds only their new defects / status change to the LATEST
+  // stored copy, so an old copy of the rest of the item is never written back.
   useEffect(() => { if (!_ready.current) return;
-    if (!writesAll()) {
-      // Not an admin: save just the items that changed (e.g. an incident report adding a defect).
-      equipment.forEach(e => {
-        const k = String(e.id), j = stableJSON(e);
-        if (equipmentSavedRef.current.get(k) === j) return;
-        equipmentSavedRef.current.set(k, j);
-        dbWrite(sb.from("equipment").upsert({ id: e.id, data: e }, { onConflict: "id" }), "equipment");
+    const t = regRef.current.equipment;
+    if (user && hasMachineryAccess(user)) {
+      saveKeyed(t, equipment, {
+        write: e => dbWrite(sb.from("equipment").upsert({ id: e.id, data: e }, { onConflict: "id" }), "equipment"),
+        remove: id => dbWrite(sb.from("equipment").delete().eq("id", id), "equipment delete"),
       });
-      // Machinery & Equipment access: also delete the items THEY removed — only ones this
-      // browser loaded or saved, never rows it simply hasn't seen (added by someone else since).
-      if (hasMachineryAccess(user)) {
-        const now = new Set(equipment.map(e => String(e.id)));
-        [...equipmentSavedRef.current.keys()].filter(k => !now.has(k)).forEach(k => {
-          equipmentSavedRef.current.delete(k);
-          dbWrite(sb.from("equipment").delete().eq("id", k), "equipment delete");
-        });
-      }
       return;
     }
-    dbSaveEquipment(equipment);
+    const { changed } = diffKeyed(t, equipment);
+    changed.forEach(e => {
+      const base = savedCopy(t, e.id) || {};
+      markSaved(t, e);
+      // one save at a time per item (two quick changes must not both read the same copy)
+      inTurn(`eq:${e.id}`, async () => {
+        const r = await sb.from("equipment").query(`select=data&id=eq.${encodeURIComponent(e.id)}`);
+        const cur = !r.error && Array.isArray(r.data) && r.data[0] ? r.data[0].data : null;
+        if (!cur) {
+          t.saved.delete(String(e.id));   // tried again on the next change
+          notify(`The change to ${e.name || "this equipment"} wasn't saved (couldn't reach the register). Please try again.`, { kind: "error" });
+          return;
+        }
+        const seen = new Set([...(cur.defects || []), ...(base.defects || [])].map(d => String(d.id)));
+        const added = (e.defects || []).filter(d => !seen.has(String(d.id)));
+        const next = { ...cur, defects: [...(cur.defects || []), ...added] };
+        if (e.status !== base.status) next.status = e.status;
+        const ok = await dbWrite(sb.from("equipment").upsert({ id: e.id, data: next }, { onConflict: "id" }), "equipment", { alertOnError: true });
+        if (!ok) t.saved.delete(String(e.id));
+      });
+    });
   }, [equipment]); // eslint-disable-line
 
   useEffect(() => { if (!_ready.current || !writesAll()) return;
     auditList("inspection", siteInspections, i => [i.date, (INSP_TYPES.find(t => t.id === i.type) || {}).label || i.type, i.location].filter(Boolean).join(" · "));
-    dbSaveSiteInspections(siteInspections);
+    saveKeyed(regRef.current.inspections, siteInspections, {
+      write: x => dbWrite(sb.from("site_inspections").upsert({ id: x.id, data: x }, { onConflict: "id" }), "site inspection"),
+      remove: id => dbWrite(sb.from("site_inspections").delete().eq("id", id), "site inspection delete"),
+    });
   }, [siteInspections]); // eslint-disable-line
 
-  // One fire safety save at a time: a change made while a save is running (e.g. Undo
-  // straight after a remove) waits and is saved next, so the prune of the earlier save
-  // can't delete a row the later change put back.
-  const fireSaveRef = useRef({ running: false, next: null });
+  // Fire safety: each list saves only the records that changed, and deletes only ones removed here.
   useEffect(() => { if (!_ready.current || !writesAll()) return;
-    const q = fireSaveRef.current;
-    q.next = fireSafety;
-    if (q.running) return;
-    (async () => {
-      q.running = true;
-      try { while (q.next) { const fs = q.next; q.next = null; await dbSaveFireSafety(fs); } }
-      finally { q.running = false; }
-    })();
+    Object.entries(FIRE_TABLES).forEach(([k, table]) => {
+      saveKeyed(regRef.current.fire[k], (fireSafety || {})[k] || [], {
+        write: x => dbWrite(sb.from(table).upsert({ id: x.id, data: x }, { onConflict: "id" }), `fire safety: ${table}`),
+        remove: id => dbWrite(sb.from(table).delete().eq("id", id), `fire safety delete: ${table}`),
+      });
+    });
   }, [fireSafety]); // eslint-disable-line
 
   useEffect(() => { if (!_ready.current || !writesAll()) return;
-    dbSaveFirstAidData(firstAidData);
+    const j = stableJSON(firstAidData);
+    if (j === firstAidSavedRef.current) return;   // nothing changed here (e.g. just refreshed)
+    const before = firstAidSavedRef.current;
+    firstAidSavedRef.current = j; firstAidWroteRef.current = Date.now();
+    dbSaveFirstAidData(firstAidData).then(ok => {
+      if (ok !== false) return;
+      // not saved: go back to the last copy known to be in the database, so the next change
+      // tries again (and a refresh can still bring in other people's changes)
+      if (firstAidSavedRef.current === j) firstAidSavedRef.current = before;
+      notify("The first aid register wasn't saved. Your change is still here — it will be tried again on your next change.", { kind: "error" });
+    });
   }, [firstAidData]); // eslint-disable-line
 
+  // Custom modules / machine types: only changed ones are saved (deleting has its own explicit call).
   useEffect(() => { if (!_ready.current || !writesAll()) return;
-    customModules.forEach(m => dbSaveCustomModule(m));
+    saveKeyed(regRef.current.modules, customModules, { canDelete: false,
+      write: m => dbWrite(sb.from("custom_modules").upsert({ id: m.id, data: m }, { onConflict: "id" }), `module "${m.title || m.id}"`) });
   }, [customModules]); // eslint-disable-line
 
   useEffect(() => { if (!_ready.current || !writesMachinery()) return;
-    customMachineTypes.forEach(m => dbSaveCustomMachineType(m));
+    saveKeyed(regRef.current.machineTypes, customMachineTypes, { canDelete: false,
+      write: m => dbWrite(sb.from("custom_machine_types").upsert({ id: m.id, data: m }, { onConflict: "id" }), "custom machine type") });
   }, [customMachineTypes]); // eslint-disable-line
 
   // NB: there is deliberately NO auto-sync effect for `passwords`. It used to write
@@ -1346,7 +1452,7 @@ export default function App() {
       score: rec.score, date: rec.date, cert_id: rec.certId, answers: rec.answers,
       module_version: moduleVersion, ...rc,
     }, { onConflict: "user_id,module_id" }), "training completion", rec.recorded ? { alertOnError: true } : undefined);
-    if (rec.recorded && !ok) return false;
+    if (!ok) return false;   // not saved: the caller (e.g. the phone's offline queue) keeps it and tries again
     await dbWrite(sb.from("training_completion_history").insert(hist), "training completion history");
     return true;
   }
@@ -1449,7 +1555,7 @@ export default function App() {
   // Upserts one incident (and uploads any new photos first). Called for EVERY incident by the auto-sync effect.
   async function dbSaveIncident(inc) {
     incidentWritingRef.current.add(String(inc.id));
-    try { await dbSaveIncidentNow(inc); } finally { incidentWritingRef.current.delete(String(inc.id)); }
+    try { return await dbSaveIncidentNow(inc); } finally { incidentWritingRef.current.delete(String(inc.id)); }
   }
   async function dbSaveIncidentNow(inc) {
     // Photos arrive from the mobile app as data URLs. Push them to Storage and
@@ -1485,6 +1591,7 @@ export default function App() {
     }, { onConflict: "id" }), "incident", { alertOnError: true });
     if (savedOk) pingIncidentAlert(inc.id);   // high-risk? the server emails admins straight away (Site Settings → Email reminders)
     auditRecord("incident", inc.id, { ...inc, photos }, incidentAuditLabel(inc));
+    return savedOk;
   }
 
   async function dbDeleteIncident(id) {
@@ -1495,7 +1602,7 @@ export default function App() {
   // Investigations are keyed by incident id; the whole investigation is one JSON `data` blob.
   async function dbSaveInvestigation(incidentId, data) {
     investigationWritingRef.current.add(String(incidentId));
-    try { await dbSaveInvestigationNow(incidentId, data); } finally { investigationWritingRef.current.delete(String(incidentId)); }
+    try { return await dbSaveInvestigationNow(incidentId, data); } finally { investigationWritingRef.current.delete(String(incidentId)); }
   }
   // Reads ONE investigation straight from the database.
   // Returns { ok:true, data } (data undefined if there is no row yet) or { ok:false }.
@@ -1529,6 +1636,7 @@ export default function App() {
     auditRecord("investigation", incidentId, data, incidentAuditLabel(incidents.find(i => String(i.id) === String(incidentId))) || String(incidentId));
     const ok = await dbWrite(sb.from("investigations").upsert({ incident_id: incidentId, data }, { onConflict: "incident_id" }), "investigation");
     if (ok) investigationBaseRef.current.set(key, data);   // only once it's really in the database
+    return ok;
   }
 
   // Marks a single corrective action complete inside its investigation and
@@ -1536,17 +1644,17 @@ export default function App() {
   // screen; safe to call from the desktop investigation tab too.
   async function dbCompleteAction(incidentId, actionId, completedBy) {
     const inv = investigations[incidentId];
-    if (!inv) return;
+    if (!inv) return false;   // not loaded (yet): the phone's queue tries again later
     const next = {
       ...inv,
       actions: (inv.actions || []).map(a =>
         a.id === actionId
-          ? { ...a, status: "complete", completedDate: todayISO(), completedBy: completedBy || "" }
+          ? completeAction(a, completedBy, todayISO())
           : a
       ),
     };
     setInvestigations(p => ({ ...p, [incidentId]: next }));
-    await dbSaveInvestigation(incidentId, next);
+    return dbSaveInvestigation(incidentId, next);
   }
 
   // Records which VERSION was read, and appends to doc_ack_history so earlier reads
@@ -1556,11 +1664,13 @@ export default function App() {
     const version = (docs.find(d => String(d.id) === String(docId)) || {}).version || 1;
     const hist = { user_id: String(userId), doc_id: String(docId), version, date, at: new Date().toISOString() };
     setDocAckHistory(p => [...p, hist]);
-    await dbWrite(sb.from("doc_acknowledgements").upsert({ user_id: String(userId), doc_id: String(docId), date, version }, { onConflict: "user_id,doc_id" }), "document acknowledgement");
+    const ok = await dbWrite(sb.from("doc_acknowledgements").upsert({ user_id: String(userId), doc_id: String(docId), date, version }, { onConflict: "user_id,doc_id" }), "document acknowledgement");
+    if (!ok) return false;   // not saved: the phone's queue keeps it and tries again
     await dbWrite(sb.from("doc_ack_history").insert(hist), "document read history");
+    return true;
   }
 
-  // Replaces the full list of staff a document is assigned to (delete-then-insert).
+  // Saves the full list of staff a document is assigned to (only the differences are written).
   // Saves for the same document / person run one after another (quick tick-untick
   // clicks can't overlap and leave the database different from the screen).
   const saveQueueRef = useRef(new Map());
@@ -1584,7 +1694,7 @@ export default function App() {
     const add = want.filter(u => !have.has(u));
     const drop = [...have].filter(u => !want.includes(u));
     let ok = true;
-    if (add.length) ok = (await dbWrite(sb.from("doc_assignments").insert(add.map(u => ({ doc_id: sid, user_id: u }))), "doc assignments")) !== false && ok;
+    if (add.length) ok = (await insertNew("doc_assignments", add.map(u => ({ doc_id: sid, user_id: u })), "doc assignments")) && ok;
     for (const u of drop) ok = (await dbWrite(sb.from("doc_assignments").delete().match({ doc_id: sid, user_id: u }), "doc assignments remove")) !== false && ok;
     return ok;
   }
@@ -1735,7 +1845,8 @@ export default function App() {
     const list = reports || [];
     let ok = true;
     const add = list.map((r, i) => [r, i]).filter(([, i]) => !stored.has(i));
-    if (add.length) ok = (await dbWrite(sb.from("dse_reports").insert(add.map(([r, i]) => ({ user_id: sid, report_idx: i, data: r }))), "DSE reports")) !== false && ok;
+    if (add.length) ok = (await insertNew("dse_reports", add.map(([r, i]) => ({ user_id: sid, report_idx: i, data: r })), "DSE reports",
+      row => dbWrite(sb.from("dse_reports").update({ data: row.data }).match({ user_id: sid, report_idx: row.report_idx }), "DSE report"))) && ok;
     for (const [r, i] of list.map((r, i) => [r, i]).filter(([, i]) => stored.has(i))) {
       if (stableJSON(stored.get(i)) === stableJSON(r)) continue;
       ok = (await dbWrite(sb.from("dse_reports").update({ data: r }).match({ user_id: sid, report_idx: i }), "DSE report")) !== false && ok;
@@ -1780,7 +1891,7 @@ export default function App() {
     const merged = { ...(existing?.data || {}), theme: themeKey };
     window.__userProfiles = profiles.map(r => String(r.user_id)===sid ? {...r, data:merged} : r);
     if (!existing) window.__userProfiles.push({ user_id: sid, data: merged });
-    await dbWrite(sb.from("user_profiles").upsert({ user_id: sid, data: merged }, { onConflict: "user_id" }), "theme preference");
+    return dbWrite(sb.from("user_profiles").upsert({ user_id: sid, data: merged }, { onConflict: "user_id" }), "theme preference");
   }
 
   // ── Mobile permits view model ───────────────────────────────────────────────
@@ -1865,11 +1976,10 @@ export default function App() {
     },
 
     // ── Inspections, permits, RIDDOR (mobile-only writes) ───────────────────
-    // dbSaveSiteInspections() upserts AND prunes anything not in the array it
-    // is given, so a single record must never be passed to it. Instead we put
-    // the record into state (deduped by id, because the offline queue may
-    // replay a write we already applied optimistically) and let the existing
-    // [siteInspections] effect persist the whole array.
+    // The record is saved here, directly, and the result returned (false = not saved), so the
+    // phone's offline queue keeps it and tries again. It also goes into state (deduped by id,
+    // because the queue may replay a write already applied), marked as saved so the
+    // [siteInspections] effect doesn't write it a second time.
     saveInspection: async (record) => {
       // site_inspections stores the whole record as jsonb, so the photos have
       // to become URLs before the record goes into state.
@@ -1878,7 +1988,10 @@ export default function App() {
         photos: await uploadPhotos(PHOTO_BUCKET, `insp_${record.id}_${i}`, nc.photos),
       })));
       const next = { ...record, nonConformances: ncs };
+      const ok = await dbWrite(sb.from("site_inspections").upsert({ id: next.id, data: next }, { onConflict: "id" }), "site inspection");
+      if (ok) markSaved(regRef.current.inspections, next);
       setSiteInspections(p => [next, ...p.filter(r => r.id !== next.id)]);
+      return ok;
     },
 
     savePermitSignOn: (entry) => {
@@ -2032,7 +2145,7 @@ export default function App() {
   async function dbSaveContractorVisits(cid,data) { await dbWrite(sb.from("contractor_visits").upsert({contractor_id:cid,data},{onConflict:"contractor_id"}), "contractor visits"); }
 
   async function dbSavePermit(p) {
-    await dbWrite(sb.from("permits").upsert({ id: p.id, data: p }, { onConflict: "id" }), "permit", { alertOnError: true });
+    return dbWrite(sb.from("permits").upsert({ id: p.id, data: p }, { onConflict: "id" }), "permit", { alertOnError: true });
   }
   async function dbDeletePermit(id) {
     await dbWrite(sb.from("permits").delete().eq("id", id), "permit delete");
@@ -2132,10 +2245,9 @@ export default function App() {
   function managerSignOffAction(incidentId, action, member, note) {
     const inv = investigations[incidentId]; if (!inv) return;
     const today = todayISO();
-    const done = action.status === "complete" || action.status === "closed";
+    const done = isActionDone(action);
     const next = { ...inv, actions: (inv.actions || []).map(a => a.id !== action.id ? a : {
-      ...a,
-      ...(done ? {} : { status: "complete", completedDate: today, completedBy: user.name }),
+      ...completeAction(a, user.name, today),
       managerSignOff: { by: user.name, date: today, note: note || "" },
     }) };
     primeAudit("investigation", incidentId, next);
@@ -2238,7 +2350,7 @@ export default function App() {
 
   // Whole first aid register saved as one JSON document (row id "singleton").
   async function dbSaveFirstAidData(data) {
-    await dbWrite(sb.from("first_aid_register").upsert({ id: "singleton", data }, { onConflict: "id" }), "first aid register");
+    return dbWrite(sb.from("first_aid_register").upsert({ id: "singleton", data }, { onConflict: "id" }), "first aid register");
   }
 
   // Saves the six fire-safety lists to their six tables using upsert-and-prune.
@@ -2719,6 +2831,7 @@ export default function App() {
         docAssignments={docAssignments}
         docAcknowledgements={docAcknowledgements}
         dseReports={dseReports}
+        extCerts={extCerts}
         incidents={incidents}
         investigations={investigations}
         allUsers={allUsers}
@@ -3187,14 +3300,13 @@ export default function App() {
     // Quick hazard reports this user still has to complete in the full form
     const myQuickToComplete = myIncompleteQuickReports(incidents, user.id);
     const openQuickReport = (inc) => { setStab("incidents"); setQuickEditId(inc.id); };
-    // Compliance % = good items / all items (assigned modules + uploaded ext. certs + 1 for DSE).
+    // Compliance % = in-date items / all items (assigned modules + uploaded ext. certs + 1 for DSE).
     // Bands: 100% green, ≥70% amber, otherwise red.
-    // Overall health score — includes DSE as one item
-    const totalItems = myMods.length + myCertTypes.length + 1; // +1 for DSE
-    const goodItems  = upToDate.length + myCertTypes.filter(ct=>!expiredCerts.find(e=>e.id===ct.id)&&!expiringCerts.find(e=>e.id===ct.id)).length + (dseCompleted&&!dseExpired?1:0);
-    const healthPct  = totalItems ? Math.round(goodItems/totalItems*100) : 100;
-    const healthColor = healthPct===100?"#10b981":healthPct>=70?"#f59e0b":"#ef4444";
-    const healthLabel = healthPct===100?"Fully Compliant":healthPct>=70?"Mostly Compliant":"Needs Attention";
+    // (domains/training/compliance.js — the same rules as the phone, My Team, the matrix and reports)
+    const myCompliance = personalCompliance({ mods: myMods, comps: myC, certs: Object.fromEntries(myCertTypes.map(ct => [ct.id, myExtCerts[ct.id]])),
+      lastDse: lastDseReport || null, dseRenewalMonths: DSE_RENEWAL_MONTHS });
+    const healthPct  = myCompliance.pct;
+    const { color: healthColor, label: healthLabel } = complianceBand(healthPct);
     const totalActionNeeded = actionNeeded.length + (dseNeedsAction?1:0);
 
     // Staff menu bar widths: the tabs must never be hidden behind the bell. Wider than
@@ -3266,7 +3378,7 @@ export default function App() {
               // NB: action owners are matched by NAME (lib/openActions sameName: ignoring case and extra spaces), not id — renaming a user orphans their actions.
               // Investigation corrective actions assigned to this user
               const myActions = Object.values(investigations).flatMap(inv=>
-                (inv.actions||[]).filter(a=>sameName(a.owner,user.name)&&a.status!=="complete"&&a.status!=="closed")
+                (inv.actions||[]).filter(a=>sameName(a.owner,user.name)&&!isActionDone(a))
               );
               const overdueActions = myActions.filter(a=>a.dueDate&&a.dueDate<todayISO());
               // Line managers: team items waiting for their sign-off
@@ -3275,7 +3387,7 @@ export default function App() {
                 const teamNames = new Set(team.map(u=>String(u.name).trim().toLowerCase()));
                 const dseOpen = team.reduce((n,u)=>{ const reps=dseReports[u.id]||dseReports[String(u.id)]||[]; const ri=reps.length-1; if(ri<0) return n;
                   const resp=adminResponses[u.id]||adminResponses[String(u.id)]||{}; return n+(reps[ri].issues||[]).filter((_,ii)=>!(resp[`${ri}_${ii}`]||{}).resolved).length; },0);
-                const actsToSign = Object.values(investigations).flatMap(inv=>(inv.actions||[]).filter(a=>teamNames.has(String(a.owner||"").trim().toLowerCase())&&(a.status==="complete"||a.status==="closed")&&!a.managerSignOff)).length;
+                const actsToSign = Object.values(investigations).flatMap(inv=>(inv.actions||[]).filter(a=>teamNames.has(String(a.owner||"").trim().toLowerCase())&&isActionDone(a)&&!a.managerSignOff)).length;
                 if (dseOpen) notifications.push({type:"dse",urgent:false,title:`${dseOpen} team DSE issue${dseOpen!==1?"s":""} to sign off`,detail:"Open My Team to review and sign off",nav:{tab:"team"}});
                 if (actsToSign) notifications.push({type:"report",urgent:false,title:`${actsToSign} completed team action${actsToSign!==1?"s":""} awaiting your sign-off`,detail:"Open My Team to sign them off",nav:{tab:"team"}});
               }
@@ -3710,7 +3822,7 @@ export default function App() {
               {/* Passed results for EARLIER versions of a module (kept when a module is
                   updated — see saveModuleVersion). Certificates stay viewable. */}
               {(()=>{
-                const earlier = compHistory.filter(h=>String(h.user_id)===String(user.id) && h.score>=70 && (()=>{
+                const earlier = compHistory.filter(h=>String(h.user_id)===String(user.id) && (h.cert_id || h.recorded || Number(h.score)>=PASS_MARK) && (()=>{
                   const m = allModules.find(x=>String(x.id)===String(h.module_id));
                   return m && (h.module_version||1) < (m.version||1);
                 })()).sort((a,b)=>String(b.date).localeCompare(String(a.date)));
@@ -4464,9 +4576,8 @@ export default function App() {
             // ── Training stats ────────────────────────────────────────────────
             const staffList = staff;
             const overdueTraining = staffList.filter(u=>{
-              const a=(assigns[u.id]||[]).length;
-              const d=(assigns[u.id]||[]).filter(mid=>(comps[u.id]||{})[mid]).length;
-              return a>0 && d<a;
+              const _tr=staffTraining(u.id, assigns, comps, allModules);   // training/compliance.js
+              return _tr.total>0 && _tr.good<_tr.total;
             });
             const expiringTraining = staffList.filter(u=>
               (assigns[u.id]||[]).some(mid=>{
@@ -4607,38 +4718,12 @@ export default function App() {
                       return card(E("🔥",""),"Fire Safety",f.wardens.length,sub,null,f.issues>0,()=>setAtab("firesafety"));
                     })() },
                     { id:"firstAid", node: (()=>{
-                      const fa = firstAidData||{};
-                      const faAiders = fa.aiders||[];
-                      const faCustomZones = fa.customZones||[];
-                      const faAllZones = [...new Set([...getSiteLists().firstAidZones, ...faCustomZones])];
-                      const minPerShift = fa.assessment?.minPerShift||1;
-                      // Build combined aider list (manual + cert-detected), same logic as FirstAidRegisterTab
-                      const faCertAiders = [];
-                      Object.entries(extCerts||{}).forEach(([uid2, certs2])=>{
-                        if(certs2.first_aid){ const u2=staffList.find(s=>String(s.id)===String(uid2)); if(u2) faCertAiders.push({id:`cert_${uid2}`,expiryDate:certs2.first_aid.expiryDate||"",shifts:certs2.first_aid.shifts||[],zones:certs2.first_aid.zones||[]}); }
-                      });
-                      const manualIds = new Set(faAiders.filter(a=>a.staffId).map(a=>String(a.staffId)));
-                      const allFaAiders = [...faAiders, ...faCertAiders.filter(c=>!manualIds.has(String(c.staffId||c.id.replace("cert_",""))))];
-                      const validAiders = allFaAiders.filter(a=>{ if(!a.expiryDate) return false; return Math.ceil((new Date(a.expiryDate)-new Date())/86400000)>=0; });
-                      const expiredCount = allFaAiders.length - validAiders.length;
-                      // A "gap" = a zone/shift combination with fewer valid first aiders than minPerShift.
-                      // Keep in step with the equivalent logic in FirstAidRegisterTab.jsx.
-                      // Count coverage gaps
-                      const SHIFTS3 = coverShifts(getSiteLists().firstAidShifts);   // this site's shifts (Site Settings)
-                      let gapCount = 0;
-                      faAllZones.forEach(zone=>{
-                        SHIFTS3.forEach(shift=>{
-                          const count = validAiders.filter(a=>{
-                            const shiftsOk = !a.shifts?.length || a.shifts.some(isAllShift) || a.shifts.includes(shift);
-                            const zonesOk  = !a.zones?.length  || a.zones.includes(zone);
-                            return shiftsOk && zonesOk;
-                          }).length;
-                          if(count < minPerShift) gapCount++;
-                        });
-                      });
+                      // the same list and rules as the First Aid register (domains/firstAid/firstAidLogic.js)
+                      const faSum = firstAidSummary({ firstAidData, extCerts, staff: staffList, zones: getSiteLists().firstAidZones, shifts: getSiteLists().firstAidShifts });
+                      const validAiders = faSum.inDate, gapCount = faSum.gaps, expiredCount = faSum.expired.length + faSum.undated.length;
                       const sub = validAiders.length===0 ? "No qualified first aiders" :
                         gapCount>0 ? `${gapCount} zone/shift gap${gapCount!==1?"s":""}` :
-                        expiredCount>0 ? `${expiredCount} cert${expiredCount!==1?"s":""} expired` :
+                        expiredCount>0 ? `${expiredCount} cert${expiredCount!==1?"s":""} expired or undated` :
                         "All shifts covered";
                       const isAlert = validAiders.length===0 || gapCount>0 || expiredCount>0;
                       return card(E("🩺",""),"First Aid",validAiders.length,sub,null,isAlert,()=>setAtab("firstaid"));
@@ -4669,9 +4754,7 @@ export default function App() {
                   {/* Incomplete training */}
                   {section("Staff with incomplete training",
                     listCard(overdueTraining,"All staff training complete",u=>{
-                      const a=(assigns[u.id]||[]).length;
-                      const d=(assigns[u.id]||[]).filter(mid=>(comps[u.id]||{})[mid]).length;
-                      const pct=a?Math.min(100,Math.round(d/a*100)):0;
+                      const _tr=staffTraining(u.id, assigns, comps, allModules), a=_tr.total, d=_tr.good, pct=_tr.pct;   // training/compliance.js
                       return (<>
                         <Avatar name={u.name} size={28}/>
                         <div style={{flex:1,minWidth:0}}>
@@ -5064,9 +5147,7 @@ export default function App() {
                     if (!u.name.toLowerCase().includes(q) && !u.email.toLowerCase().includes(q) && !(u.jobTitle||"").toLowerCase().includes(q)) return false;
                   }
                   if (staffFilterProgress!=="all") {
-                    const a=(assigns[u.id]||[]).length;
-                    const d=(assigns[u.id]||[]).filter(mid=>(comps[u.id]||{})[mid]).length;
-                    const pct=a?Math.min(100, Math.round(d/a*100)):0;
+                    const _tr=staffTraining(u.id, assigns, comps, allModules), a=_tr.total, d=_tr.good, pct=_tr.pct;   // training/compliance.js
                     if (staffFilterProgress==="compliant" && pct!==100) return false;
                     if (staffFilterProgress==="inprogress" && (pct===100||pct===0)) return false;
                     if (staffFilterProgress==="overdue" && (a===0 || pct!==0)) return false;   // nothing started (people with no modules are under "No Modules")
@@ -5176,9 +5257,8 @@ export default function App() {
                           </label>
                         )}
                         {ordered.map((u,i)=>{
-                          const a=(assigns[u.id]||[]).length, d=(assigns[u.id]||[]).filter(mid=>(comps[u.id]||{})[mid]).length;
-                          const pct=a?Math.min(100, Math.round(d/a*100)):0;
-                          const barColor=pct===100?T.green:pct>=50?T.accent:"#ef4444";
+                          const tr=staffTraining(u.id, assigns, comps, allModules), a=tr.total, d=tr.good, pct=tr.pct;   // training/compliance.js
+                          const barColor={green:T.green,amber:T.accent,red:"#ef4444"}[tr.band.key]||T.muted;
                           const lastActive=lastLoginMap[u.id];
                           return (
                             <React.Fragment key={u.id}>
@@ -5213,9 +5293,8 @@ export default function App() {
                       </div>
                       {filteredStaff.length===0 && <div style={{padding:"32px 20px",textAlign:"center",color:T.muted,fontSize:14}}>{staff.length===0?"No staff members yet. Add one above.":"No staff match the current filters."}</div>}
                       {ordered.map((u,i)=>{
-                        const a=(assigns[u.id]||[]).length, d=(assigns[u.id]||[]).filter(mid=>(comps[u.id]||{})[mid]).length;
-                        const pct=a?Math.min(100, Math.round(d/a*100)):0;
-                        const barColor=pct===100?T.green:pct>=50?T.accent:"#ef4444";
+                        const tr=staffTraining(u.id, assigns, comps, allModules), a=tr.total, d=tr.good, pct=tr.pct;   // training/compliance.js
+                        const barColor={green:T.green,amber:T.accent,red:"#ef4444"}[tr.band.key]||T.muted;
                         const lastActive=lastLoginMap[u.id];
                         const ticked=selIds.includes(String(u.id));
                         return (
@@ -5894,7 +5973,7 @@ export default function App() {
 
           {atab==="investigation" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
-            <LazyInvestigationTab incidents={incidents} setIncidents={setIncidents} staff={staff}
+            <LazyInvestigationTab userName={user?.name || ""} incidents={incidents} setIncidents={setIncidents} staff={staff}
               investigations={investigations} setInvestigations={setInvestigations}
               fetchInvestigation={fetchInvestigation} acceptInvestigationBase={acceptInvestigationBase}
               focusedId={investigationView} setFocusedId={setInvestigationView}

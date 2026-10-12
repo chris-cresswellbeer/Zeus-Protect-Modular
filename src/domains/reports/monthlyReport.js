@@ -15,6 +15,8 @@
  * and open/overdue actions are a snapshot "as at" the day the report is produced —
  * the portal keeps current status, not a month-end history of it.
  */
+import { inspectionPct, scoreBand as inspBand, PRINT_SCORE_COLOR } from "../inspections/inspectionScore";
+import { isActionDone, actionDoneDate } from "../../lib/actionStatus";
 import { buildTrainingMatrix } from "../training/trainingMatrix";
 import { collectOpenActions } from "../../lib/openActions";
 import { INSP_TYPES } from "../../data/seedInspections";
@@ -30,7 +32,7 @@ const ym = (y, m) => `${y}-${pad(m + 1)}`;
 const inMonth = (d, y, m) => !!d && String(d).slice(0, 7) === ym(y, m);
 const shift = (y, m, k) => { const d = new Date(y, m + k, 1); return { y: d.getFullYear(), m: d.getMonth() }; };
 const pctOf = (a, b) => b ? Math.round(a / b * 100) : null;
-const inspPct = ins => ins && ins.maxScore ? Math.round((Number(ins.overallScore) || 0) / Number(ins.maxScore) * 100) : null;
+const inspPct = inspectionPct;   // inspections/inspectionScore.js
 const avg = list => list.length ? Math.round(list.reduce((s, v) => s + v, 0) / list.length) : null;
 
 /**
@@ -102,7 +104,7 @@ function buildMonthlyReport(data, { year, month }) {
   const byOwner = {};
   overdue.forEach(a => { byOwner[a.owner] = (byOwner[a.owner] || 0) + 1; });
   let closedInMonth = 0;
-  Object.values(data.investigations || {}).forEach(inv => (inv.actions || []).forEach(a => { if (inMonth(a.completedDate || a.completedAt, year, month)) closedInMonth++; }));
+  Object.values(data.investigations || {}).forEach(inv => (inv.actions || []).forEach(a => { if (isActionDone(a) && inMonth(actionDoneDate(a), year, month)) closedInMonth++; }));
   inspections.forEach(ins => (ins.nonConformances || []).forEach(nc => { if (inMonth(nc.completedDate || nc.actionCompletedDate, year, month)) closedInMonth++; }));
   const actions = { open: open.length, overdue: overdue.length, noDueDate: open.filter(a => !a.dueDate).length,
     oldestOverdue: overdue[0] ? overdue[0].daysOverdue : 0, list: overdue,
@@ -158,7 +160,7 @@ function keyPoints(r) {
 const h = s => String(s === null || s === undefined ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = d => { if (!d) return "—"; const [y, m, dd] = String(d).slice(0, 10).split("-"); return dd ? `${dd}/${m}/${y}` : h(d); };
 const band = p => p === null || p === undefined ? "#64748b" : p >= 95 ? "#047857" : p >= 80 ? "#b45309" : "#b91c1c";
-const scoreBand = p => p === null || p === undefined ? "#64748b" : p >= 90 ? "#047857" : p >= 75 ? "#b45309" : p >= 60 ? "#c2410c" : "#b91c1c";
+const scoreBand = p => PRINT_SCORE_COLOR[inspBand(p).key];   // bands: inspections/inspectionScore.js
 
 function stackedBars(trend) {
   const W = 680, H = 220, L = 30, B = 34, T = 14;

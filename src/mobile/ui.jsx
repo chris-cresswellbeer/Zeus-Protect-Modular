@@ -189,21 +189,25 @@ function MobileHeader({ kicker, title, onBack, right, Z, font }) {
 }
 
 /** Shown while offline; tells the user how many changes are waiting to sync. */
-function OfflineBanner({ queueCount, Z }) {
+// Shown while offline, or while saves are waiting to be sent / couldn't be sent.
+function OfflineBanner({ online = false, queueCount = 0, stuckCount = 0, Z }) {
+  const stuck = stuckCount > 0;
+  const text = !online ? "Offline — you can carry on, we\u2019ll send it when you\u2019re back online"
+    : queueCount > 0 ? `Waiting to send ${queueCount} — trying again every minute`
+    : `${stuckCount} couldn\u2019t be sent — see More`;
+  const col = stuck && online && !queueCount ? Z.red : Z.gold;
   return (
-    <div style={{
-      flexShrink: 0, background: "rgba(245,158,11,0.1)",
-      borderBottom: "1px solid rgba(245,158,11,0.22)",
+    <div role="status" data-testid="offline-banner" style={{
+      flexShrink: 0, background: `${col}1a`,
+      borderBottom: `1px solid ${col}38`,
       padding: "7px 18px", display: "flex", alignItems: "center", gap: 8,
     }}>
-      <span style={{ width: 7, height: 7, borderRadius: 99, background: Z.gold, flexShrink: 0 }} />
-      <span style={{ fontSize: 11.5, fontWeight: 600, color: "#fbbf24", flex: 1 }}>
-        Offline — you can carry on, we&rsquo;ll sync later
-      </span>
+      <span style={{ width: 7, height: 7, borderRadius: 99, background: col, flexShrink: 0 }} />
+      <span style={{ fontSize: 11.5, fontWeight: 600, color: Z.white, flex: 1 }}>{text}</span>
       {queueCount > 0 && (
         <span style={{
           fontSize: 10.5, fontWeight: 800, color: Z.gold,
-          background: "rgba(245,158,11,0.15)", borderRadius: 6, padding: "2px 7px",
+          background: `${Z.gold}26`, borderRadius: 6, padding: "2px 7px",
         }}>
           {queueCount} queued
         </span>

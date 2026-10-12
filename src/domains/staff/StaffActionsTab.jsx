@@ -1,6 +1,7 @@
 import React, { useState, useRef } from "react";
 import { getExpiryStatus, todayISO } from "../../lib/dates";
 import { sameName } from "../../lib/openActions";
+import { isActionDone, actionDoneDate, completeAction } from "../../lib/actionStatus";
 import { ACCEPT_IMG_DOCS } from "../../lib/constants";
 import { myIncompleteQuickReports, isQuickReportOverdue, quickReportDueLabel } from "../incidents/quickReportStatus";
 import { DSE_RENEWAL_MONTHS, DSE_QUESTION_COUNT } from "../../data/seedDse";
@@ -17,8 +18,7 @@ import { DSE_RENEWAL_MONTHS, DSE_QUESTION_COUNT } from "../../data/seedDse";
  * evidence (base64). Changes go into `investigations` state and are saved by App.jsx's
  * [investigations] auto-sync effect.
  *
- * NB: this sets completedAt on completion, whereas the mobile app (dbCompleteAction)
- * sets completedDate. Reports that show a completion date should check both.
+ * "Done" and the completion date come from lib/actionStatus.js (same as everywhere else).
  */
 function StaffActionsTab({ user, onCompleteQuickReport, incidents, investigations, setInvestigations, assigns, comps, allModules, docs, docAssignments, docAcknowledgements, dseReports, adminResponses, dseDraft, onStartDse, setStab, setMod, Z, font }) {
   const today = todayISO();
@@ -68,9 +68,9 @@ function StaffActionsTab({ user, onCompleteQuickReport, incidents, investigation
       .filter(a => sameName(a.owner, user.name));
   });
 
-  const open     = myActions.filter(a=>a.status!=="complete"&&a.status!=="closed");
+  const open     = myActions.filter(a=>!isActionDone(a));
   const overdue  = open.filter(a=>a.dueDate&&a.dueDate<today);
-  const complete = myActions.filter(a=>a.status==="complete"||a.status==="closed");
+  const complete = myActions.filter(a=>isActionDone(a));
 
   // ── Quick hazard reports still needing the full form ─────────────────────
   const quickToComplete = myIncompleteQuickReports(incidents, user.id);
@@ -89,7 +89,7 @@ function StaffActionsTab({ user, onCompleteQuickReport, incidents, investigation
     setInvestigations(prev => {
       const inv = {...prev[a.incidentId]};
       const actions = [...(inv.actions||[])];
-      actions[a.actionIdx] = {...actions[a.actionIdx], status:"complete", completedBy:user.name, completedAt:today};
+      actions[a.actionIdx] = completeAction(actions[a.actionIdx], user.name, today);
       return {...prev, [a.incidentId]: {...inv, actions}};
     });
   }
@@ -139,8 +139,8 @@ function StaffActionsTab({ user, onCompleteQuickReport, incidents, investigation
   function renderActionCard(a) {
     const k = getKey(a);
     const isExpanded = expandedId===k;
-    const isOverdue = a.status!=="complete"&&a.status!=="closed"&&a.dueDate&&a.dueDate<today;
-    const isDone = a.status==="complete"||a.status==="closed";
+    const isDone = isActionDone(a);
+    const isOverdue = !isDone&&a.dueDate&&a.dueDate<today;
     const attachments = a.attachments||[];
 
     return (
@@ -155,7 +155,7 @@ function StaffActionsTab({ user, onCompleteQuickReport, incidents, investigation
             <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
               <span style={{fontSize:10,fontWeight:700,color:priColor(a.priority),background:`${priColor(a.priority)}18`,border:`1px solid ${priColor(a.priority)}33`,borderRadius:6,padding:"2px 8px"}}>{a.priority} priority</span>
               {a.dueDate && <span style={{fontSize:11,color:isOverdue?"#f87171":Z.muted}}>{isOverdue?"🚨 Overdue: ":"📅 Due: "}{a.dueDate}</span>}
-              {isDone && <span style={{fontSize:11,color:"#10b981",fontWeight:700}}>✓ Completed{a.completedAt?" "+a.completedAt:""}</span>}
+              {isDone && <span style={{fontSize:11,color:"#10b981",fontWeight:700}}>✓ Completed{actionDoneDate(a)?" "+actionDoneDate(a):""}</span>}
               {attachments.length>0 && <span style={{fontSize:11,color:Z.muted}}>📎 {attachments.length} file{attachments.length!==1?"s":""}</span>}
             </div>
             <div style={{fontSize:11,color:Z.muted,marginTop:4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>

@@ -296,7 +296,20 @@ function oppositeTheme(currentKey) {
   return themeForMode(isDarkTheme(currentKey) ? "light" : "dark", currentKey);
 }
 
+// ─── The active theme as CSS variables ─────────────────────────────────────────
+// Small shared pieces that aren't handed the theme (shared/primitives.jsx Pill and Bar)
+// read these, so they follow whichever theme is chosen: var(--zp-overlay), var(--zp-green)…
+// Called whenever the theme changes (App.jsx on computers, MobileApp.jsx on phones).
+const THEME_VARS = { overlay: "--zp-overlay", borderMd: "--zp-border-md", muted: "--zp-muted", white: "--zp-text",
+  green: "--zp-green", amber: "--zp-amber", red: "--zp-red", accent: "--zp-accent", accentLt: "--zp-accent-lt", navyMd: "--zp-card" };
+function applyThemeVars(themeKey) {
+  if (typeof document === "undefined") return;
+  const t = getThemeTokens(themeKey), st = document.documentElement.style;
+  Object.entries(THEME_VARS).forEach(([k, v]) => { if (t[k]) st.setProperty(v, t[k]); });
+}
+
 export {
+  applyThemeVars,
   Z, Z_LIGHT, Z_SLATE, Z_FOREST, Z_GRAPHITE, Z_ARCTIC, Z_SAND, Z_ROSE,
   Z_HCDARK, Z_FROST, Z_MINT, Z_HCLIGHT,
   THEMES, ALL_THEMES, getTheme, getThemeTokens, isDarkTheme, isLightTheme,

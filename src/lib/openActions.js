@@ -13,7 +13,8 @@ import { todayISO } from "./dates";
  * ownerAssumed: a risk assessment action with no responsible person (the assessor is shown instead).
  * daysOverdue is null when there is no due date, 0 or less when not yet due.
  */
-const DONE = new Set(["complete", "completed", "closed", "done"]);
+import { isActionDone } from "./actionStatus";
+const DONE = new Set(["complete", "completed", "closed", "done"]);   // site inspection non-conformances
 /** Action owners are names: the same person whatever the case or spacing ("ann  bee" = "Ann Bee"). */
 export const sameName = (a, b) => { const n = v => String(v || "").trim().replace(/\s+/g, " ").toLowerCase(); return !!n(a) && n(a) === n(b); };
 /** A short, stable id from an action's text, for older actions saved without an id (their position
@@ -28,7 +29,7 @@ function collectOpenActions({ incidents = [], investigations = {}, inspections =
   incidents.forEach(inc => {
     const inv = investigations[inc.id];
     (inv?.actions || []).forEach((a, i) => {
-      if (DONE.has(String(a.status || "").toLowerCase())) return;
+      if (isActionDone(a)) return;
       out.push({ key: `inc_${inc.id}_${a.id || i}`, sid: `inc_${inc.id}_${a.id || textId(a.description)}`, source: "Incident investigation", title: a.description || "Corrective action",
         ref: [inc.date, inc.location].filter(Boolean).join(" · "), owner: a.owner || "Unassigned", dueDate: a.dueDate || null,
         raisedDate: inv.investigationDate || inc.date || null, daysOverdue: od(a.dueDate), priority: a.priority || (inc.riddor ? "high" : "medium") });

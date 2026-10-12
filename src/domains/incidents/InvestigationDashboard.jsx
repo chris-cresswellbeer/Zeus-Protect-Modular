@@ -1,3 +1,4 @@
+import { isActionDone } from "../../lib/actionStatus";
 import { E } from "../../lib/emoji";
 
 import { todayISO } from "../../lib/dates";
@@ -19,8 +20,8 @@ function InvestigationDashboard({ incidents, investigations, onOpen, Z, font }) 
     (inv.actions||[]).forEach(a => allActions.push({...a, incId, incLocation: incidents.find(i=>i.id===incId)?.location||"Unknown"}));
   });
 
-  const openActions    = allActions.filter(a => a.status !== "complete");
-  const overdueActions = allActions.filter(a => a.status !== "complete" && a.dueDate && a.dueDate < today);
+  const openActions    = allActions.filter(a => !isActionDone(a));
+  const overdueActions = allActions.filter(a => !isActionDone(a) && a.dueDate && a.dueDate < today);
   const highRiskOpen   = incidents.filter(i => {
     if (i.closed) return false;
     if (i.riddor) return true;

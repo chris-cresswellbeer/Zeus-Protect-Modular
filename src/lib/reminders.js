@@ -53,7 +53,7 @@
 import { EXT_CERT_TYPES } from "../data/seedExtCerts";
 import { TRAINING_MODULES } from "../data/seedTraining";
 import { MACHINERY_TYPES, machineState } from "../data/seedMachinery";
-import { parseCompletionDate } from "../domains/training/completion";
+import { parseCompletionDate, PASS_MARK } from "../domains/training/completion";
 import { collectOpenActions } from "./openActions";
 import { riddorDue, riddorUrgent, riddorDueText } from "../domains/incidents/riddor";
 import { INJURY_TYPES } from "../data/seedIncidents";
@@ -173,7 +173,7 @@ export function prepareData(rows = {}) {
   });
   const comps = {};
   r("training_completions").forEach(x => {
-    if (!x.recorded && !x.cert_id && x.score != null && Number(x.score) < 70) return;   // a failed attempt (older versions saved these)
+    if (!x.recorded && !x.cert_id && x.score != null && Number(x.score) < PASS_MARK) return;   // a failed attempt (older versions saved these)
     (comps[String(x.user_id)] = comps[String(x.user_id)] || {})[String(x.module_id)] = { date: x.date, score: x.score };
   });
   const docs = r("documents").map(x => ({ id: String(x.id), title: x.title || "Document", type: x.type || "Document", reviewDate: x.review_date || (x.data && x.data.reviewDate) || "" }));

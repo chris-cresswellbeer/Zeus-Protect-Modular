@@ -63,10 +63,12 @@ async function enqueue(type, payload, label) {
     req.onerror = () => reject(req.error);
   });
   // Ask the service worker to retry for us if the tab is closed before we drain.
+  // (getRegistration, not .ready: .ready never resolves when no service worker is
+  // registered, which used to leave this function — and the "waiting to send" display — hanging.)
   if ("serviceWorker" in navigator && "SyncManager" in window) {
     try {
-      const reg = await navigator.serviceWorker.ready;
-      await reg.sync.register("zeus-sync");
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (reg && reg.sync) await reg.sync.register("zeus-sync");
     } catch (e) {
       /* Background Sync unavailable (Safari) — the online listener covers it. */
     }
@@ -102,17 +104,34 @@ async function bumpAttempts(item) {
   });
 }
 
-// handlers: { [type]: async (payload) => void }
-// Drains in insertion order and stops at the first failure so writes that
-// depend on earlier ones (a completion before its certificate) stay ordered.
-// ⚠ A handler only counts as FAILED if it throws/rejects. The App.jsx db* functions
-// wrap writes in dbWrite(), which logs errors and resolves false instead of throwing —
-// so a server-side failure is treated as success and the item is removed. To make the
-// queue truly durable, have the handlers throw when dbWrite returns false.
-async function drainQueue(handlers) {
+// handlers: { [type]: async (payload) => void } — a handler FAILS by throwing/rejecting
+// (MobileApp wraps the App.jsx saves so that "not saved" throws).
+// Drains in insertion order and stops at the first failure so writes that depend on
+// earlier ones (a completion before its certificate) stay ordered — except an item that
+// has failed MAX_ATTEMPTS times: it's set aside ("couldn't be sent", shown in More) so it
+// can't hold up everything queued after it. retry(id) puts it back in line.
+const MAX_ATTEMPTS = 30;
+const isStuck = item => (item.attempts || 0) >= MAX_ATTEMPTS;
+
+// Only one run at a time: several things can start one (signal back, the 1-minute retry,
+// the offline worker's wake-up, "Try again"). A second request while one is running waits
+// for it and then runs once more, so an item is never sent twice at the same moment.
+let running = null, again = false;
+function drainQueue(handlers) {
+  if (running) { again = true; return running; }
+  running = (async () => {
+    let total = 0;
+    do { again = false; total += await drainOnce(handlers); } while (again);
+    return total;
+  })().finally(() => { running = null; });
+  return running;
+}
+
+async function drainOnce(handlers) {
   const items = await listQueue();
   let drained = 0;
   for (const item of items) {
+    if (isStuck(item)) continue;
     const handler = handlers[item.type];
     if (!handler) {
       console.warn("[syncQueue] no handler for type", item.type, "— dropping");
@@ -126,10 +145,21 @@ async function drainQueue(handlers) {
     } catch (err) {
       console.warn("[syncQueue] failed", item.type, err);
       await bumpAttempts(item);
-      break;
+      if ((item.attempts || 0) + 1 < MAX_ATTEMPTS) break;   // keep the order; a newly stuck item steps aside
     }
   }
   return drained;
 }
 
-export { enqueue, listQueue, remove, drainQueue };
+/** Put a set-aside ("couldn't be sent") item back in line. */
+async function retry(id) {
+  const item = (await listQueue()).find(x => x.id === id);
+  if (!item) return;
+  const db = await openDb();
+  await new Promise((resolve, reject) => {
+    const req = tx(db, "readwrite").put({ ...item, attempts: 0 });
+    req.onsuccess = resolve; req.onerror = () => reject(req.error);
+  });
+}
+
+export { enqueue, listQueue, remove, drainQueue, retry, isStuck, MAX_ATTEMPTS };

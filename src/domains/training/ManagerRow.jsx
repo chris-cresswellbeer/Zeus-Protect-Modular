@@ -1,3 +1,4 @@
+import { staffTraining, moduleState, isInDateState } from "./compliance";
 import { useState } from "react";
 import { Avatar, Bar } from "../../shared/primitives";
 import { TRAINING_MODULES } from "../../data/seedTraining";
@@ -88,11 +89,10 @@ function ManagerRow({ mgr, assigns, comps, Z, font, modules, extCerts, machineCo
           {mgr.members.map((u,ui)=>{
             const assignedIds = assigns[u.id]||[];
             const userComps   = comps[u.id]||{};
-            const a = assignedIds.length;
-            const d = (assigns[u.id]||[]).filter(mid => userComps[mid]).length;
-            const pct = a ? Math.min(100, Math.round(d/a*100)) : 0;
-            const pending = allModules.filter(m=>assignedIds.includes(m.id)&&!userComps[m.id]);
-            const memberColor = pct===100?Z.green:pct>=50?Z.accentLt:"#f87171";
+            const tr = staffTraining(u.id, assigns, comps, allModules);   // training/compliance.js
+            const a = tr.total, d = tr.good, pct = tr.pct;
+            const pending = allModules.filter(m=>assignedIds.includes(m.id)&&!m._hidden&&!isInDateState(moduleState(m, userComps[m.id])));
+            const memberColor = { green: Z.green, amber: Z.accentLt, red: "#f87171" }[tr.band.key] || Z.muted;
             const isMemberOpen = expandedMember === u.id;
             return (
               <div key={u.id} style={{borderTop:ui>0?`1px solid ${Z.border}`:"none"}}>

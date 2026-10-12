@@ -65,7 +65,11 @@ function Row({ icon, title, sub, right, onClick, Z, font, tone = "flat" }) {
     <Tag
       onClick={onClick}
       style={{
-        width: "100%", textAlign: "left", display: "flex", alignItems: "center",
+        // boxSizing/margin/lineHeight set explicitly: a row that isn't tappable is a <div>, which
+        // doesn't get a button's built-in sizing — without these it ran off the screen edge and
+        // came out taller than the tappable rows above it (Today → All clear).
+        width: "100%", boxSizing: "border-box", margin: 0, lineHeight: 1.35,
+        textAlign: "left", display: "flex", alignItems: "center",
         gap: 13, borderRadius: 14, padding: "13px 14px", minHeight: 56,
         cursor: onClick ? "pointer" : "default", fontFamily: font,
         ...tones[tone],

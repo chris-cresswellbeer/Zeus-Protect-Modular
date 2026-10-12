@@ -5,6 +5,7 @@ import { PERMIT_TYPES } from "../../data/seedPermits";
 import { PermitForm } from "./PermitForm";
 import { HelpTip } from "../../shared/HelpTip";
 import { localDateTime } from "../../lib/dates";
+import { brandHtml } from "../../lib/brandCore";
 
 /**
  * PermitsTab — admin Permit to Work register: list (filter by status/type), create/edit
@@ -65,7 +66,7 @@ function PermitsTab({ permits, setPermits, dbSavePermit, dbDeletePermit, staff, 
     @media print{@page{margin:12mm;size:A4}}
     </style></head><body>
     <div class="header">
-      <div><h1>${pt.icon} Permit to Work — ${pt.label}</h1><p style="color:#64748b;margin-top:4px">Zeus Protect Health &amp; Safety · ${p.id}</p></div>
+      <div><h1>${pt.icon} Permit to Work — ${pt.label}</h1><p style="color:#64748b;margin-top:4px">${brandHtml().foot} · ${p.id}</p></div>
       <div><div class="badge">${p.status.toUpperCase()}</div><div style="font-size:11px;color:#94a3b8;margin-top:6px;text-align:right">Issued: ${p.startDateTime?.replace("T"," ")||"—"}</div></div>
     </div>
     <div class="grid">

@@ -25,6 +25,7 @@ import { isPassed } from "./completion";
 import { isInDateState } from "./compliance";
 import { EXPIRY_WARNING_DAYS, getExpiryStatus, todayISO } from "../../lib/dates";
 import { buildXlsx, downloadBlob, colName } from "../../lib/xlsxWriter";
+import { getBrand } from "../../lib/brandCore";
 
 const MATRIX_STATUS = {
   valid:    { key: "valid",    label: "Complete — in date",                     symbol: "✓", fill: "C6EFCE", text: "006100" },
@@ -126,7 +127,7 @@ function cellText(c) {
 }
 
 /** Download the matrix as an .xlsx file. `filterText` describes the filters used. */
-function exportTrainingMatrixXlsx(matrix, { filterText = "", companyName = "Zeus Protect", filename } = {}) {
+function exportTrainingMatrixXlsx(matrix, { filterText = "", companyName = getBrand().product, filename } = {}) {
   const { cols, rows, colStats, totals } = matrix;
   const today = todayISO();
   const FIXED = 4;                                     // Name, Job title, Manager, Compliance

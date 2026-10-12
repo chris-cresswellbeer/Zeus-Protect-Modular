@@ -3,6 +3,7 @@ import { useWindowWidth } from "../../shared/hooks";
 import { Avatar } from "../../shared/primitives";
 import ThemePicker from "../../shared/ThemePicker";
 import { hashPassword, DEFAULT_HASH } from "../../lib/supabase";
+import { isSuperAdmin } from "../../lib/brandCore";
 
 /**
  * AccountTab — "My Account" for any logged-in user (staff or admin):
@@ -70,7 +71,10 @@ function AccountTab({ user, passwords, onSetPassword, authMode, onChangeOwnPassw
 
   return (
     <div>
-      <h2 style={{fontSize:22,fontWeight:900,letterSpacing:-.5,marginBottom:24,color:Z.white}}>My Account</h2>
+      <h2 style={{fontSize:22,fontWeight:900,letterSpacing:-.5,marginBottom:24,color:Z.white,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>My Account
+        {/* super admins (super_admin.sql) also manage the branding in Site Settings */}
+        {isSuperAdmin(user) && <span data-testid="super-admin-badge" title="You can also change the branding (Site Settings)" style={{fontSize:11,fontWeight:800,letterSpacing:.5,color:Z.gold,background:`${Z.gold}1f`,border:`1px solid ${Z.gold}55`,borderRadius:99,padding:"3px 10px",textTransform:"uppercase"}}>Super admin</span>}
+      </h2>
       <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:20,maxWidth:800}}>
 
         {/* Profile */}

@@ -20,6 +20,8 @@ import { getThemeTokens, themeForMode, isLightTheme, applyThemeVars } from "../t
 import { applyLightThemeFix } from "../lib/lightThemeFix";
 import { getExpiryStatus, todayISO } from "../lib/dates";
 import { isActionDone } from "../lib/actionStatus";
+import { getBrand } from "../lib/brandCore";
+import { useBrand } from "../lib/brand";
 import { personalCompliance } from "../domains/training/compliance";
 import { EXT_CERT_TYPES } from "../data/seedExtCerts";
 import { DSE_RENEWAL_MONTHS } from "../data/seedDse";
@@ -59,7 +61,7 @@ const STAFF_TABS = [
 ];
 
 const TITLES = {
-  today: ["Zeus Protect", "Today"],
+  today: [null, "Today"],   // null = the portal name (branding)
   training: ["My training", ""],
   module: ["Training", ""],
   report: ["Report", "Hazard report"],
@@ -121,7 +123,8 @@ function MobileApp({
   const effectiveTheme = followSystem ? themeForMode(systemDark ? "dark" : "light", theme) : theme;
   const T = getThemeTokens(effectiveTheme);
   // Pale-text fix follows the theme actually on screen (App.jsx leaves this to us on phones).
-  React.useEffect(() => { applyLightThemeFix(isLightTheme(effectiveTheme)); applyThemeVars(effectiveTheme); }, [effectiveTheme]);
+  const brand = useBrand();   // re-render (and re-apply the theme) when the branding changes
+  React.useEffect(() => { applyLightThemeFix(isLightTheme(effectiveTheme)); applyThemeVars(effectiveTheme); }, [effectiveTheme, brand]);
 
   const isAdmin = user.role === "admin";
   const [tab, setTab] = React.useState("today");
@@ -435,7 +438,7 @@ function MobileApp({
       fontSize: `${textScale}rem`, overscrollBehavior: "none",
     }}>
       <MobileHeader
-        kicker={kicker}
+        kicker={kicker === null ? getBrand().product : kicker}
         title={title}
         onBack={PARENT_TAB[screen] ? back : undefined}
         Z={T} font={FONT}

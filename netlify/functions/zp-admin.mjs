@@ -128,6 +128,12 @@ export const handler = async (event) => {
 
     const accounts = await allAccounts();
     const accountOf = id => accounts.find(a => zpId(a) === String(id));
+    // A super admin's sign-in (super_admin.sql) can only be created, reset or removed by
+    // another super admin — otherwise an ordinary admin could reset their password and
+    // sign in as them.
+    const callerSuper = callerStaff.superAdmin === true;
+    const guarded = u => !!u && u.superAdmin === true && !callerSuper;
+    const GUARDED = "Only a super admin can change a super admin's sign-in.";
 
     switch (body.action) {
       case "status": {
@@ -136,12 +142,15 @@ export const handler = async (event) => {
           return { id: u.id, hasAccount: !!a, banned: a ? isBanned(a) : false, mustChange: a ? !!(a.app_metadata || {}).must_change_password : false }; }) });
       }
       case "create": {
-        const r = await createAccount(await staffRecord(body.userId), body.password, accounts);
+        const target = await staffRecord(body.userId);
+        if (guarded(target)) return fail(403, GUARDED);
+        const r = await createAccount(target, body.password, accounts);
         return r.ok ? reply(200, { ok: true }) : fail(400, r.error);
       }
       case "setPassword": {
         const u = await staffRecord(body.userId);
         if (!u) return fail(404, "Staff record not found.");
+        if (guarded(u)) return fail(403, GUARDED);
         const bad = checkPassword(body.password); if (bad) return fail(400, bad);
         const a = accountOf(u.id);
         if (!a) { const r = await createAccount(u, body.password, accounts); return r.ok ? reply(200, { ok: true, created: true }) : fail(400, r.error); }
@@ -167,6 +176,7 @@ export const handler = async (event) => {
         const a = accountOf(body.userId);
         if (!a) return reply(200, { ok: true, noAccount: true });
         if (a.id === caller.id) return fail(400, "You can't remove your own sign-in account.");
+        if (guarded(await staffRecord(body.userId))) return fail(403, GUARDED);
         const r = await call(`/auth/v1/admin/users/${a.id}`, { method: "DELETE" });
         return r.ok ? reply(200, { ok: true }) : fail(500, errOf(r));
       }
@@ -175,6 +185,7 @@ export const handler = async (event) => {
         const results = [];
         for (const [userId, password] of Object.entries(body.passwords || {})) {
           const u = staff.find(s => s.id === String(userId));
+          if (guarded(u)) { results.push({ userId: String(userId), ok: false, error: GUARDED }); continue; }
           const r = await createAccount(u, password, accounts);
           results.push({ userId: String(userId), ok: r.ok, error: r.error || null });
         }

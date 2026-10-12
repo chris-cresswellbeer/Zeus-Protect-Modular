@@ -3,6 +3,7 @@ import { E } from "../../lib/emoji";
 import { buildBackup, lastBackupAt, BACKUP_TABLES } from "../../lib/backup";
 import { downloadBlob } from "../../lib/xlsxWriter";
 import { auditEvent } from "../../lib/audit";
+import { fileProduct } from "../../lib/brandCore";
 
 /**
  * BackupPanel — top of Documents ▼ → Audit Trail (admins). Downloads a full
@@ -24,7 +25,7 @@ function BackupPanel({ user, onBackedUp, Z, font }) {
     try {
       const r = await buildBackup({ by: user ? user.name : "", onProgress: (done, total, table) => setBusy({ done, total, table }) });
       const stamp = new Date().toISOString().slice(0, 16).replace(/[T:]/g, "-");
-      downloadBlob(r.blob, `zeus-protect-backup-${stamp}.zip`);
+      downloadBlob(r.blob, `${fileProduct()}-backup-${stamp}.zip`);
       const failed = Object.keys(r.errors);
       await auditEvent("backup", "all", "download", `Downloaded a full backup: ${r.total} records${failed.length ? ` (${failed.length} table${failed.length !== 1 ? "s" : ""} not read)` : ""}`, {}, "Full backup");
       const now = new Date().toISOString();

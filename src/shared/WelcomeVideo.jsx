@@ -5,6 +5,7 @@ import { parseVideoLink } from "../lib/videoLink";
 import { MAX_UPLOAD_MB } from "../lib/uploadLimits";
 import { notify, ask } from "./Feedback";
 import { auditEvent } from "../lib/audit";
+import { getBrand } from "../lib/brandCore";
 
 /**
  * WelcomeVideo — the video a person sees the very first time they sign in.
@@ -72,7 +73,7 @@ export function WelcomeHost() {
         <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 16 }}>
           <div style={{ flex: 1 }}>
             <h2 id="welcome-title" style={{ margin: 0, fontSize: phone ? 20 : 26, fontWeight: 900, letterSpacing: -0.3 }}>
-              {c.replay ? "Welcome video" : `Welcome to Zeus Protect${first ? `, ${first}` : ""}`}
+              {c.replay ? "Welcome video" : `Welcome to ${getBrand().product}${first ? `, ${first}` : ""}`}
             </h2>
             <p style={{ margin: "6px 0 0", fontSize: 14, color: Z.muted, lineHeight: 1.5 }}>
               {c.replay ? "A short tour of the portal." : `Here's a short tour of the portal before you start. You can watch it again any time from ${phone ? "the More tab" : "My Account"}.`}

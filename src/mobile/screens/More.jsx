@@ -11,6 +11,7 @@ import { promptInstall, isStandalone } from "../registerSW";
 import { WelcomeReplay } from "../../shared/WelcomeVideo";
 
 import { todayISO } from "../../lib/dates";
+import { getBrand } from "../../lib/brandCore";
 // ─── More ────────────────────────────────────────────────────────────────────
 
 function More({
@@ -60,7 +61,7 @@ function More({
       {canInstall && !isStandalone() && (
         <div style={{ marginBottom: 18 }}>
           <PrimaryButton onClick={promptInstall} Z={Z} font={font}>
-            Add Zeus Protect to your home screen
+            Add {getBrand().product} to your home screen
           </PrimaryButton>
         </div>
       )}
@@ -228,7 +229,7 @@ function Certificates({ certificates, holder, Z, font }) {
               </div>
             ))}
           </div>
-          <div style={{ fontSize: 12.5, color: "#cbd5e1", marginTop: 22 }}>Zeus Protect · checked {fmt(todayISO())}</div>
+          <div style={{ fontSize: 12.5, color: "#cbd5e1", marginTop: 22 }}>{getBrand().product} · checked {fmt(todayISO())}</div>
           <button type="button" onClick={() => setShown(null)} ref={(el) => { if (el && !el.dataset.f) { el.dataset.f = "1"; el.focus(); } }} style={{ marginTop: 22, minHeight: 48, padding: "0 30px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.1)", color: "#fff", fontSize: 15, fontWeight: 800, fontFamily: font }}>Close</button>
         </div>
       )}

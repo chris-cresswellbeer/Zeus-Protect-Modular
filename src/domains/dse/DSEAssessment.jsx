@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useFormGuard, DraftBanner, confirmLeave } from "../../lib/unsaved";
-import { ZeusLogo } from "../../shared/Logo";
+import { BrandLogo } from "../../shared/Logo";
 import { DSE_SECTIONS } from "../../data/seedDse";
 
 import { todayISO } from "../../lib/dates";
@@ -97,7 +97,7 @@ function DSEAssessment({ user, dseAnswers, setDseAnswers, dseComments, setDseCom
     return (
       <div style={{ minHeight: "100vh", background: Z.bg, fontFamily: font, color: Z.white }}>
         <div style={{ background: `linear-gradient(90deg,${Z.navyDk},${Z.navy})`, borderBottom: `1px solid ${Z.border}`, padding: "14px 28px", display: "flex", alignItems: "center", gap: 14 }}>
-          <ZeusLogo darkMode={darkMode}/>
+          <BrandLogo darkMode={darkMode}/>
           <div style={{ width: 1, height: 28, background: Z.borderMd }} />
           <span style={{ fontWeight: 700, fontSize: 15, color: Z.white }}>DSE Self-Assessment — Complete</span>
           <button onClick={leave} style={{ marginLeft: "auto", background: Z.overlay, border: `1px solid ${Z.borderMd}`, borderRadius: 8, padding: "7px 16px", color: Z.muted, cursor: "pointer", fontFamily: font, fontWeight: 700 }}>← Back to Dashboard</button>
@@ -183,7 +183,7 @@ function DSEAssessment({ user, dseAnswers, setDseAnswers, dseComments, setDseCom
   return (
     <div style={{ minHeight: "100vh", background: Z.bg, fontFamily: font, color: Z.white }}>
       <div style={{ background: `linear-gradient(90deg,${Z.navyDk},${Z.navy})`, borderBottom: `1px solid ${Z.border}`, padding: "12px 28px", display: "flex", alignItems: "center", gap: 14 }}>
-        <ZeusLogo darkMode={darkMode}/>
+        <BrandLogo darkMode={darkMode}/>
         <div style={{ width: 1, height: 28, background: Z.borderMd }} />
         <button onClick={leave} title={hasProgress ? "Your answers are saved. Finish it later from My Actions or My DSE." : undefined}
           style={{ background: Z.overlay, border: `1px solid ${Z.borderMd}`, borderRadius: 8, padding: "6px 14px", color: Z.muted, cursor: "pointer", fontFamily: font, fontWeight: 700, fontSize: 12 }}>{hasProgress ? "← Save & finish later" : "← Back"}</button>

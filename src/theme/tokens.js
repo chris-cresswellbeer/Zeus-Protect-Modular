@@ -240,7 +240,7 @@ const THEMES = [
   { key:"rose",     mode:"light", icon:"🌸", label:"Rose",               desc:"Blush & deep rose",         tokens:Z_ROSE },
   { key:"hclight",  mode:"light", icon:"◐",  label:"High Contrast Light", desc:"Black on white", tokens:Z_HCLIGHT },
   // Dark
-  { key:"dark",     mode:"dark",  icon:"🌙", label:"Navy",               desc:"Zeus default",              tokens:Z },
+  { key:"dark",     mode:"dark",  icon:"🌙", label:"Navy",               desc:"Default",                   tokens:Z },
   { key:"slate",    mode:"dark",  icon:"◼",  label:"Midnight Slate",     desc:"Charcoal & teal",           tokens:Z_SLATE },
   { key:"forest",   mode:"dark",  icon:"🌲", label:"Deep Forest",        desc:"Dark green & amber",        tokens:Z_FOREST },
   { key:"graphite", mode:"dark",  icon:"⬛", label:"Graphite & Gold",    desc:"Near-black & gold",         tokens:Z_GRAPHITE },
@@ -296,6 +296,24 @@ function oppositeTheme(currentKey) {
   return themeForMode(isDarkTheme(currentKey) ? "light" : "dark", currentKey);
 }
 
+// ─── Brand colours (Site Settings → Branding, lib/brandCore.js) ────────────────
+// The default Navy theme takes the company's main colour (backgrounds and cards) and
+// accent colour (highlights). The other 11 themes are unchanged. "" = the original colours.
+const NAVY_ORIGINAL = { navy: Z.navy, navyDk: Z.navyDk, navyMd: Z.navyMd, bg: Z.bg, bgCard: Z.bgCard, bgDeep: Z.bgDeep, gold: Z.gold };
+const hexToRgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+const rgbToHex = c => "#" + c.map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0")).join("");
+const mix = (h, to, t) => rgbToHex(hexToRgb(h).map((v, i) => v + (to[i] - v) * t));
+function applyBrandColours(primary, accent) {
+  const ok = v => /^#[0-9a-f]{6}$/i.test(String(v || ""));
+  Object.assign(Z, NAVY_ORIGINAL);
+  if (ok(primary) && primary.toLowerCase() !== NAVY_ORIGINAL.navy) {
+    const black = [0, 0, 0], white = [255, 255, 255];
+    Object.assign(Z, { navy: primary, bgCard: primary, navyMd: mix(primary, white, 0.08), navyDk: mix(primary, black, 0.3),
+      bgDeep: mix(primary, black, 0.3), bg: mix(primary, black, 0.55) });
+  }
+  if (ok(accent)) Z.gold = accent;
+}
+
 // ─── The active theme as CSS variables ─────────────────────────────────────────
 // Small shared pieces that aren't handed the theme (shared/primitives.jsx Pill and Bar)
 // read these, so they follow whichever theme is chosen: var(--zp-overlay), var(--zp-green)…
@@ -309,7 +327,7 @@ function applyThemeVars(themeKey) {
 }
 
 export {
-  applyThemeVars,
+  applyThemeVars, applyBrandColours,
   Z, Z_LIGHT, Z_SLATE, Z_FOREST, Z_GRAPHITE, Z_ARCTIC, Z_SAND, Z_ROSE,
   Z_HCDARK, Z_FROST, Z_MINT, Z_HCLIGHT,
   THEMES, ALL_THEMES, getTheme, getThemeTokens, isDarkTheme, isLightTheme,

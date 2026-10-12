@@ -1,3 +1,4 @@
+import { brandHtml } from "../../lib/brandCore";
 /**
  * Builds a standalone HTML document for a risk assessment (used for the
  * Documents library preview and for printing/downloading).
@@ -64,7 +65,7 @@ function generateRAHtml(ra) {
     <tbody>${rows}</tbody>
   </table>
   <div class="footer">
-    <span>Zeus Health &amp; Safety Portal &nbsp;·&nbsp; Generated ${ra.date}</span>
+    <span>${brandHtml().foot} &nbsp;·&nbsp; Generated ${ra.date}</span>
     <span>Assessor: ${ra.assessor||"—"} &nbsp;·&nbsp; Review: ${ra.reviewDate||"—"}</span>
   </div>
   </body></html>`;

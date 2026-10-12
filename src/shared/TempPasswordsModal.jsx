@@ -1,6 +1,7 @@
 import React from "react";
 import { notify, ask } from "../shared/Feedback";
 import { E } from "../lib/emoji";
+import { brandHtml } from "../lib/brandCore";
 
 /**
  * TempPasswordsModal — shows temporary passwords ONCE, after an admin creates
@@ -15,12 +16,12 @@ function TempPasswordsModal({ items = [], failures = [], title, onClose, Z, font
   function print() {
     const w = window.open("", "_blank");
     if (!w) { notify("Allow pop-ups for this site to print the list.", { kind: "error" }); return; }
-    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Zeus Protect – temporary passwords</title>
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${brandHtml().product} – temporary passwords</title>
       <style>body{font-family:Arial,sans-serif;padding:24px;color:#0f172a}h1{font-size:18px}p{font-size:12px;color:#475569}
       table{border-collapse:collapse;width:100%;font-size:13px}th,td{border:1px solid #cbd5e1;padding:8px;text-align:left}
       th{background:#0d1f5c;color:#fff}td.pw{font-family:Consolas,monospace;font-size:15px;letter-spacing:1px}
       .slip{page-break-inside:avoid}</style></head><body>
-      <h1>Zeus Protect – temporary passwords</h1>
+      <h1>${brandHtml().product} – temporary passwords</h1>
       <p>Printed ${new Date().toLocaleString("en-GB")}. Give each person their own line only. They must choose a new password the first time they sign in. Shred this sheet afterwards.</p>
       <table><tr><th>Name</th><th>Sign-in</th><th>Temporary password</th></tr>
       ${items.map(i => `<tr class="slip"><td>${esc(i.name)}</td><td>${esc(i.login)}</td><td class="pw">${esc(i.password)}</td></tr>`).join("")}

@@ -12,6 +12,7 @@ import { useRemembered } from "../../lib/remembered";
 import { latestByKey, supersededBy, overdueInspections } from "./inspectionDue";
 
 import { todayISO } from "../../lib/dates";
+import { brandHtml } from "../../lib/brandCore";
 /**
  * SiteInspectionsTab — admin workplace inspections (checklists + non-conformances).
  *
@@ -215,7 +216,7 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
       </div>`).join("")}
     `:"<p style='color:#94a3b8'>No non-conformances recorded for this inspection.</p>"}
     <div class="footer">
-      <span>Zeus Health & Safety Portal — Site Inspection Report</span>
+      <span>${brandHtml().foot} — Site Inspection Report</span>
       <span>Generated: ${today}</span>
     </div>
     </body></html>`;
@@ -456,7 +457,7 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
             </div>
             <div>
               <label style={lbl}>Location / Area *</label>
-              <input value={form.location} onChange={e=>setForm(p=>({...p,location:e.target.value}))} placeholder="e.g. Zeus HQ — Full Site" list="insp-places" aria-label="Location / Area" style={inp}/>
+              <input value={form.location} onChange={e=>setForm(p=>({...p,location:e.target.value}))} placeholder="e.g. Main site — Full Site" list="insp-places" aria-label="Location / Area" style={inp}/>
               {/* places used before for this type first: the same name each time keeps "overdue re-inspections" right */}
               <datalist id="insp-places">{[...new Set([...inspections.filter(i=>i.type===form.type).map(i=>i.location), ...inspections.map(i=>i.location)].filter(Boolean))].map(l=><option key={l} value={l}/>)}</datalist>
             </div>

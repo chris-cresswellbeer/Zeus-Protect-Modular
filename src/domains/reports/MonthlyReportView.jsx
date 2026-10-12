@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { E } from "../../lib/emoji";
-import { ZEUS_LOGO_LIGHT_SRC } from "../../shared/Logo";
+import { brandLightLogo } from "../../shared/Logo";
+import { brandCompany } from "../../lib/brandCore";
 import { buildMonthlyReport, renderMonthlyReportHtml, openMonthlyReport, MONTHS } from "./monthlyReport";
 
 /**
@@ -18,11 +19,11 @@ function MonthlyReportView({ incidents, investigations, inspections, ras, staff,
   const [year, month] = sel.split("-").map(Number);
 
   const report = useMemo(() => buildMonthlyReport(
-    { incidents, investigations, inspections, ras, staff, modules, assigns, comps, generatedBy: userName, companyName: "Zeus Packaging UK" },
+    { incidents, investigations, inspections, ras, staff, modules, assigns, comps, generatedBy: userName, companyName: brandCompany() },
     { year, month }), [incidents, investigations, inspections, ras, staff, modules, assigns, comps, userName, year, month]);
 
   function generate() {
-    const html = renderMonthlyReportHtml(report, { logoSrc: ZEUS_LOGO_LIGHT_SRC });
+    const html = renderMonthlyReportHtml(report, { logoSrc: brandLightLogo() });
     const ok = openMonthlyReport(html, `HS_Management_Report_${year}-${String(month + 1).padStart(2, "0")}.html`);
     setPopupBlocked(!ok);
   }

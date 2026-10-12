@@ -1,3 +1,4 @@
+import { inspectionPct } from "../inspections/inspectionScore";
 import { useState, useRef, useEffect } from "react";
 import { E } from "../../lib/emoji";
 import { notify, ask } from "../../shared/Feedback";
@@ -471,7 +472,7 @@ function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDel
           <div style={{display:"flex",flexDirection:"column",gap:10}}>
             {sum.drills.map(row=>{
               const d = row.drill, ins = row.inspection;
-              const pct = ins && ins.maxScore>0 ? Math.round(ins.overallScore/ins.maxScore*100) : null;
+              const pct = inspectionPct(ins);
               const insLink = ins && (
                 <button type="button" onClick={()=>onOpenInspection&&onOpenInspection(ins.id)} style={{background:"rgba(245,158,11,0.1)",border:"1px solid rgba(245,158,11,0.3)",borderRadius:8,padding:"5px 12px",color:"#f59e0b",cursor:"pointer",fontSize:12,fontFamily:font,fontWeight:700}}>
                   🔔 Checklist{pct!=null?` ${pct}%`:""} →
@@ -836,7 +837,7 @@ function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDel
           <div style={{display:"flex",flexDirection:"column",gap:10}}>
             {sum.fras.map(row=>{
               const r = row.review, ins = row.inspection;
-              const pct = ins && ins.maxScore>0 ? Math.round(ins.overallScore/ins.maxScore*100) : null;
+              const pct = inspectionPct(ins);
               const insLink = ins && (
                 <button type="button" onClick={()=>onOpenInspection&&onOpenInspection(ins.id)} style={{background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:8,padding:"5px 12px",color:"#f87171",cursor:"pointer",fontSize:12,fontFamily:font,fontWeight:700}}>
                   {E("🔥 ","")}FRA checklist{pct!=null?` ${pct}%`:""} →

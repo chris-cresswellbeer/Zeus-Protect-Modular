@@ -16,11 +16,16 @@
 // See src/mobile/README.md for the full prop wiring.
 
 import React from "react";
-import { getThemeTokens } from "../theme/tokens";
+import { getThemeTokens, themeForMode, isLightTheme, applyThemeVars } from "../theme/tokens";
+import { applyLightThemeFix } from "../lib/lightThemeFix";
 import { getExpiryStatus, todayISO } from "../lib/dates";
+import { isActionDone } from "../lib/actionStatus";
+import { personalCompliance } from "../domains/training/compliance";
+import { EXT_CERT_TYPES } from "../data/seedExtCerts";
+import { DSE_RENEWAL_MONTHS } from "../data/seedDse";
 import { useOnline } from "./lib/useOnline";
-import { enqueue, listQueue, drainQueue } from "./lib/syncQueue";
-import { watchInstallPrompt } from "./registerSW";
+import { enqueue, listQueue, drainQueue, retry as retryQueued, isStuck } from "./lib/syncQueue";
+import { watchInstallPrompt, keepMediaOffline } from "./registerSW";
 import { MobileHeader, OfflineBanner, TabBar } from "./ui";
 import { Today } from "./screens/Today";
 import { Training } from "./screens/Training";
@@ -38,6 +43,7 @@ import { progressMap, saveProgress as saveModuleProgress, clearProgress } from "
 import { dueInfo } from "../lib/dueDates";
 import { latestByKey } from "../domains/inspections/inspectionDue";
 import { isPassed } from "../domains/training/completion";
+import { sameName } from "../lib/openActions";
 
 
 const FONT = "'Barlow','Trebuchet MS',system-ui,sans-serif";
@@ -98,7 +104,7 @@ function MobileApp({
   user, onSignOut, onSwitchToDesktop, onCompleteQuickReport,
   // domain state, straight from App.jsx
   allModules, assigns, comps, docs, docAssignments, docAcknowledgements, docBundles = [],
-  dseReports, incidents, investigations, allUsers = [], dueDates = {},
+  dseReports, extCerts = {}, incidents, investigations, allUsers = [], dueDates = {},
   siteInspections = [], permits = [],
   // theme
   theme, setTheme, setDarkMode,
@@ -110,8 +116,12 @@ function MobileApp({
   const [systemDark, setSystemDark] = React.useState(
     () => !window.matchMedia || window.matchMedia("(prefers-color-scheme: dark)").matches
   );
-  const effectiveTheme = followSystem ? (systemDark ? "dark" : "light") : theme;
+  // Follow system: the phone's light/dark setting picks the mode; the theme is
+  // the person's saved one if it's that mode, else the last one they used in it.
+  const effectiveTheme = followSystem ? themeForMode(systemDark ? "dark" : "light", theme) : theme;
   const T = getThemeTokens(effectiveTheme);
+  // Pale-text fix follows the theme actually on screen (App.jsx leaves this to us on phones).
+  React.useEffect(() => { applyLightThemeFix(isLightTheme(effectiveTheme)); applyThemeVars(effectiveTheme); }, [effectiveTheme]);
 
   const isAdmin = user.role === "admin";
   const [tab, setTab] = React.useState("today");
@@ -139,7 +149,7 @@ function MobileApp({
   }, []);
 
   // ── Install prompt ────────────────────────────────────────────────────────
-  React.useEffect(() => { watchInstallPrompt(setCanInstall); }, []);
+  React.useEffect(() => watchInstallPrompt(setCanInstall), []);
 
   // ── Queue ─────────────────────────────────────────────────────────────────
   const refreshQueue = React.useCallback(() => { listQueue().then(setQueue); }, []);
@@ -148,30 +158,46 @@ function MobileApp({
   // Queue item `type` → the App.jsx write that performs it. Adding a new offline-capable
   // write = add a handler here + call write("<type>", payload, label, optimistic).
   // Never rename an existing type: items already queued on phones would be dropped.
+  // must(): the App.jsx saves resolve false when the database didn't take the write (bad
+  // signal, server error) — that must count as FAILED, so the item stays queued and retries.
+  const must = (fn) => async (p) => { const r = await fn(p); if (r === false) throw new Error("not saved"); return r; };
   const handlers = React.useMemo(() => ({
-    completion: (p) => db.saveCompletion(p.userId, p.moduleId, p.record),
-    docAck: (p) => db.acknowledgeDoc(p.userId, p.docId, p.date),
-    incident: (p) => db.saveIncident(p.record),
+    completion: must((p) => db.saveCompletion(p.userId, p.moduleId, p.record)),
+    docAck: must((p) => db.acknowledgeDoc(p.userId, p.docId, p.date)),
+    incident: must((p) => db.saveIncident(p.record)),
     // dseReport / riddorReported kept only so writes queued by older builds still drain.
-    dseReport: (p) => db.saveDseReport(p.userId, p.report),
-    actionComplete: (p) => db.completeAction(p.investigationId, p.actionId),
-    theme: (p) => db.saveTheme(p.userId, p.theme),
-    inspection: (p) => db.saveInspection(p.record),
-    permitSignOn: (p) => db.savePermitSignOn(p.entry),
-    permitSignOff: (p) => db.savePermitSignOff(p.entry),
-    riddorReported: (p) => db.markRiddorReported(p.incidentId),
-  }), [db]);
+    dseReport: must((p) => db.saveDseReport(p.userId, p.report)),
+    actionComplete: must((p) => db.completeAction(p.investigationId, p.actionId)),
+    theme: must((p) => db.saveTheme(p.userId, p.theme)),
+    inspection: must((p) => db.saveInspection(p.record)),
+    permitSignOn: must((p) => db.savePermitSignOn(p.entry)),
+    permitSignOff: must((p) => db.savePermitSignOff(p.entry)),
+    riddorReported: must((p) => db.markRiddorReported(p.incidentId)),
+  }), [db]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Whenever we come back online, replay queued writes in order.
+  // Whenever we come back online, replay queued writes in order — and while online with
+  // something waiting, try again every minute (the signal may be weak rather than gone).
+  const waiting = queue.filter((q) => !isStuck(q)).length;
   React.useEffect(() => {
     if (!online) return;
-    drainQueue(handlers).then((n) => { if (n) refreshQueue(); });
-  }, [online, handlers, refreshQueue]);
+    const run = () => drainQueue(handlers).then(() => refreshQueue()).catch(() => {});
+    run();
+    if (!waiting) return;
+    const t = setInterval(run, 60000);
+    return () => clearInterval(t);
+  }, [online, handlers, refreshQueue, waiting > 0]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The offline worker (public/sw.js) wakes the page via Background Sync when signal returns.
+  React.useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+    const onMsg = (e) => { if (e.data && e.data.type === "zeus-drain-queue") drainQueue(handlers).then(() => refreshQueue()).catch(() => {}); };
+    navigator.serviceWorker.addEventListener("message", onMsg);
+    return () => navigator.serviceWorker.removeEventListener("message", onMsg);
+  }, [handlers, refreshQueue]);
+  const retryItem = (id) => retryQueued(id).then(() => drainQueue(handlers)).then(() => refreshQueue());
 
   // Central write path: apply the optimistic UI update, then try the write directly
   // when online, otherwise (or if it THROWS) put it in the IndexedDB queue.
-  // ⚠ See drainQueue: App.jsx writes resolve (rather than throw) on server errors, so
-  // an online write that fails is not queued for retry.
+  // A save the database refuses counts as failed too (must(), above), so it is queued.
   async function write(type, payload, label, optimistic) {
     if (optimistic) optimistic();
     if (online) {
@@ -193,6 +219,30 @@ function MobileApp({
     .filter((m) => myIds.includes(m.id))
     .map((m) => ({ ...m, progressSlide: progress[m.id] || 0, offline: !!prefs.keepOffline, due: dueInfo(dueDates, user.id, m.id, !!myComps[m.id]) }))
     .sort((a, b) => ((a.due || {}).due || "9999").localeCompare((b.due || {}).due || "9999"));   // soonest due first
+
+  // "Keep modules offline" (More): save the pictures of my unfinished modules on the
+  // phone now, so they open with no signal. Videos are streamed, not saved.
+  const mediaKey = prefs.keepOffline ? myMods.filter((m) => !myComps[m.id]).map((m) => m.id + ":" + (m.version || 1)).join(",") : "";
+  React.useEffect(() => {
+    if (!mediaKey) return;
+    // "Download over mobile data" off: wait for Wi-Fi (where the phone can tell us)
+    const conn = navigator.connection;
+    if (!prefs.mobileData && conn && (conn.type === "cellular" || conn.saveData)) return;
+    const urls = [];
+    myMods.filter((m) => !myComps[m.id]).forEach((m) => (m.slides || []).forEach((sl) => {
+      [...(sl.images || []).map((im) => im && im.url), sl.image && sl.image.url].forEach((u) => {
+        if (typeof u === "string" && /^https:\/\//.test(u)) urls.push(u);
+      });
+    }));
+    if (urls.length) keepMediaOffline([...new Set(urls)]);
+  }, [mediaKey, prefs.mobileData]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Same figure as the computer dashboard (domains/training/compliance.js).
+  const myExt = extCerts[user.id] || extCerts[String(user.id)] || {};
+  const myDseList = dseReports[user.id] || dseReports[String(user.id)] || [];
+  const myCompliance = personalCompliance({ mods: myMods, comps: myComps,
+    certs: Object.fromEntries(EXT_CERT_TYPES.filter((ct) => myExt[ct.id]).map((ct) => [ct.id, myExt[ct.id]])),
+    lastDse: myDseList[myDseList.length - 1] || null, dseRenewalMonths: DSE_RENEWAL_MONTHS });
 
   const requiredDocs = docs.filter((d) =>
     (docAssignments[String(d.id)] || []).includes(String(user.id))
@@ -219,11 +269,11 @@ function MobileApp({
 
   const myActions = Object.entries(investigations || {}).flatMap(([invId, inv]) =>
     (inv.actions || [])
-      .filter((a) => a.owner === user.name)
+      .filter((a) => sameName(a.owner, user.name))
       .map((a) => ({ ...a, investigationId: invId, ref: invId }))
   );
-  const openActions = myActions.filter((a) => a.status !== "complete" && a.status !== "closed");
-  const closedActions = myActions.filter((a) => a.status === "complete" || a.status === "closed");
+  const openActions = myActions.filter((a) => !isActionDone(a));
+  const closedActions = myActions.filter((a) => isActionDone(a));
 
   const recordedDone = myMods.filter((m) => myComps[m.id] && myComps[m.id].recorded).map((m) => {
     const c = myComps[m.id];
@@ -335,7 +385,6 @@ function MobileApp({
     setFollowSystem(false);
     savePrefs({ ...prefs, followSystem: false });
     setTheme(key);
-    setDarkMode(["dark", "slate", "forest", "graphite"].includes(key));
     write("theme", { userId: user.id, theme: key }, "Theme preference");
   }
 
@@ -392,12 +441,12 @@ function MobileApp({
         Z={T} font={FONT}
       />
 
-      {(!online || queue.length > 0) && <OfflineBanner queueCount={queue.length} Z={T} />}
+      {(!online || queue.length > 0) && <OfflineBanner online={online} queueCount={waiting} stuckCount={queue.length - waiting} Z={T} />}
 
       <main ref={mainRef} style={{ flex: 1, overflow: "auto", WebkitOverflowScrolling: "touch" }}>
         {screen === "today" && (
           <Today
-            user={user} myMods={myMods} myComps={myComps} unreadDocs={unreadDocs}
+            user={user} myMods={myMods} myComps={myComps} unreadDocs={unreadDocs} compliance={myCompliance}
             quickToComplete={quickToComplete} onCompleteQuickReport={onCompleteQuickReport}
             onResume={(m) => { setActiveModule(m); go("module"); }}
             onOpenModule={(m) => { setActiveModule(m); go("module"); }}
@@ -460,6 +509,7 @@ function MobileApp({
               permitsToSign: permitsToSign.length,
             }}
             queue={queue}
+            onRetryQueued={retryItem}
             canInstall={canInstall}
             onOpenDocs={() => go("documents")}
             onOpenCerts={() => go("certificates")}

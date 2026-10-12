@@ -7,6 +7,9 @@ import { getExpiryStatus, todayISO } from "../../lib/dates";
 import { teamOf, normName } from "./team";
 import { E } from "../../lib/emoji";
 import { dueInfo, dueText } from "../../lib/dueDates";
+import { moduleState, isInDateState, complianceBand } from "../training/compliance";
+import { DSE_RENEWAL_MONTHS } from "../../data/seedDse";
+import { isActionDone, actionDoneDate } from "../../lib/actionStatus";
 
 /**
  * MyTeamTab — the "My Team" tab for users with role "manager".
@@ -22,31 +25,33 @@ import { dueInfo, dueText } from "../../lib/dueDates";
 
 const norm = normName;
 
+// green / amber / red in this theme's colours, by the portal-wide bands (training/compliance.js)
+const bandColor = (pct, Z) => ({ green: Z.green, amber: Z.amber, red: Z.red }[complianceBand(pct).key] || Z.muted);
+
 // One member's position, using the same rules as the staff dashboard.
 function summarise(u, ctx) {
   const { allModules, assigns, comps, docs, docAssignments, docAcknowledgements, dseReports, adminResponses, investigations, dueDates } = ctx;
   const ids = assigns[String(u.id)] || [];
-  const mods = allModules.filter(m => ids.includes(m.id));
+  const mods = allModules.filter(m => ids.includes(m.id) && !m._hidden);   // retired modules don't count
   const c = comps[u.id] || comps[String(u.id)] || {};
   const modules = mods.map(m => {
     const rec = c[m.id];
-    let status = "not_started", ex = null;
-    if (isPassed(rec)) {
-      ex = m.renewalMonths ? getExpiryStatus(rec.date, m.renewalMonths) : null;
-      status = !ex || ex.status === "valid" ? "valid" : ex.status;   // valid | expiring | expired
-    } else if (rec) status = "failed";
+    // the portal-wide rules (training/compliance.js): valid | expiring | expired | failed | missing
+    const st = moduleState(m, rec);
+    const status = st === "missing" ? "not_started" : st;
+    const ex = rec && m.renewalMonths && isPassed(rec, m) ? getExpiryStatus(rec.date, m.renewalMonths) : null;
     // due date (lib/dueDates.js): only matters until it's passed
-    const due = dueInfo(dueDates, u.id, m.id, isPassed(rec));
+    const due = dueInfo(dueDates, u.id, m.id, isPassed(rec, m));
     return { m, rec, status, ex, due };
   });
-  const good = modules.filter(x => x.status === "valid" || x.status === "expiring").length;
+  const good = modules.filter(x => isInDateState(x.status)).length;
   const unreadDocs = docs.filter(d => (docAssignments[String(d.id)] || []).includes(String(u.id)) && !((docAcknowledgements[String(u.id)] || {})[d.id]));
   const reports = dseReports[u.id] || dseReports[String(u.id)] || [];
   const ri = reports.length - 1;
   const last = reports[ri];
   const resp = adminResponses[u.id] || adminResponses[String(u.id)] || {};
   const dseIssues = last ? (last.issues || []).map((iss, ii) => ({ iss, ii, ri, r: resp[`${ri}_${ii}`] || {} })) : [];
-  const dseExp = last ? getExpiryStatus(last.date, 12) : null;
+  const dseExp = last ? getExpiryStatus(last.date, DSE_RENEWAL_MONTHS) : null;
   const actions = Object.entries(investigations || {}).flatMap(([incidentId, inv]) =>
     (inv.actions || []).filter(a => norm(a.owner) === norm(u.name)).map(a => ({ a, incidentId })));
   return {
@@ -57,7 +62,7 @@ function summarise(u, ctx) {
     unreadDocs, last, dseExp, dseIssues,
     openDse: dseIssues.filter(x => !x.r.resolved).length,
     actions,
-    openActions: actions.filter(x => x.a.status !== "complete" && x.a.status !== "closed").length,
+    openActions: actions.filter(x => !isActionDone(x.a)).length,
     awaitingSignOff: actions.filter(x => !x.a.managerSignOff).length,
   };
 }
@@ -161,11 +166,11 @@ function MemberDetail({ u, s, allModules, assigned, onAssign, onSignOffDse, onSi
 
       <div style={h}>Corrective actions</div>
       {s.actions.length === 0 ? <div style={{ fontSize: 12, color: Z.muted }}>None assigned.</div> : s.actions.map(({ a, incidentId }) => {
-        const done = a.status === "complete" || a.status === "closed";
+        const done = isActionDone(a);
         const late = !done && a.dueDate && a.dueDate < todayISO();
         return (
           <div key={incidentId + a.id} style={row}>
-            <span style={{ fontSize: 13, color: Z.white, flex: 1, minWidth: 200 }}>{a.description}<span style={{ display: "block", fontSize: 12, color: late ? Z.red : Z.muted }}>Due {a.dueDate || "—"}{done ? ` · completed ${a.completedDate || ""}` : late ? " · overdue" : ""}</span></span>
+            <span style={{ fontSize: 13, color: Z.white, flex: 1, minWidth: 200 }}>{a.description}<span style={{ display: "block", fontSize: 12, color: late ? Z.red : Z.muted }}>Due {a.dueDate || "—"}{done ? ` · completed ${actionDoneDate(a)}` : late ? " · overdue" : ""}</span></span>
             {a.managerSignOff
               ? <Badge text={`Signed off by ${a.managerSignOff.by} ${a.managerSignOff.date}`} color={Z.green} Z={Z} />
               : <SignOffButton label={done ? "Sign off" : "Mark complete & sign off"} onConfirm={note => onSignOffAction(incidentId, a, u, note)} Z={Z} font={font} />}
@@ -185,7 +190,7 @@ function MyTeamTab({ manager, users, allModules, assigns, comps, docs, docAssign
   const teamPct = totalMods ? Math.round(goodMods / totalMods * 100) : 100;
   const tiles = [
     { label: "Team members", value: team.length, color: Z.accentLt },
-    { label: "Training up to date", value: `${teamPct}%`, color: teamPct === 100 ? Z.green : teamPct >= 70 ? Z.amber : Z.red },
+    { label: "Training up to date", value: `${teamPct}%`, color: bandColor(teamPct, Z) },
     { label: "Training to do", value: rows.reduce((n, r) => n + r.s.overdue, 0), color: Z.red },
     { label: "Past due date", value: rows.reduce((n, r) => n + r.s.pastDue, 0), color: rows.some(r => r.s.pastDue) ? Z.red : Z.green },
     { label: "Unread documents", value: rows.reduce((n, r) => n + r.s.unreadDocs.length, 0), color: Z.amber },
@@ -229,7 +234,7 @@ function MyTeamTab({ manager, users, allModules, assigns, comps, docs, docAssign
             </div>
             {rows.map(({ u, s }) => {
               const open = openId === u.id;
-              const pctCol = s.pct === 100 ? Z.green : s.pct >= 70 ? Z.amber : Z.red;
+              const pctCol = bandColor(s.pct, Z);
               return (
                 <div key={u.id} style={{ borderTop: `1px solid ${Z.border}` }}>
                   <button onClick={() => setOpenId(open ? null : u.id)} style={{ width: "100%", display: "grid", gridTemplateColumns: "2fr 1.1fr 1fr 1fr 1fr 24px", gap: 10, alignItems: "center", padding: "13px 18px", background: open ? Z.overlay : "transparent", border: "none", cursor: "pointer", textAlign: "left", fontFamily: font, color: Z.white }}>

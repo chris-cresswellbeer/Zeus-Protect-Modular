@@ -23,7 +23,7 @@ import { todayISO } from "../../lib/dates";
  * (setDocs, dbSaveDoc, dbDeleteDoc, setDocAssignments, dbSaveDocAssignments,
  *  setDocAcknowledgements, setPreviewDoc…), plus pre-computed counts from the parent.
  */
-function DocCard({ d, staff, assignedIds, assignedStaff, readCount, unreadCount, icon, docAcknowledgements, setDocAcknowledgements, setDocAssignments, dbSaveDocAssignments, setDocs, dbDeleteDoc, dbSaveDoc, setPreviewDoc, docAckHistory = [], bundleNames = [], T, font }) {
+function DocCard({ tick, d, staff, assignedIds, assignedStaff, readCount, unreadCount, icon, docAcknowledgements, setDocAcknowledgements, setDocAssignments, dbSaveDocAssignments, setDocs, dbDeleteDoc, dbSaveDoc, setPreviewDoc, docAckHistory = [], bundleNames = [], T, font }) {
   const [expanded, setExpanded] = React.useState(false);
   const [pendingFile, setPendingFile] = React.useState(null); // new-version file awaiting the minor/major choice
   const [showVersions, setShowVersions] = React.useState(false);
@@ -118,6 +118,7 @@ function DocCard({ d, staff, assignedIds, assignedStaff, readCount, unreadCount,
   return (
     <div style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:16,border:`1px solid ${reviewOverdue?"rgba(239,68,68,0.4)":reviewSoon?"rgba(245,158,11,0.35)":T.border}`,overflow:"hidden"}}>
       <div style={{padding:"14px 20px",display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
+        {tick}
         <span style={{fontSize:26,flexShrink:0}}>{docIcon}</span>
         {/* flex-basis keeps the title readable; the buttons wrap onto a second line when space runs out */}
         <div style={{flex:"1 1 260px",minWidth:0}}>

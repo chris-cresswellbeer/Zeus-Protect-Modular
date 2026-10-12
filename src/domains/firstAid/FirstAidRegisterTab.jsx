@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { FA_CERT_TYPES, FA_KIT_TYPES } from "../../data/seedFirstAid";
-import { useSiteLists, coverShifts, isAllShift } from "../../lib/siteLists";
-import { EXPIRY_WARNING_DAYS, localISO, todayISO } from "../../lib/dates";
+import { useSiteLists, coverShifts } from "../../lib/siteLists";
+import { localISO, todayISO } from "../../lib/dates";
+import { mergeAiders, aiderState, coverageCount as countCover } from "./firstAidLogic";
 
 /**
  * FirstAidRegisterTab — admin first aid arrangements (Health and Safety (First-Aid)
@@ -18,7 +19,7 @@ import { EXPIRY_WARNING_DAYS, localISO, todayISO } from "../../lib/dates";
  *   2. auto-detected: any staff member with a "first_aid" external certificate
  *      (extCerts, uploaded under Assign Training → External Certificates).
  *   A manual entry for the same staffId hides the auto-detected one.
- * The admin dashboard card in App.jsx repeats this merge + coverage logic — keep in step.
+ * The list and the coverage rules are in firstAidLogic.js, shared with the admin dashboard card.
  */
 function FirstAidRegisterTab({ staff, extCerts, firstAidData, setFirstAidData, Z, font }) {
   const [subTab, setSubTab] = useState("aiders");
@@ -34,34 +35,9 @@ function FirstAidRegisterTab({ staff, extCerts, firstAidData, setFirstAidData, Z
   const allZones = [...new Set([...site.firstAidZones, ...customZones])];
   const today = todayISO();
 
-  // ── Pull first aiders from extCerts automatically ─────────────────────────
-  // Build a combined list: manually added aiders + auto-detected from extCerts
-  const certAiders = [];
-  Object.entries(extCerts || {}).forEach(([uid, certs]) => {
-    if (certs.first_aid) {
-      const u = staff.find(s => String(s.id) === String(uid));
-      if (u) certAiders.push({
-        _fromCert: true,
-        id: `cert_${uid}`,
-        staffId: uid,
-        name: u.name,
-        jobTitle: u.jobTitle || "",
-        certType: "First Aid at Work (FAW)",
-        issuedDate: certs.first_aid.issuedDate || "",
-        expiryDate: certs.first_aid.expiryDate || "",
-        shifts: certs.first_aid.shifts || [],
-        zones:  certs.first_aid.zones  || [],
-        phone: "",
-        isLead: false,
-      });
-    }
-  });
-  // Merge: manual aiders take precedence over cert-auto entries for same staffId
-  const manualStaffIds = new Set(aiders.filter(a=>a.staffId).map(a=>String(a.staffId)));
-  const allAiders = [
-    ...aiders,
-    ...certAiders.filter(c => !manualStaffIds.has(String(c.staffId))),
-  ];
+  // Register entries + anyone with a first aid certificate (firstAidLogic.js — the same
+  // list and rules as the admin dashboard card).
+  const allAiders = mergeAiders(firstAidData, extCerts, staff);
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   const uid = () => Math.random().toString(36).slice(2,9);
@@ -78,11 +54,11 @@ function FirstAidRegisterTab({ staff, extCerts, firstAidData, setFirstAidData, Z
   function daysUntil(d) { return d ? Math.ceil((new Date(d)-new Date())/86400000) : null; }
   // First aid certificates: amber within EXPIRY_WARNING_DAYS of expiry (lib/dates.js) (FAW/EFAW certificates last 3 years).
   function certBadge(expiryDate) {
-    const d = daysUntil(expiryDate);
-    if (d === null) return { label:"No date", color:"#6b7280", bg:"rgba(107,114,128,0.12)" };
-    if (d < 0)   return { label:"Expired",          color:"#ef4444", bg:"rgba(239,68,68,0.15)" };
-    if (d <= EXPIRY_WARNING_DAYS) return { label:`Exp. in ${d}d`,    color:"#f59e0b", bg:"rgba(245,158,11,0.15)" };
-    return               { label:"Valid",            color:"#10b981", bg:"rgba(16,185,129,0.12)" };
+    const st = aiderState(expiryDate), d = daysUntil(expiryDate);
+    if (st === "undated")  return { label:"No date — not counted", color:"#6b7280", bg:"rgba(107,114,128,0.12)" };
+    if (st === "expired")  return { label:"Expired",          color:"#ef4444", bg:"rgba(239,68,68,0.15)" };
+    if (st === "expiring") return { label:`Exp. in ${d}d`,    color:"#f59e0b", bg:"rgba(245,158,11,0.15)" };
+    return                        { label:"Valid",            color:"#10b981", bg:"rgba(16,185,129,0.12)" };
   }
   // Kits should be checked roughly monthly: due 35 days after the last check, amber in the final 7 days.
   function kitBadge(lastCheckDate) {
@@ -97,17 +73,9 @@ function FirstAidRegisterTab({ staff, extCerts, firstAidData, setFirstAidData, Z
   );
 
   // ── Coverage matrix ───────────────────────────────────────────────────────
-  // Number of in-date first aiders covering a zone on a shift. An aider with no zones/shifts
-  // listed (or "All Shifts") counts everywhere/always. Expired aiders are excluded.
-  function coverageCount(zone, shift) {
-    return allAiders.filter(a => {
-      const b = certBadge(a.expiryDate);
-      if (b.color === "#ef4444") return false; // expired
-      const shiftsOk = !a.shifts?.length || a.shifts.some(isAllShift) || a.shifts.includes(shift);
-      const zonesOk  = !a.zones?.length  || a.zones.includes(zone);
-      return shiftsOk && zonesOk;
-    }).length;
-  }
+  // In-date first aiders covering a zone on a shift (firstAidLogic.js). An aider with no
+  // zones/shifts listed (or "All Shifts") counts everywhere/always. Expired or undated: not counted.
+  const coverageCount = (zone, shift) => countCover(allAiders, zone, shift);
 
   function openAdd(section) { setModalSection(section); setEditId(null); setModalForm({}); setShowModal(true); }
   function openEdit(item, section) { setModalSection(section); setEditId(item.id); setModalForm({...item, shifts:[...(item.shifts||[])], zones:[...(item.zones||[])]}); setShowModal(true); }
@@ -198,9 +166,9 @@ function FirstAidRegisterTab({ staff, extCerts, firstAidData, setFirstAidData, Z
   </>);
 
   // ── Summary stats ─────────────────────────────────────────────────────────
-  const validCount   = allAiders.filter(a=>certBadge(a.expiryDate).color==="#10b981").length;
-  const expiringCount= allAiders.filter(a=>certBadge(a.expiryDate).color==="#f59e0b").length;
-  const expiredCount = allAiders.filter(a=>certBadge(a.expiryDate).color==="#ef4444").length;
+  const validCount   = allAiders.filter(a=>aiderState(a.expiryDate)==="valid").length;
+  const expiringCount= allAiders.filter(a=>aiderState(a.expiryDate)==="expiring").length;
+  const expiredCount = allAiders.filter(a=>aiderState(a.expiryDate)==="expired").length;
   const kitIssues    = kits.filter(k=>kitBadge(k.lastCheckDate).color==="#ef4444").length;
   const minPerShift  = assessment.minPerShift || 1;
   const coverageGaps = allZones.reduce((acc,z) => acc + (coverShifts(FA_SHIFTS).filter(s=>coverageCount(z,s)<minPerShift).length),0);

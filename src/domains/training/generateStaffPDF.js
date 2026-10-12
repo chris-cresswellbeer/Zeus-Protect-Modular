@@ -1,3 +1,4 @@
+import { staffTraining, PRINT_COLOR } from "./compliance";
 import { isPassed, scoreText } from "./completion";
 import { getExpiryStatus, todayISO } from "../../lib/dates";
 import { EXT_CERT_TYPES } from "../../data/seedExtCerts";
@@ -38,11 +39,10 @@ async function generateStaffPDF(u, allModules, assigns, comps, docs, docAssignme
   const today = new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"long",year:"numeric"});
   const assignedIds = assigns[u.id]||[];
   const userComps = comps[u.id]||{};
-  const a = assignedIds.length;
-  const d = assignedIds.filter(mid=>userComps[mid]).length;
-  const pct = a ? Math.min(100,Math.round(d/a*100)) : 0;
-  // Headline status: 100% Compliant, ≥50% In Progress, otherwise Overdue.
-  const status = pct===100?"Compliant":pct>=50?"In Progress":"Overdue";
+  // Headline figure and status: the portal-wide rules (training/compliance.js) — assigned
+  // modules passed and in date; 100% Compliant, 70% or more In Progress, otherwise Overdue.
+  const tr = staffTraining(u.id, assigns, comps, allModules);
+  const a = tr.total, d = tr.good, pct = tr.pct, status = tr.status;
   const lastLogin = lastLoginMap[u.id]||"Never";
 
   // Training rows
@@ -115,7 +115,7 @@ async function generateStaffPDF(u, allModules, assigns, comps, docs, docAssignme
     </tr>`;
   }).join("");
 
-  const statusColor = pct===100?"#15803d":pct>=50?"#b45309":"#dc2626";
+  const statusColor = PRINT_COLOR[tr.band.key];
 
   const html = `<!DOCTYPE html>
 <html><head><meta charset="UTF-8">

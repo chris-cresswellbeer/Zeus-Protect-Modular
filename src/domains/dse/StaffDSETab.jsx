@@ -1,5 +1,6 @@
 import { useWindowWidth } from "../../shared/hooks";
 import { HelpTip } from "../../shared/HelpTip";
+import { DSE_QUESTION_COUNT } from "../../data/seedDse";
 
 /**
  * StaffDSETab — the staff member's "My DSE" tab: start/retake the assessment and
@@ -14,13 +15,15 @@ import { HelpTip } from "../../shared/HelpTip";
  *   Responses are keyed by array POSITION, so reports must never be reordered or
  *   deleted from the middle of a user's list. Questions come from data/seedDse.js (DSE_SECTIONS).
  */
-function StaffDSETab({ user, dseReports, adminResponses, setDseAnswers, setDseComments, setDseSection, setDseSubmitted, setDseActive, Z, font }) {
+function StaffDSETab({ user, dseReports, adminResponses, setDseAnswers, setDseComments, setDseSection, setDseSubmitted, setDseActive, dseDraft, onStartDse, Z, font }) {
   const myReports   = dseReports[user.id] || [];
   const latestReport = myReports[myReports.length - 1];
   const latestRi    = myReports.length - 1;
   const myAdminResps = adminResponses[user.id] || {};
 
+  // onStartDse (App.jsx openDse) carries on from saved progress if there is some.
   const startAssessment = () => {
+    if (onStartDse) return onStartDse();
     setDseAnswers({}); setDseComments({}); setDseSection(0); setDseSubmitted(false); setDseActive(true);
   };
 
@@ -31,10 +34,10 @@ function StaffDSETab({ user, dseReports, adminResponses, setDseAnswers, setDseCo
         <p style={{color:Z.muted,marginBottom:28,fontSize:13}}>Display Screen Equipment self-assessment — DSE Regulations 1992</p>
         <div style={{background:`linear-gradient(135deg,${Z.navyMd},${Z.navy})`,borderRadius:16,padding:40,textAlign:"center",border:`1px solid ${Z.border}`}}>
           <div style={{fontSize:48,marginBottom:12}}>🖥️</div>
-          <p style={{color:Z.muted,fontSize:14,margin:"0 0 20px"}}>You haven't completed a DSE assessment yet.</p>
+          <p style={{color:Z.muted,fontSize:14,margin:"0 0 20px"}}>{dseDraft ? `You've started your DSE assessment: ${Object.keys(dseDraft.answers||{}).length} of ${DSE_QUESTION_COUNT} questions answered.` : "You haven't completed a DSE assessment yet."}</p>
           <button onClick={startAssessment}
             style={{background:"linear-gradient(135deg,#8b5cf6,#7c3aed)",color:"#fff",border:"none",borderRadius:10,padding:"11px 28px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:14}}>
-            Start Assessment →
+            {dseDraft ? "Continue Assessment →" : "Start Assessment →"}
           </button>
         </div>
       </div>
@@ -57,7 +60,7 @@ function StaffDSETab({ user, dseReports, adminResponses, setDseAnswers, setDseCo
         </div>
         <button onClick={startAssessment}
           style={{background:"rgba(139,92,246,0.15)",color:"#a78bfa",border:"1px solid rgba(139,92,246,0.3)",borderRadius:10,padding:"9px 18px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:13}}>
-          Retake Assessment
+          {dseDraft ? "Continue Assessment" : "Retake Assessment"}
         </button>
       </div>
 

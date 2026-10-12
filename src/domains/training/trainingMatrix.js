@@ -22,6 +22,7 @@
  * Pure JS — no React — so it can be tested on its own.
  */
 import { isPassed } from "./completion";
+import { isInDateState } from "./compliance";
 import { EXPIRY_WARNING_DAYS, getExpiryStatus, todayISO } from "../../lib/dates";
 import { buildXlsx, downloadBlob, colName } from "../../lib/xlsxWriter";
 
@@ -84,7 +85,7 @@ function buildTrainingMatrix({ staff, modules, assigns, comps, dueDates, filter 
   let rows = people.map(u => {
     const cells = cols.map(m => cellFor(u, m, assigns, comps, dueDates));
     const assignedCells = cells.filter(c => c.assigned);
-    const ok = assignedCells.filter(c => c.status === "valid" || c.status === "expiring").length;
+    const ok = assignedCells.filter(c => isInDateState(c.status)).length;   // training/compliance.js
     return {
       user: u, cells,
       assigned: assignedCells.length, ok,

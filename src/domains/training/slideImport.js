@@ -16,7 +16,8 @@
  */
 import { unzipSync } from "fflate";
 
-export const MAX_UPLOAD_MB = 50;               // Supabase free plan: largest file it accepts
+export { MAX_UPLOAD_MB } from "../../lib/uploadLimits";   // Supabase free plan: largest file it accepts
+import { MAX_UPLOAD_MB } from "../../lib/uploadLimits";
 const PAGE_WIDTH = 1600;                        // px — sharp on a laptop, ~200–400 KB per JPEG
 const JPEG_QUALITY = 0.85;
 

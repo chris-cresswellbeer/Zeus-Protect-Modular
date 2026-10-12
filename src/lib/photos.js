@@ -143,8 +143,58 @@ async function uploadPhotos(bucket, prefix, photos) {
   return out;
 }
 
-// Supabase Storage bucket for all captured photos. Must exist and be PUBLIC.
+// Investigation evidence photos ({name, type, uploaded} objects, desktop Investigation tab).
+// Each photo is shrunk and uploaded to storage straight away, and the record keeps only
+// its link: { name, type, url, uploaded }. Older records hold the picture itself in
+// `data` (base64); toStoredPhotos() moves those to storage the next time the
+// investigation is saved. If an upload fails (no signal) the picture is kept in `data`
+// and tried again on the next save, so it is never lost.
+// Path: inc_<incident id>_inv_<time>_<n>.<ext> — the incident-photos bucket's rules let
+// whoever can see that incident open it (db_rules.sql, section 4).
+async function uploadDataUrl(bucket, path, dataUrl) {
+  try {
+    const blob = await dataUrlToBlob(dataUrl);
+    const { error } = await sb.storage.upload(bucket, path, blob);
+    return error ? null : sb.storage.getPublicUrl(bucket, path);
+  } catch (err) {
+    console.warn("[photos] upload failed", err);
+    return null;
+  }
+}
+const extOf = dataUrl => ((String(dataUrl).match(/^data:image\/([a-z0-9+]+)/i) || [])[1] || "jpg").toLowerCase().replace("jpeg", "jpg").replace("svg+xml", "svg");
+
+/** Shrink and upload picked image files → [{ name, type, url | data, uploaded }]. */
+async function photosFromFiles(files, incidentId, today) {
+  const out = [];
+  let n = 0;
+  for (const f of files) {
+    const data = await compressToDataUrl(f);
+    if (!data) continue;
+    const url = await uploadDataUrl(PHOTO_BUCKET, `inc_${incidentId}_inv_${Date.now()}_${n++}.${extOf(data)}`, data);
+    out.push(url ? { name: f.name, type: f.type, url, uploaded: today } : { name: f.name, type: f.type, data, uploaded: today });
+  }
+  return out;
+}
+
+/** Move any photos still held as base64 to storage. Returns the same array if none were moved. */
+async function toStoredPhotos(photos, incidentId) {
+  const list = Array.isArray(photos) ? photos : [];
+  if (!list.some(p => p && !p.url && /^data:image\//i.test(p.data || ""))) return photos;
+  const out = [];
+  let n = 0;
+  for (const p of list) {
+    if (!p || p.url || !/^data:image\//i.test(p.data || "")) { out.push(p); continue; }
+    const url = await uploadDataUrl(PHOTO_BUCKET, `inc_${incidentId}_inv_${Date.now()}_${n++}.${extOf(p.data)}`, p.data);
+    if (!url) { out.push(p); continue; }
+    const { data, ...rest } = p;   // eslint-disable-line no-unused-vars
+    out.push({ ...rest, url });
+  }
+  return out;
+}
+
+// Supabase Storage bucket for all captured photos. Public with the old sign-in; private
+// with the new one (links are swapped for signed links on screen — lib/fileAccess.js).
 // Renaming it here without migrating files will break existing photo links.
 const PHOTO_BUCKET = "incident-photos";
 
-export { compressToDataUrl, uploadPhotos, isUploaded, PHOTO_BUCKET };
+export { compressToDataUrl, uploadPhotos, isUploaded, photosFromFiles, toStoredPhotos, PHOTO_BUCKET };

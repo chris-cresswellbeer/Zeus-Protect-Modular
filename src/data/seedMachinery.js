@@ -21,6 +21,17 @@ function isWarehouseWorker(user) {
   return user.isWarehouseWorker === true;
 }
 
+/**
+ * May this person manage the Machinery Competence and Equipment Register pages?
+ * Admins always; anyone else when an admin has switched on "Machinery & Equipment
+ * access" in Edit Staff (users.data.machineryAccess). The database checks the same
+ * flag in the sign-in version (machinery_access.sql / db_rules.sql zp.machinery_access()).
+ */
+function hasMachineryAccess(user) {
+  if (!user) return false;
+  return user.role === "admin" || user.machineryAccess === true;
+}
+
 const MACHINERY_TYPES = [
   { id:"flt",      icon:"🏗",  label:"Counterbalance FLT",       category:"Forklift", licenceRequired:true,  renewalMonths:36, notes:"RTITB/ITSSAR licence required. Medical fitness check advised." },
   { id:"reach",    icon:"📦",  label:"Reach Truck",              category:"Forklift", licenceRequired:true,  renewalMonths:36, notes:"Separate licence from counterbalance. Aisle width and height restrictions apply." },
@@ -105,4 +116,4 @@ const toCompMap = m => Object.fromEntries(Object.entries(m || {}).map(([uid, v])
 
 // ─── Machinery Competence Tab (Staff) ─────────────────────────────────────────
 
-export { isWarehouseWorker, MACHINERY_TYPES, MACHINE_CATEGORIES, COMP_STATUS, machineExpiryStatus, MACHINE_STATE, CHOOSABLE_STATUS, machineState, compsFor, toCompMap };
+export { isWarehouseWorker, hasMachineryAccess, MACHINERY_TYPES, MACHINE_CATEGORIES, COMP_STATUS, machineExpiryStatus, MACHINE_STATE, CHOOSABLE_STATUS, machineState, compsFor, toCompMap };

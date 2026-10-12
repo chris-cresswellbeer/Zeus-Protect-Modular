@@ -4,6 +4,7 @@
 // All the derived compliance figures come from the same expressions the desktop
 // staff dashboard uses in App.jsx — this screen does not invent its own maths.
 
+import { complianceBand } from "../../domains/training/compliance";
 import React from "react";
 import { getExpiryStatus } from "../../lib/dates";
 import { Screen, SectionLabel, Row, StatusChip, PrimaryButton } from "../ui";
@@ -17,7 +18,7 @@ import { dueText } from "../../lib/dueDates";
 // Props: user, myMods (assigned modules, with progressSlide from local progress),
 // myComps, unreadDocs, and navigation callbacks (onResume, onOpenModule, onOpenDocs, onReport).
 function Today({
-  user, myMods, myComps, unreadDocs, quickToComplete = [], onCompleteQuickReport,
+  user, myMods, myComps, unreadDocs, quickToComplete = [], onCompleteQuickReport, compliance = null,
   onResume, onOpenModule, onOpenDocs, onReport,
   Z, font,
 }) {
@@ -35,11 +36,10 @@ function Today({
   const expired = completed.filter((m) => statusOf(m).key === "expired");
   const upToDate = completed.filter((m) => statusOf(m).key === "valid");
 
-  // DSE is a desk task and lives in the portal, so mobile health is training only.
-  const totalItems = myMods.length;
-  const goodItems = upToDate.length;
-  const healthPct = totalItems ? Math.round((goodItems / totalItems) * 100) : 100;
-  const healthColor = healthPct === 100 ? "#10b981" : healthPct >= 70 ? "#f59e0b" : "#ef4444";
+  // The same compliance figure as the computer dashboard (training, certificates and DSE —
+  // domains/training/compliance.js), worked out in MobileApp and passed in.
+  const healthPct = compliance ? compliance.pct : (myMods.length ? Math.round((upToDate.length / myMods.length) * 100) : 100);
+  const healthColor = complianceBand(healthPct).color;
 
   const actionCount =
     quickToComplete.length + notStarted.length + expired.length + (unreadDocs.length ? 1 : 0);

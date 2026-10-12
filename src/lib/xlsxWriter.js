@@ -23,6 +23,9 @@
  * Style keys: bold, italic, color (hex text colour), size, fill (hex background),
  * h ("left"|"center"|"right"), v ("top"|"center"|"bottom"), wrap, rotate (0-180),
  * border (thin grey all round), numFmt (e.g. "0%").
+ *
+ * Formulas: { f: "SUM(C2:C40)", v: 12 } — `v` is the value shown until Excel
+ * recalculates (give the real total so previews and Numbers show it too).
  */
 
 // ── zip (store only) ─────────────────────────────────────────────────────────
@@ -118,6 +121,10 @@ function sheetXml(sheet, styles) {
       const ref = colName(ci) + (ri + 1);
       const s = styles.id(c.s);
       const sAttr = s ? ` s="${s}"` : "";
+      if (c.f) {
+        const cached = typeof c.v === "number" && isFinite(c.v) ? `<v>${c.v}</v>` : "";
+        return `<c r="${ref}"${sAttr}><f>${esc(c.f)}</f>${cached}</c>`;
+      }
       if (c.v === null || c.v === undefined || c.v === "") return s ? `<c r="${ref}"${sAttr}/>` : "";
       if (typeof c.v === "number" && isFinite(c.v)) return `<c r="${ref}"${sAttr}><v>${c.v}</v></c>`;
       return `<c r="${ref}"${sAttr} t="inlineStr"><is><t xml:space="preserve">${esc(c.v)}</t></is></c>`;

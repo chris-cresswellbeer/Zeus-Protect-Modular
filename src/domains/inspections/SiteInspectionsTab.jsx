@@ -1,3 +1,4 @@
+import { scoreAnswers, inspectionPct, scoreBand } from "./inspectionScore";
 import { useState, useEffect } from "react";
 import { ask } from "../../shared/Feedback";
 import { useFormGuard, DraftBanner, confirmLeave } from "../../lib/unsaved";
@@ -63,24 +64,16 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
   const today = (()=>{ const t=new Date(); return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,"0")}-${String(t.getDate()).padStart(2,"0")}`; })();   // local date
   const selInsp = inspections.find(i=>i.id===activeId);
   const typeInfo = id => INSP_TYPES.find(t=>t.id===id)||INSP_TYPES[0];
-  const scoreColor = pct => pct>=90?"#10b981":pct>=75?"#f59e0b":pct>=60?"#fb923c":"#ef4444";
-  const scoreLabel = pct => pct>=90?"Excellent":pct>=75?"Good":pct>=60?"Satisfactory":"Requires Improvement";
+  // scoring and bands: inspectionScore.js (the same rules as the phone, Fire Safety and reports)
+  const scoreColor = pct => scoreBand(pct).color;
+  const scoreLabel = pct => scoreBand(pct).label;
 
   // Score calculation
   // Score = points earned / points possible (2 per question). Unanswered questions still
   // count toward `possible`, so an incomplete checklist lowers the score.
+  // Questions not answered are left out of the score and the maximum (inspectionScore.js).
   function calcScore(type, sections) {
-    const defs = INSP_SECTIONS[type]||[];
-    let earned=0, possible=0;
-    defs.forEach(sec => {
-      sec.questions.forEach(q => {
-        const ans = (sections[sec.id]||{})[q.id];
-        possible += 2;
-        if (ans===2) earned+=2;
-        else if (ans===1) earned+=1;
-      });
-    });
-    return { earned, possible };
+    return scoreAnswers(INSP_SECTIONS[type]||[], sections);
   }
 
   // Flat answer helper
@@ -153,7 +146,7 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
   // Printable inspection report (score, answers per section, NC table with photos).
   async function generateReport(ins) {
     const ti = typeInfo(ins.type);
-    const pct = ins.maxScore>0 ? Math.round(ins.overallScore/ins.maxScore*100) : 0;
+    const pct = inspectionPct(ins) ?? 0;
     const openNCs = ins.nonConformances.filter(n=>n.actionStatus!=="complete");
     const closedNCs = ins.nonConformances.filter(n=>n.actionStatus==="complete");
     // Build printable HTML
@@ -241,7 +234,7 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
   // ── DETAIL view ─────────────────────────────────────────────────────────────
   if (view==="detail" && selInsp) {
     const ti = typeInfo(selInsp.type);
-    const pct = selInsp.maxScore>0 ? Math.round(selInsp.overallScore/selInsp.maxScore*100) : 0;
+    const pct = inspectionPct(selInsp) ?? 0;
     const sc = scoreColor(pct);
     const openNCs = selInsp.nonConformances.filter(n=>n.actionStatus!=="complete");
     return (
@@ -669,7 +662,8 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
   const latestInsp = latestByKey(inspections);
   const overdue = overdueInspections(inspections, today);
   const openCount = inspections.filter(i=>i.status==="open").length;
-  const avgScore = inspections.length ? Math.round(inspections.reduce((s,i)=>s+(i.maxScore>0?i.overallScore/i.maxScore*100:0),0)/inspections.length) : 0;
+  const scored = inspections.map(inspectionPct).filter(p => p !== null);   // an inspection with no maximum isn't averaged in
+  const avgScore = scored.length ? Math.round(scored.reduce((s,p)=>s+p,0)/scored.length) : 0;
 
   return (
     <div>
@@ -741,7 +735,7 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
       <div style={{display:"grid",gap:10}}>
         {filtered.sort((a,b)=>b.date.localeCompare(a.date)).map(ins=>{
           const ti=typeInfo(ins.type);
-          const pct=ins.maxScore>0?Math.round(ins.overallScore/ins.maxScore*100):0;
+          const pct=inspectionPct(ins) ?? 0;
           const sc=scoreColor(pct);
           const openNCs=ins.nonConformances.filter(n=>n.actionStatus!=="complete").length;
           const newer=supersededBy(ins,latestInsp);

@@ -21,7 +21,7 @@
  *      src/domains/* (most are lazy-loaded to keep the first download small).
  *
  * FILE MAP (search for these banners)
- *   SortableStatCard ............ draggable dashboard tile wrapper
+ *   SortableStatGrid ............ draggable dashboard cards (shared/SortableStatGrid.jsx, lazy)
  *   ── state declarations ....... top of App()
  *   ── Load all persisted data .. loadAll() — the big Promise.allSettled
  *   ── Auto-sync watchers ....... useEffects that save whole collections
@@ -43,7 +43,7 @@
  *   ABOVE the `if (!dbReady) return` early return (≈ the "Show loading screen"
  *   banner). Adding a hook below it will crash with "Rendered more hooks than
  *   during the previous render". Never call hooks inside .map(), IIFEs or
- *   conditionals — extract a module-level component instead (see SortableStatCard).
+ *   conditionals — extract a module-level component instead (see shared/SortableStatGrid.jsx).
  *
  * KNOWN TECHNICAL DEBT (documented, not yet addressed)
  *   • Auto-sync effects re-save the ENTIRE collection on any change (e.g. every
@@ -51,32 +51,58 @@
  *     refactor is planned.
  *   • No protection against two admins editing the same record at once
  *     (last write wins).
- *   • A few save helpers still use delete-then-insert (dbSaveAssigns,
- *     dbSaveDocAssignments, dbSaveDseReport) — a failure between the two
- *     calls can leave rows missing.
+ *   • Saves never clear a person's rows and write them back: training and document
+ *     assignments and DSE assessments compare with what's stored and add, change or
+ *     remove only the differences, so a dropped connection can't lose records.
  *   • This file is very large (~4,000 lines). Staff/admin tab bodies that are
  *     still inline here are good candidates for extraction into src/domains/.
  * ═══════════════════════════════════════════════════════════════════════════
  */
 import React, { useState, useEffect, useRef } from "react";
-import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
-import { SortableContext, rectSortingStrategy, arrayMove, useSortable } from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
+import { lazyFresh } from "./lib/staleBuild";   // a part that can't be downloaded shows a note instead of an error
+import { isActionDone, completeAction } from "./lib/actionStatus";   // one meaning of "done" for corrective actions
 // ── Seed / reference data (src/data). Used as defaults until Supabase has rows. ──
 import { EXT_CERT_TYPES } from "./data/seedExtCerts";
 import { INSP_TYPES } from "./data/seedInspections";
 import { PERMIT_TYPES } from "./data/seedPermits";
-import { isWarehouseWorker, MACHINERY_TYPES, machineState, compsFor } from "./data/seedMachinery";
+import { isWarehouseWorker, hasMachineryAccess, MACHINERY_TYPES, machineState, compsFor } from "./data/seedMachinery";
 import { TRAINING_MODULES } from "./data/seedTraining";
 // ── Domain tabs. `React.lazy` = the tab's code is only downloaded the first time it is
 // opened (code-splitting). Each lazy tab must be rendered inside <React.Suspense>.
 // The `.then(m => ({ default: m.X }))` adapts a NAMED export to what React.lazy expects.
-const LazyContractorsTab = React.lazy(() => import("./domains/contractors/ContractorsTab").then(m => ({ default: m.ContractorsTab })));
-const LazyMyTeamTab = React.lazy(() => import("./domains/manager/MyTeamTab").then(m => ({ default: m.MyTeamTab })));
-const LazyAuditTrailTab = React.lazy(() => import("./domains/audit/AuditTrailTab").then(m => ({ default: m.AuditTrailTab })));
-const LazyCoshhTab = React.lazy(() => import("./domains/coshh/CoshhTab").then(m => ({ default: m.CoshhTab })));
+// ── Parts of the portal loaded only when first shown ─────────────────────────
+// Each is a normal component name, so the code that uses it doesn't change; the file
+// itself is downloaded the first time it appears. Keeps the first download small
+// (most people never open most of these on a given day). Hooks: none here.
+const LAZY_PAGE  = <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif", color: "#94a3b8", background: "#060d2e" }}>Loading…</div>;
+const LAZY_BLOCK = <div style={{ padding: 40, textAlign: "center", color: "#94a3b8" }}>Loading…</div>;
+function lazyPart(loader, fallback = null) {
+  const L = lazyFresh(loader);
+  const Part = props => <React.Suspense fallback={fallback}><L {...props}/></React.Suspense>;
+  return Part;
+}
+const RecordCompletionModal = lazyPart(() => import("./domains/training/RecordCompletion").then(m => ({ default: m.RecordCompletionModal })), null);
+const ImportPriorTrainingModal = lazyPart(() => import("./domains/training/RecordCompletion").then(m => ({ default: m.ImportPriorTrainingModal })), null);
+const GroupSessionModal = lazyPart(() => import("./domains/training/RecordCompletion").then(m => ({ default: m.GroupSessionModal })), null);
+const DSEAssessment = lazyPart(() => import("./domains/dse/DSEAssessment").then(m => ({ default: m.DSEAssessment })), LAZY_PAGE);
+const MachineryEquipmentPage = lazyPart(() => import("./domains/machinery/MachineryEquipmentPage").then(m => ({ default: m.MachineryEquipmentPage })), LAZY_BLOCK);
+const QuickReportModal = lazyPart(() => import("./domains/incidents/QuickReportModal").then(m => ({ default: m.QuickReportModal })), null);
+const EditStaffModal = lazyPart(() => import("./domains/staff/EditStaffModal").then(m => ({ default: m.EditStaffModal })), null);
+const ModulePreviewModal = lazyPart(() => import("./domains/training/ModulePreviewModal").then(m => ({ default: m.ModulePreviewModal })), null);
+const HotspotActivity = lazyPart(() => import("./domains/training/HotspotActivity").then(m => ({ default: m.HotspotActivity })), LAZY_BLOCK);
+const TempPasswordsModal = lazyPart(() => import("./shared/TempPasswordsModal").then(m => ({ default: m.TempPasswordsModal })), null);
+const SignInAccountsPanel = lazyPart(() => import("./domains/staff/SignInAccountsPanel").then(m => ({ default: m.SignInAccountsPanel })), LAZY_BLOCK);
+const MobileApp = lazyPart(() => import("./mobile/MobileApp.jsx").then(m => ({ default: m.default })), LAZY_PAGE);
+const CertificateModal = lazyPart(() => import("./domains/training/CertificateModal").then(m => ({ default: m.CertificateModal })), null);
+const DocBundles = lazyPart(() => import("./domains/documents/DocBundles").then(m => ({ default: m.DocBundles })), LAZY_BLOCK);
+const MyBundles = lazyPart(() => import("./domains/documents/DocBundles").then(m => ({ default: m.MyBundles })));
+const LazySortableStatGrid = lazyFresh(() => import("./shared/SortableStatGrid"));
+
+const LazyContractorsTab = lazyFresh(() => import("./domains/contractors/ContractorsTab").then(m => ({ default: m.ContractorsTab })));
+const LazyMyTeamTab = lazyFresh(() => import("./domains/manager/MyTeamTab").then(m => ({ default: m.MyTeamTab })));
+const LazyAuditTrailTab = lazyFresh(() => import("./domains/audit/AuditTrailTab").then(m => ({ default: m.AuditTrailTab })));
+const LazyCoshhTab = lazyFresh(() => import("./domains/coshh/CoshhTab").then(m => ({ default: m.CoshhTab })));
 import { DocCard } from "./domains/documents/DocCard";
-import { DocBundles, MyBundles } from "./domains/documents/DocBundles";
 import { SlideVideo } from "./shared/SlideVideo";
 import { parseRoute, routeHash, routeAllowed } from "./lib/router";
 import { notify, ask, notifyAfterReload, setFeedbackTheme } from "./shared/Feedback";
@@ -88,60 +114,55 @@ import { openFile } from "./lib/fileAccess";
 import { ScrollNav } from "./shared/ScrollNav";
 import { BackupPanel, BACKUP_DUE_DAYS } from "./domains/audit/BackupPanel";
 import { lastBackupAt } from "./lib/backup";
-import { RecordCompletionModal, ImportPriorTrainingModal, GroupSessionModal } from "./domains/training/RecordCompletion";
 import { EvidenceLinks, AttachEvidenceModal, SessionsModal } from "./domains/training/TrainingEvidence";
 import { uploadEvidence, listSessions, sessionKey, evidenceLabel } from "./domains/training/evidence";
 import { teamOf } from "./domains/manager/team";
-import { isPassed, scoreText, recordedText, passMarkOf } from "./domains/training/completion";
-import { DSEAssessment } from "./domains/dse/DSEAssessment";
-const LazyStaffDSETab = React.lazy(() => import("./domains/dse/StaffDSETab").then(m => ({ default: m.StaffDSETab })));
-const LazyEquipmentTrackerTab = React.lazy(() => import("./domains/equipment/EquipmentTrackerTab").then(m => ({ default: m.EquipmentTrackerTab })));
-const LazyFireSafetyTab = React.lazy(() => import("./domains/fireSafety/FireSafetyTab").then(m => ({ default: m.FireSafetyTab })));
-const LazyFirstAidRegisterTab = React.lazy(() => import("./domains/firstAid/FirstAidRegisterTab").then(m => ({ default: m.FirstAidRegisterTab })));
-const LazyAdminIncidentTab = React.lazy(() => import("./domains/incidents/AdminIncidentTab").then(m => ({ default: m.AdminIncidentTab })));
-const LazyIncidentTracker = React.lazy(() => import("./domains/incidents/IncidentTracker").then(m => ({ default: m.IncidentTracker })));
-const LazyInvestigationTab = React.lazy(() => import("./domains/incidents/InvestigationTab").then(m => ({ default: m.InvestigationTab })));
-import { QuickReportModal } from "./domains/incidents/QuickReportModal";
+import { isPassed, scoreText, recordedText, passMarkOf, PASS_MARK } from "./domains/training/completion";
+import { personalCompliance, complianceBand, staffTraining } from "./domains/training/compliance";
+import { firstAidSummary } from "./domains/firstAid/firstAidLogic";
+import { DSE_RENEWAL_MONTHS, DSE_QUESTION_COUNT } from "./data/seedDse";
+const LazyStaffDSETab = lazyFresh(() => import("./domains/dse/StaffDSETab").then(m => ({ default: m.StaffDSETab })));
+const LazyEquipmentTrackerTab = lazyFresh(() => import("./domains/equipment/EquipmentTrackerTab").then(m => ({ default: m.EquipmentTrackerTab })));
+const LazyFireSafetyTab = lazyFresh(() => import("./domains/fireSafety/FireSafetyTab").then(m => ({ default: m.FireSafetyTab })));
+const LazyFirstAidRegisterTab = lazyFresh(() => import("./domains/firstAid/FirstAidRegisterTab").then(m => ({ default: m.FirstAidRegisterTab })));
+const LazyAdminIncidentTab = lazyFresh(() => import("./domains/incidents/AdminIncidentTab").then(m => ({ default: m.AdminIncidentTab })));
+const LazyIncidentTracker = lazyFresh(() => import("./domains/incidents/IncidentTracker").then(m => ({ default: m.IncidentTracker })));
+const LazyInvestigationTab = lazyFresh(() => import("./domains/incidents/InvestigationTab").then(m => ({ default: m.InvestigationTab })));
 import { isIncompleteQuickReport, myIncompleteQuickReports, isQuickReportOverdue, quickReportDueLabel } from "./domains/incidents/quickReportStatus";
-const LazySiteInspectionsTab = React.lazy(() => import("./domains/inspections/SiteInspectionsTab").then(m => ({ default: m.SiteInspectionsTab })));
-const LazySiteSettingsTab = React.lazy(() => import("./domains/settings/SiteSettingsTab").then(m => ({ default: m.SiteSettingsTab })));
-const LazyAdminMachineryTab = React.lazy(() => import("./domains/machinery/AdminMachineryTab").then(m => ({ default: m.AdminMachineryTab })));
-const LazyMachineryCompetenceTab = React.lazy(() => import("./domains/machinery/MachineryCompetenceTab").then(m => ({ default: m.MachineryCompetenceTab })));
-const LazyPermitsTab = React.lazy(() => import("./domains/permits/PermitsTab").then(m => ({ default: m.PermitsTab })));
-const LazyRiskAssessmentTab = React.lazy(() => import("./domains/riskAssessments/RiskAssessmentTab").then(m => ({ default: m.RiskAssessmentTab })));
+const LazySiteInspectionsTab = lazyFresh(() => import("./domains/inspections/SiteInspectionsTab").then(m => ({ default: m.SiteInspectionsTab })));
+const LazySiteSettingsTab = lazyFresh(() => import("./domains/settings/SiteSettingsTab").then(m => ({ default: m.SiteSettingsTab })));
+const LazyAdminMachineryTab = lazyFresh(() => import("./domains/machinery/AdminMachineryTab").then(m => ({ default: m.AdminMachineryTab })));
+const LazyMachineryCompetenceTab = lazyFresh(() => import("./domains/machinery/MachineryCompetenceTab").then(m => ({ default: m.MachineryCompetenceTab })));
+const LazyPermitsTab = lazyFresh(() => import("./domains/permits/PermitsTab").then(m => ({ default: m.PermitsTab })));
+const LazyRiskAssessmentTab = lazyFresh(() => import("./domains/riskAssessments/RiskAssessmentTab").then(m => ({ default: m.RiskAssessmentTab })));
 import { generateRAHtml } from "./domains/riskAssessments/generateRAHtml";
-const LazyAccountTab = React.lazy(() => import("./domains/staff/AccountTab").then(m => ({ default: m.AccountTab })));
-import { EditStaffModal } from "./domains/staff/EditStaffModal";
-const LazyStaffActionsTab = React.lazy(() => import("./domains/staff/StaffActionsTab").then(m => ({ default: m.StaffActionsTab })));
-const LazyCreateModuleTab = React.lazy(() => import("./domains/training/CreateModuleTab").then(m => ({ default: m.CreateModuleTab })));
-import { ModulePreviewModal } from "./domains/training/ModulePreviewModal";
-const LazyReportsTab = React.lazy(() => import("./domains/training/ReportsTab").then(m => ({ default: m.ReportsTab })));
-import { generateStaffPDF } from "./domains/training/generateStaffPDF";
+const LazyAccountTab = lazyFresh(() => import("./domains/staff/AccountTab").then(m => ({ default: m.AccountTab })));
+const LazyStaffActionsTab = lazyFresh(() => import("./domains/staff/StaffActionsTab").then(m => ({ default: m.StaffActionsTab })));
+const LazyCreateModuleTab = lazyFresh(() => import("./domains/training/CreateModuleTab").then(m => ({ default: m.CreateModuleTab })));
+const LazyReportsTab = lazyFresh(() => import("./domains/training/ReportsTab").then(m => ({ default: m.ReportsTab })));
 import { isHtmlContent, ensureRteStyles } from "./domains/training/slideTextUtils";
-import { HotspotActivity } from "./domains/training/HotspotActivity";
 // ── Core libraries, shared UI and theme ──
+import { generateStaffPDF } from "./domains/training/generateStaffPDF";   // kept up front: it opens a window, which must happen straight from the click
 import { sanitizeHtml } from "./lib/sanitizeHtml";
 import { EXPIRY_WARNING_DAYS, getExpiryStatus, localISO, todayISO, localDateTime } from "./lib/dates";
 import { EmojiCtx, E, syncEmojiMode } from "./lib/emoji";
 import { startPlainSymbols, stopPlainSymbols } from "./lib/plainSymbols";
-import { sb, hashPassword, DEFAULT_HASH, dbWrite } from "./lib/supabase";
+import { sb, hashPassword, DEFAULT_HASH, dbWrite, insertNew } from "./lib/supabase";
 import { AUTH_MODE, signIn, signOut, meta as authMeta, adminCall, makeTempPassword, checkPassword as authCheckPassword, changeOwnPassword } from "./lib/auth";
 import { ForcePasswordChange } from "./shared/ForcePasswordChange";
-import { TempPasswordsModal } from "./shared/TempPasswordsModal";
-import { SignInAccountsPanel } from "./domains/staff/SignInAccountsPanel";
 import { uploadPhotos, PHOTO_BUCKET } from "./lib/photos";
 import { HelpTip } from "./shared/HelpTip";
 import { ZeusLogo, ZeusProtectLogo, ZEUS_LOGO_LIGHT_SRC } from "./shared/Logo";
 import { NotificationBell } from "./shared/NotificationBell";
 import { useWindowWidth, MobileCard, MobileCardRow } from "./shared/hooks";
 import { Pill, Avatar, Bar } from "./shared/primitives";
-import { Z, getThemeTokens } from "./theme/tokens";
-import MobileApp from "./mobile/MobileApp.jsx";
-import { NewVersionModal } from "./shared/NewVersionModal";
-import { CertificateModal } from "./domains/training/CertificateModal";
+import { Z, getThemeTokens, getTheme, isDarkTheme, rememberTheme, oppositeTheme, applyThemeVars } from "./theme/tokens";
 import { applyLightThemeFix, isLightTheme } from "./lib/lightThemeFix";
 import { mergeInvestigation, changedSince } from "./domains/incidents/investigationMerge";
 import { QuickSearch } from "./shared/QuickSearch";
+import { createKeyed, primeKeyed, saveKeyed, diffKeyed, mergeKeyed, savedCopy, markSaved } from "./lib/keyedSync";
+import { NewVersionModal } from "./shared/NewVersionModal";   // also used by DocCard, so it can't load separately
+import { ticksFrom, Tick, TickAll, BulkBar } from "./shared/BulkBar";
 import { NavMenu } from "./shared/NavMenu";
 import { useSort, sortRows, SortButton } from "./shared/Sortable";
 import { getProgress, saveProgress, clearProgress, resumeLabel } from "./lib/moduleProgress";
@@ -153,32 +174,9 @@ import { loadSiteLists, getSiteLists, coverShifts, isAllShift } from "./lib/site
 import { loadWelcomeVideo, showWelcome, hideWelcome, WelcomeReplay, WelcomeVideoSettings } from "./shared/WelcomeVideo";
 import { useRemembered, clearRemembered } from "./lib/remembered";
 import { setAuditUser, primeAudit, primeAuditList, primeAuditMap, auditRecord, auditList, auditDelete, auditEvent } from "./lib/audit";
+import { pingIncidentAlert } from "./lib/incidentAlert";
+import { sameName } from "./lib/openActions";
 
-// Wraps a dashboard stat card to make it draggable. Only the small handle in
-// the corner starts a drag — the rest of the card keeps its own onClick
-// (navigating to the relevant tab) working exactly as before. Defined at
-// module scope (not inside a .map()) so useSortable is called consistently
-// once per rendered instance, per the Rules of Hooks.
-function SortableStatCard({ id, children }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.4 : 1,
-    zIndex: isDragging ? 20 : "auto",
-    position: "relative",
-  };
-  return (
-    <div ref={setNodeRef} style={style} {...attributes}>
-      <span
-        {...listeners}
-        title="Drag to reorder"
-        style={{ position: "absolute", top: 10, right: 10, zIndex: 5, cursor: "grab", fontSize: 13, color: "var(--zp-drag-handle, rgba(255,255,255,0.35))", userSelect: "none", touchAction: "none", padding: "4px 6px", lineHeight: 1 }}
-      >⠿⠿</span>
-      {children}
-    </div>
-  );
-}
 
 /**
  * The whole application. See the file header for the render order and conventions.
@@ -207,6 +205,17 @@ const mapIncidentRow = (r) => ({
 });
 
 // Key-order-independent JSON, used to tell whether a record really changed.
+/** Fire safety lists (state key → table). */
+const FIRE_TABLES = { wardens: "fire_wardens", drills: "fire_drills", alarmTests: "fire_alarm_tests",
+  extinguishers: "fire_extinguishers", emergLighting: "fire_emerg_lighting", fraReviews: "fire_fra_reviews" };
+
+/** A short fingerprint of a history table: its row ids, plus `recorded` (attached evidence),
+ *  which can change on an existing row. null if any row has no id (then always re-read). */
+function idsKey(rows) {
+  if (!Array.isArray(rows) || rows.some(r => r == null || r.id == null)) return null;
+  return rows.map(r => `${r.id}:${r.recorded == null ? "" : stableJSON(r.recorded)}`).sort().join(",");
+}
+
 function stableJSON(v) {
   if (v === undefined) return "null";
   if (v === null || typeof v !== "object") return JSON.stringify(v);
@@ -229,7 +238,7 @@ function mapAssignRows(rows) {
 }
 function mapDocAssignRows(rows) {
   const map = {};
-  (rows || []).forEach(r => { const did = String(r.doc_id); (map[did] = map[did] || []).push(String(r.user_id)); });
+  (rows || []).forEach(r => { const did = String(r.doc_id), uid = String(r.user_id); const l = (map[did] = map[did] || []); if (!l.includes(uid)) l.push(uid); });   // a doubled row counts once
   return map;
 }
 function mapCompRows(rows) {
@@ -237,7 +246,7 @@ function mapCompRows(rows) {
   (rows || []).forEach(r => {
     // Older versions also saved FAILED attempts here (no certificate, under 70%). A
     // failed attempt isn't a completion — those are listed under Quiz Failures.
-    if (!r.recorded && !r.cert_id && r.score !== null && r.score !== undefined && Number(r.score) < 70) return;
+    if (!r.recorded && !r.cert_id && r.score !== null && r.score !== undefined && Number(r.score) < PASS_MARK) return;
     const uid = String(r.user_id); map[uid] = map[uid] || {};
     map[uid][String(r.module_id)] = { score: r.score, date: r.date, certId: r.cert_id, answers: r.answers, moduleVersion: r.module_version || 1, ...(r.recorded ? { recorded: r.recorded } : {}) };
   });
@@ -284,12 +293,16 @@ const INCIDENT_CORE_KEYS = new Set([
 // what is in the database. The demo data now lives in demo/ for the test scripts.
 
 export default function App() {
-  const [darkMode, setDarkMode] = useState(true); // kept for backward compat
-  const [theme, setTheme] = useState("dark"); // "dark"|"light"|"slate"|"forest"|"graphite"|"arctic"|"sand"
+  const [theme, setTheme] = useState("dark"); // a key from THEMES in theme/tokens.js
   const T = getThemeTokens(theme); // active theme tokens
-  // Light themes: darken the pale dark-theme text colours so admin text stays readable.
-  useEffect(() => { applyLightThemeFix(isLightTheme(theme)); }, [theme]);
+  // darkMode (logo artwork, a few older screens) follows the theme's mode.
+  const darkMode = isDarkTheme(theme);
+  const setDarkMode = () => {}; // kept for older callers; darkMode now follows the theme
   const [user,    setUser]    = useState(null);
+  // Remember this person's last light and last dark theme (for the header ☀/🌙 button).
+  // Not before sign-in, or the starting "dark" would overwrite what they last chose.
+  const signedIn = !!user;
+  useEffect(() => { if (signedIn) rememberTheme(theme); }, [theme, signedIn]);
   const [view,    setViewRaw] = useState("login");
   const [allUsers,setAllUsers]= useState([]); // loaded from the Supabase users table
   // ── Auth & users ──
@@ -312,7 +325,6 @@ export default function App() {
   // ── Navigation: atab = active ADMIN tab key, stab = active STAFF tab key (see the render sections) ──
   const [atab,    setAtabRaw] = useState("dashboard");
   const [dashboardLayouts, setDashboardLayouts] = useState({}); // { [userId]: [cardId, ...] } — admin's saved stat-card order
-  const statDragSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
   const [adminReportView, setAdminReportView] = useRemembered("admin.reportView", "staff");
   const [focusIncidentId, setFocusIncidentId] = useState(null);
   const [focusContractorId, setFocusContractorId] = useState(null); // quick search → open this contractor
@@ -347,6 +359,9 @@ export default function App() {
   const [dseComments, setDseComments] = useState({});
   const [dseSection, setDseSection] = useState(0);
   const [dseSubmitted, setDseSubmitted] = useState(false);
+  // An unfinished assessment, saved to the person's account (user_profiles.data.dseDraft):
+  // { answers, comments, section, at } or null. Shown in My Actions and resumed by openDse().
+  const [dseDraft, setDseDraft] = useState(null);
   const [dseReports, setDseReports] = useState({});
   const [adminResponses, setAdminResponses] = useState({}); // { userId: { reportIdx_issueIdx: { comment, resolved } } }
   // ── Incidents, investigations and other H&S registers ──
@@ -412,6 +427,7 @@ export default function App() {
   const [staffFilterManager,  setStaffFilterManager]  = useRemembered("staff.manager", "all");
   const [staffFilterSearch,   setStaffFilterSearch]   = useState("");
   const [staffSel, setStaffSel] = useState([]); // Staff list: ticked people (string ids) for bulk actions
+  const [docSel, setDocSel] = useState([]);     // H&S Documents: ticked documents for bulk actions
   const [staffSort, setStaffSortBy] = useSort("staff", { by: "name", dir: "asc" }); // Staff list column sort (shared/Sortable.jsx)
   // Due dates on assigned training (lib/dueDates.js): { uid: { mid: "YYYY-MM-DD" } }, from training_assigns.due_date
   const [dueDates, setDueDates] = useState({});
@@ -496,6 +512,10 @@ export default function App() {
   // sets forceDesktop and returns the user here.
   const isPhone = winW <= 700;
   const [forceDesktop, setForceDesktop] = useState(false);
+  // Light themes: darken the pale dark-theme text colours so admin text stays readable.
+  // The phone layout does this itself, because "Follow system" can show a different theme.
+  const phoneLayout = isPhone && !!user && !forceDesktop;
+  useEffect(() => { if (!phoneLayout) { applyLightThemeFix(isLightTheme(theme)); applyThemeVars(theme); } }, [theme, phoneLayout]);
   const routerOn = !!user && (view === "admin" || view === "staff") && !(isPhone && !forceDesktop);
   // Keep the address in step with the page; each page change is a new Back/Forward step.
   // (After Back/Forward the address already matches, so nothing is added.)
@@ -634,9 +654,10 @@ export default function App() {
           sb.from("custom_machine_types").select("*"),
           sb.from("dashboard_layout").select("*"),
           sb.from("coshh_assessments").select("*"),
-          sb.from("doc_ack_history").select("*"),
-          sb.from("training_completion_history").select("*"),
-          sb.from("module_versions").select("*"),
+          // history tables load just AFTER the first screen (loadHistory below) — they grow fastest
+          Promise.resolve({ data: null, error: null }),
+          Promise.resolve({ data: null, error: null }),
+          Promise.resolve({ data: null, error: null }),
           sb.from("doc_bundles").select("*"),
         ]);
 
@@ -858,10 +879,8 @@ export default function App() {
         }
 
         // Custom chemicals
-        // Versioning history (read-only lists; appended to as people complete/read things)
-        const dahRows = rows(dahRes); if (dahRows && dahRows.length) setDocAckHistory(dahRows);
-        const chRows  = rows(chRes);  if (chRows && chRows.length) setCompHistory(chRows);
-        const mvRows  = rows(mvRes);  if (mvRows && mvRows.length) setModuleVersions(mvRows);
+        // Versioning history: loaded by loadHistory() once the first screen is showing.
+        void dahRes; void chRes; void mvRes;
 
         // COSHH assessments (one per substance code)
         const caRows = rows(caRes);
@@ -905,7 +924,22 @@ export default function App() {
         console.error("Supabase load error:", e);
       } finally {
         setDbReady(true);
+        loadHistory();   // not awaited: the portal is usable while this arrives
       }
+    }
+    // Stage 2: the history tables (every quiz result and every "I've read this", and old
+    // module versions). They only grow, aren't needed for the first screen, and on a busy
+    // site are the biggest tables. Anything added in this browser meanwhile is kept.
+    async function loadHistory() {
+      const [dah, ch, mv] = await Promise.all([
+        sb.from("doc_ack_history").select("*"), sb.from("training_completion_history").select("*"), sb.from("module_versions").select("*"),
+      ]);
+      const ok = r => r && !r.error && Array.isArray(r.data);
+      const keep = (fresh, cur, key) => { const have = new Set(fresh.map(key)); return [...fresh, ...cur.filter(x => !have.has(key(x)))]; };
+      if (ok(dah)) setDocAckHistory(cur => keep(dah.data, cur, h => `${h.user_id}|${h.doc_id}|${h.version}|${h.date}`));
+      if (ok(ch)) { setCompHistory(cur => keep(ch.data, cur, h => `${h.user_id}|${h.module_id}|${h.date}|${h.score}`)); historyIdsRef.current = idsKey(ch.data); }
+      if (ok(mv)) setModuleVersions(cur => keep(mv.data, cur, v => String(v.id)));
+      historyReadyRef.current = true;
     }
     loadAllRef.current = loadAll;
     if (AUTH_MODE !== "supabase") loadAll();
@@ -969,7 +1003,24 @@ export default function App() {
   // saved in between, the two sets of changes are combined (investigationMerge.js)
   // instead of the last save silently wiping out the other.
   const investigationBaseRef = useRef(new Map());
-  const equipmentSavedRef = useRef(new Map());   // non-admin sessions: last saved copy of each equipment item
+  const dseSavedRef = useRef(new Map());
+  const historyReadyRef = useRef(false);   // stage-2 history tables loaded (loadHistory)
+  const historyIdsRef = useRef(null);      // ids of the training history rows last read (refresh skips it if unchanged)   // last saved copy of each person's DSE assessments
+  // Registers kept as lists of records: what was last saved/loaded, per record (lib/keyedSync.js),
+  // so only changed records are written and other people's changes are never overwritten.
+  const regRef = useRef(null);
+  if (!regRef.current) {
+    const noFile = r => { const { _fileObj, ...rest } = r || {}; return rest; };
+    const noFra  = r => { const { _fileObj, fileData, ...rest } = r || {}; return rest; };
+    regRef.current = {
+      equipment: createKeyed(), inspections: createKeyed(), modules: createKeyed(), machineTypes: createKeyed(),
+      fire: { wardens: createKeyed(noFile), drills: createKeyed(noFile), alarmTests: createKeyed(noFile),
+              extinguishers: createKeyed(noFile), emergLighting: createKeyed(noFile), fraReviews: createKeyed(noFra) },
+    };
+  }
+  const firstAidSavedRef = useRef(null);         // last saved/loaded first aid register (JSON)
+  const firstAidWroteRef = useRef(0);            // when this browser last saved the first aid register
+  const dseRespSavedRef = useRef(new Map());     // last saved copy of each DSE response ("uid|ri|ii")
   const refreshBusyRef = useRef(false);
   // Training/reading records this browser just changed: key → time ("c:uid:mid", "k:uid:docId", "a:uid").
   const recentWriteRef = useRef(new Map());
@@ -987,7 +1038,13 @@ export default function App() {
     primeAuditList("inspection", siteInspections);
     incidents.forEach(i => incidentSavedRef.current.set(String(i.id), stableJSON(i)));
     Object.entries(investigations).forEach(([id, d]) => { investigationSavedRef.current.set(String(id), stableJSON(d)); investigationBaseRef.current.set(String(id), d); });
-    equipment.forEach(e => equipmentSavedRef.current.set(String(e.id), stableJSON(e)));
+    const R = regRef.current;
+    primeKeyed(R.equipment, equipment); primeKeyed(R.inspections, siteInspections);
+    primeKeyed(R.modules, customModules); primeKeyed(R.machineTypes, customMachineTypes);
+    Object.keys(R.fire).forEach(k => primeKeyed(R.fire[k], (fireSafety || {})[k] || []));
+    firstAidSavedRef.current = stableJSON(firstAidData);
+    Object.entries(adminResponses).forEach(([uid, keys]) => Object.entries(keys || {}).forEach(([key, rec]) => dseRespSavedRef.current.set(`${uid}|${key}`, stableJSON(rec))));
+    Object.entries(dseReports).forEach(([uid, reps]) => dseSavedRef.current.set(String(uid), stableJSON(reps)));
     _ready.current = true;
   }, [dbReady]); // eslint-disable-line
 
@@ -1020,13 +1077,75 @@ export default function App() {
   // actions completed on the phone). Re-read both tables every 30 s while the tab is
   // visible, when the window regains focus, and when an incidents screen is opened.
   // Records with a save still in flight from THIS browser are kept as they are.
+  // Registers people edit on their own pages (equipment, inspections, fire safety, first aid,
+  // custom modules, machine types): take in other people's changes. Only for those who can
+  // edit them; records with an unsaved or in-flight change here are left alone (lib/keyedSync.js).
+  async function refreshRegisters() {
+    // by role (with the old sign-in everyone "can write", but only these people edit registers)
+    const admin = !!user && user.role === "admin", machinery = !!user && hasMachineryAccess(user);
+    if (!machinery) return;
+    const R = regRef.current;
+    const ok = r => r && !r.error && Array.isArray(r.data);
+    const data = r => r.data.map(x => x.data).filter(Boolean);
+    const reads = { equipment: sb.from("equipment").select("*"), machineTypes: sb.from("custom_machine_types").select("*") };
+    if (admin) {
+      Object.assign(reads, { inspections: sb.from("site_inspections").select("*"), modules: sb.from("custom_modules").select("*"),
+        firstAid: sb.from("first_aid_register").select("*").eq("id", "singleton") });
+      Object.entries(FIRE_TABLES).forEach(([k, table]) => { reads[`fire.${k}`] = sb.from(table).select("*"); });
+    }
+    const keys = Object.keys(reads);
+    const readAt = Date.now();   // anything this browser saves after this moment is newer than what comes back
+    const res = Object.fromEntries((await Promise.all(keys.map(k => reads[k]))).map((r, i) => [keys[i], r]));
+    if (ok(res.equipment)) { const fresh = data(res.equipment); setEquipment(cur => mergeKeyed(R.equipment, cur, fresh, readAt)); }
+    if (ok(res.machineTypes)) { const fresh = data(res.machineTypes); setCustomMachineTypes(cur => mergeKeyed(R.machineTypes, cur, fresh, readAt)); }
+    if (!admin) return;
+    const freshInsp = ok(res.inspections) ? data(res.inspections) : null;
+    if (freshInsp) setSiteInspections(cur => {
+      const next = mergeKeyed(R.inspections, cur, freshInsp, readAt);
+      if (next !== cur) primeAuditList("inspection", next);   // changes made elsewhere aren't logged as ours
+      return next;
+    });
+    if (ok(res.modules)) { const fresh = data(res.modules); setCustomModules(cur => mergeKeyed(R.modules, cur, fresh, readAt)); }
+    const fireFresh = {};
+    Object.keys(FIRE_TABLES).forEach(k => { if (ok(res[`fire.${k}`])) fireFresh[k] = data(res[`fire.${k}`]); });
+    const NONE = [];
+    if (Object.keys(fireFresh).length) setFireSafety(cur => {
+      let changed = false; const next = { ...(cur || {}) };
+      Object.entries(fireFresh).forEach(([k, fresh]) => { const was = (cur || {})[k] || NONE; const m = mergeKeyed(R.fire[k], was, fresh, readAt); if (m !== was) { next[k] = m; changed = true; } });
+      return changed ? next : cur;
+    });
+    // first aid is one document: take theirs only if nothing is unsaved here and we haven't saved since the read
+    if (ok(res.firstAid) && res.firstAid.data[0] && firstAidWroteRef.current < readAt) {
+      const fresh = res.firstAid.data[0].data, fj = stableJSON(fresh), prev = firstAidSavedRef.current;
+      if (prev !== null && fj !== prev) setFirstAidData(cur => {
+        if (stableJSON(cur) !== prev) return cur;   // unsaved change here: keep it (same answer if React runs this twice)
+        firstAidSavedRef.current = fj;
+        return fresh;
+      });
+    }
+  }
+
   async function refreshSharedRecords() {
     if (!_ready.current || refreshBusyRef.current) return;
     refreshBusyRef.current = true;
     try {
+      const registers = refreshRegisters().catch(e => console.error("Register refresh failed:", e));   // awaited below
+      // Training history only grows, and can be the biggest table: read just its row ids,
+      // and the full rows only when they changed (or the table has no ids to compare).
+      const historyRead = async () => {
+        if (!historyReadyRef.current) return { data: null, error: "not loaded yet" };
+        const ids = await sb.from("training_completion_history").select("id,recorded");   // every page; recorded = evidence, which can change
+        if (!ids.error && Array.isArray(ids.data)) {
+          const k = idsKey(ids.data);
+          if (k !== null && k === historyIdsRef.current) return { data: null, error: "unchanged" };
+        }
+        const full = await sb.from("training_completion_history").select("*");
+        if (!full.error && Array.isArray(full.data)) historyIdsRef.current = idsKey(full.data);
+        return full;
+      };
       const [iRes, invRes, cRes, ackRes, aRes, hRes, daRes, bdRes] = await Promise.all([sb.from("incidents").select("*"), sb.from("investigations").select("*"),
         sb.from("training_completions").select("*"), sb.from("doc_acknowledgements").select("*"), sb.from("training_assigns").select("*"),
-        sb.from("training_completion_history").select("*"), sb.from("doc_assignments").select("*"), sb.from("doc_bundles").select("*")]);
+        historyRead(), sb.from("doc_assignments").select("*"), sb.from("doc_bundles").select("*")]);
       // Training completions, assignments and document confirmations made elsewhere
       // (a member of staff finishing a module, a manager assigning one) appear here
       // without a reload. With the old sign-in an empty table means "use the demo data".
@@ -1087,6 +1206,7 @@ export default function App() {
           return next;
         });
       }
+      await registers;
     } finally {
       refreshBusyRef.current = false;
     }
@@ -1114,69 +1234,112 @@ export default function App() {
   // Supabase sign-in: only admins may change shared registers, so other people's
   // browsers don't try to save them back (the database would refuse anyway).
   const writesAll = () => AUTH_MODE !== "supabase" || (user && user.role === "admin");
+  // Machinery Competence + Equipment Register: also people with Machinery & Equipment access.
+  const writesMachinery = () => writesAll() || hasMachineryAccess(user);
 
   useEffect(() => { if (!_ready.current) return;
     Object.entries(dseReports).filter(([uid]) => writesAll() || String(uid) === String(user && user.id)).forEach(([uid, reports]) => {
+      // only people whose assessments changed since the last save (not everyone, every time)
+      const j = stableJSON(reports);
+      if (dseSavedRef.current.get(String(uid)) === j) return;
+      dseSavedRef.current.set(String(uid), j);
       auditRecord("dse_report", uid, reports, auditNameOf(uid));
-      dbSaveDseReport(Number(uid), reports);
+      dbSaveDseReport(Number(uid), reports).then(ok => { if (ok === false) dseSavedRef.current.delete(String(uid)); });   // retried on the next change
     });
   }, [dseReports]); // eslint-disable-line
 
   useEffect(() => { if (!_ready.current) return;
     // Admins save any response; line managers only their team's (sign-offs); staff none.
+    // Only responses that changed here are written (an old page can't undo someone's sign-off).
     Object.entries(adminResponses).filter(([uid]) => writesAll() || (user && user.role === "manager" && String(uid) !== String(user.id))).forEach(([uid, keys]) => {
+      const changed = Object.entries(keys || {}).filter(([key, rec]) => dseRespSavedRef.current.get(`${uid}|${key}`) !== stableJSON(rec));
+      if (!changed.length) return;
       auditRecord("dse_response", uid, keys, auditNameOf(uid));
-      Object.entries(keys).forEach(([key, rec]) => {
+      changed.forEach(([key, rec]) => {
+        dseRespSavedRef.current.set(`${uid}|${key}`, stableJSON(rec));
         const [ri, ii] = key.split("_").map(Number);
         dbSaveDseAdminResponse(Number(uid), ri, ii, rec);
       });
     });
   }, [adminResponses]); // eslint-disable-line
 
+  // Equipment: only changed items are written. People who manage equipment (admins, Machinery &
+  // Equipment access) save the item and may delete ones they removed. Everyone else (e.g. an
+  // incident report adding a defect) adds only their new defects / status change to the LATEST
+  // stored copy, so an old copy of the rest of the item is never written back.
   useEffect(() => { if (!_ready.current) return;
-    if (!writesAll()) {
-      // e.g. an incident report adding a defect: save just that item.
-      equipment.forEach(e => {
-        const k = String(e.id), j = stableJSON(e);
-        if (equipmentSavedRef.current.get(k) === j) return;
-        equipmentSavedRef.current.set(k, j);
-        dbWrite(sb.from("equipment").upsert({ id: e.id, data: e }, { onConflict: "id" }), "equipment");
+    const t = regRef.current.equipment;
+    if (user && hasMachineryAccess(user)) {
+      saveKeyed(t, equipment, {
+        write: e => dbWrite(sb.from("equipment").upsert({ id: e.id, data: e }, { onConflict: "id" }), "equipment"),
+        remove: id => dbWrite(sb.from("equipment").delete().eq("id", id), "equipment delete"),
       });
       return;
     }
-    dbSaveEquipment(equipment);
+    const { changed } = diffKeyed(t, equipment);
+    changed.forEach(e => {
+      const base = savedCopy(t, e.id) || {};
+      markSaved(t, e);
+      // one save at a time per item (two quick changes must not both read the same copy)
+      inTurn(`eq:${e.id}`, async () => {
+        const r = await sb.from("equipment").query(`select=data&id=eq.${encodeURIComponent(e.id)}`);
+        const cur = !r.error && Array.isArray(r.data) && r.data[0] ? r.data[0].data : null;
+        if (!cur) {
+          t.saved.delete(String(e.id));   // tried again on the next change
+          notify(`The change to ${e.name || "this equipment"} wasn't saved (couldn't reach the register). Please try again.`, { kind: "error" });
+          return;
+        }
+        const seen = new Set([...(cur.defects || []), ...(base.defects || [])].map(d => String(d.id)));
+        const added = (e.defects || []).filter(d => !seen.has(String(d.id)));
+        const next = { ...cur, defects: [...(cur.defects || []), ...added] };
+        if (e.status !== base.status) next.status = e.status;
+        const ok = await dbWrite(sb.from("equipment").upsert({ id: e.id, data: next }, { onConflict: "id" }), "equipment", { alertOnError: true });
+        if (!ok) t.saved.delete(String(e.id));
+      });
+    });
   }, [equipment]); // eslint-disable-line
 
   useEffect(() => { if (!_ready.current || !writesAll()) return;
     auditList("inspection", siteInspections, i => [i.date, (INSP_TYPES.find(t => t.id === i.type) || {}).label || i.type, i.location].filter(Boolean).join(" · "));
-    dbSaveSiteInspections(siteInspections);
+    saveKeyed(regRef.current.inspections, siteInspections, {
+      write: x => dbWrite(sb.from("site_inspections").upsert({ id: x.id, data: x }, { onConflict: "id" }), "site inspection"),
+      remove: id => dbWrite(sb.from("site_inspections").delete().eq("id", id), "site inspection delete"),
+    });
   }, [siteInspections]); // eslint-disable-line
 
-  // One fire safety save at a time: a change made while a save is running (e.g. Undo
-  // straight after a remove) waits and is saved next, so the prune of the earlier save
-  // can't delete a row the later change put back.
-  const fireSaveRef = useRef({ running: false, next: null });
+  // Fire safety: each list saves only the records that changed, and deletes only ones removed here.
   useEffect(() => { if (!_ready.current || !writesAll()) return;
-    const q = fireSaveRef.current;
-    q.next = fireSafety;
-    if (q.running) return;
-    (async () => {
-      q.running = true;
-      try { while (q.next) { const fs = q.next; q.next = null; await dbSaveFireSafety(fs); } }
-      finally { q.running = false; }
-    })();
+    Object.entries(FIRE_TABLES).forEach(([k, table]) => {
+      saveKeyed(regRef.current.fire[k], (fireSafety || {})[k] || [], {
+        write: x => dbWrite(sb.from(table).upsert({ id: x.id, data: x }, { onConflict: "id" }), `fire safety: ${table}`),
+        remove: id => dbWrite(sb.from(table).delete().eq("id", id), `fire safety delete: ${table}`),
+      });
+    });
   }, [fireSafety]); // eslint-disable-line
 
   useEffect(() => { if (!_ready.current || !writesAll()) return;
-    dbSaveFirstAidData(firstAidData);
+    const j = stableJSON(firstAidData);
+    if (j === firstAidSavedRef.current) return;   // nothing changed here (e.g. just refreshed)
+    const before = firstAidSavedRef.current;
+    firstAidSavedRef.current = j; firstAidWroteRef.current = Date.now();
+    dbSaveFirstAidData(firstAidData).then(ok => {
+      if (ok !== false) return;
+      // not saved: go back to the last copy known to be in the database, so the next change
+      // tries again (and a refresh can still bring in other people's changes)
+      if (firstAidSavedRef.current === j) firstAidSavedRef.current = before;
+      notify("The first aid register wasn't saved. Your change is still here — it will be tried again on your next change.", { kind: "error" });
+    });
   }, [firstAidData]); // eslint-disable-line
 
+  // Custom modules / machine types: only changed ones are saved (deleting has its own explicit call).
   useEffect(() => { if (!_ready.current || !writesAll()) return;
-    customModules.forEach(m => dbSaveCustomModule(m));
+    saveKeyed(regRef.current.modules, customModules, { canDelete: false,
+      write: m => dbWrite(sb.from("custom_modules").upsert({ id: m.id, data: m }, { onConflict: "id" }), `module "${m.title || m.id}"`) });
   }, [customModules]); // eslint-disable-line
 
-  useEffect(() => { if (!_ready.current || !writesAll()) return;
-    customMachineTypes.forEach(m => dbSaveCustomMachineType(m));
+  useEffect(() => { if (!_ready.current || !writesMachinery()) return;
+    saveKeyed(regRef.current.machineTypes, customMachineTypes, { canDelete: false,
+      write: m => dbWrite(sb.from("custom_machine_types").upsert({ id: m.id, data: m }, { onConflict: "id" }), "custom machine type") });
   }, [customMachineTypes]); // eslint-disable-line
 
   // NB: there is deliberately NO auto-sync effect for `passwords`. It used to write
@@ -1289,7 +1452,7 @@ export default function App() {
       score: rec.score, date: rec.date, cert_id: rec.certId, answers: rec.answers,
       module_version: moduleVersion, ...rc,
     }, { onConflict: "user_id,module_id" }), "training completion", rec.recorded ? { alertOnError: true } : undefined);
-    if (rec.recorded && !ok) return false;
+    if (!ok) return false;   // not saved: the caller (e.g. the phone's offline queue) keeps it and tries again
     await dbWrite(sb.from("training_completion_history").insert(hist), "training completion history");
     return true;
   }
@@ -1392,7 +1555,7 @@ export default function App() {
   // Upserts one incident (and uploads any new photos first). Called for EVERY incident by the auto-sync effect.
   async function dbSaveIncident(inc) {
     incidentWritingRef.current.add(String(inc.id));
-    try { await dbSaveIncidentNow(inc); } finally { incidentWritingRef.current.delete(String(inc.id)); }
+    try { return await dbSaveIncidentNow(inc); } finally { incidentWritingRef.current.delete(String(inc.id)); }
   }
   async function dbSaveIncidentNow(inc) {
     // Photos arrive from the mobile app as data URLs. Push them to Storage and
@@ -1413,7 +1576,7 @@ export default function App() {
     Object.entries(inc).forEach(([k, v]) => {
       if (!INCIDENT_CORE_KEYS.has(k) && v !== undefined && typeof v !== "function") details[k] = v;
     });
-    await dbWrite(sb.from("incidents").upsert({
+    const savedOk = await dbWrite(sb.from("incidents").upsert({
       id: inc.id, date: inc.date, type: inc.type, accident_code: inc.accidentCode,
       number_code: inc.numberCode, location: inc.location, reported_by: inc.reportedBy,
       description: inc.description, injury_type: inc.injuryType, riddor: inc.riddor, closed: inc.closed,
@@ -1426,7 +1589,9 @@ export default function App() {
       urgency: inc.urgency||null,
       details,
     }, { onConflict: "id" }), "incident", { alertOnError: true });
+    if (savedOk) pingIncidentAlert(inc.id);   // high-risk? the server emails admins straight away (Site Settings → Email reminders)
     auditRecord("incident", inc.id, { ...inc, photos }, incidentAuditLabel(inc));
+    return savedOk;
   }
 
   async function dbDeleteIncident(id) {
@@ -1437,7 +1602,7 @@ export default function App() {
   // Investigations are keyed by incident id; the whole investigation is one JSON `data` blob.
   async function dbSaveInvestigation(incidentId, data) {
     investigationWritingRef.current.add(String(incidentId));
-    try { await dbSaveInvestigationNow(incidentId, data); } finally { investigationWritingRef.current.delete(String(incidentId)); }
+    try { return await dbSaveInvestigationNow(incidentId, data); } finally { investigationWritingRef.current.delete(String(incidentId)); }
   }
   // Reads ONE investigation straight from the database.
   // Returns { ok:true, data } (data undefined if there is no row yet) or { ok:false }.
@@ -1471,6 +1636,7 @@ export default function App() {
     auditRecord("investigation", incidentId, data, incidentAuditLabel(incidents.find(i => String(i.id) === String(incidentId))) || String(incidentId));
     const ok = await dbWrite(sb.from("investigations").upsert({ incident_id: incidentId, data }, { onConflict: "incident_id" }), "investigation");
     if (ok) investigationBaseRef.current.set(key, data);   // only once it's really in the database
+    return ok;
   }
 
   // Marks a single corrective action complete inside its investigation and
@@ -1478,17 +1644,17 @@ export default function App() {
   // screen; safe to call from the desktop investigation tab too.
   async function dbCompleteAction(incidentId, actionId, completedBy) {
     const inv = investigations[incidentId];
-    if (!inv) return;
+    if (!inv) return false;   // not loaded (yet): the phone's queue tries again later
     const next = {
       ...inv,
       actions: (inv.actions || []).map(a =>
         a.id === actionId
-          ? { ...a, status: "complete", completedDate: todayISO(), completedBy: completedBy || "" }
+          ? completeAction(a, completedBy, todayISO())
           : a
       ),
     };
     setInvestigations(p => ({ ...p, [incidentId]: next }));
-    await dbSaveInvestigation(incidentId, next);
+    return dbSaveInvestigation(incidentId, next);
   }
 
   // Records which VERSION was read, and appends to doc_ack_history so earlier reads
@@ -1498,15 +1664,39 @@ export default function App() {
     const version = (docs.find(d => String(d.id) === String(docId)) || {}).version || 1;
     const hist = { user_id: String(userId), doc_id: String(docId), version, date, at: new Date().toISOString() };
     setDocAckHistory(p => [...p, hist]);
-    await dbWrite(sb.from("doc_acknowledgements").upsert({ user_id: String(userId), doc_id: String(docId), date, version }, { onConflict: "user_id,doc_id" }), "document acknowledgement");
+    const ok = await dbWrite(sb.from("doc_acknowledgements").upsert({ user_id: String(userId), doc_id: String(docId), date, version }, { onConflict: "user_id,doc_id" }), "document acknowledgement");
+    if (!ok) return false;   // not saved: the phone's queue keeps it and tries again
     await dbWrite(sb.from("doc_ack_history").insert(hist), "document read history");
+    return true;
   }
 
-  // Replaces the full list of staff a document is assigned to (delete-then-insert).
-  async function dbSaveDocAssignments(docId, userIds) {
+  // Saves the full list of staff a document is assigned to (only the differences are written).
+  // Saves for the same document / person run one after another (quick tick-untick
+  // clicks can't overlap and leave the database different from the screen).
+  const saveQueueRef = useRef(new Map());
+  const inTurn = (key, fn) => {
+    const q = saveQueueRef.current;
+    const next = (q.get(key) || Promise.resolve()).catch(() => {}).then(fn);
+    q.set(key, next);
+    next.finally(() => { if (q.get(key) === next) q.delete(key); });
+    return next;
+  };
+  // Compare with what's stored and change only the differences (never clear and rewrite,
+  // which could lose everyone's assignment if the connection dropped in between).
+  function dbSaveDocAssignments(docId, userIds) { return inTurn(`d:${docId}`, () => saveDocAssignmentsNow(docId, userIds)); }
+  async function saveDocAssignmentsNow(docId, userIds) {
     markWrite(`d:${docId}`);
-    await dbWrite(sb.from("doc_assignments").delete().eq("doc_id", String(docId)), "doc assignments clear");
-    if (userIds.length) await dbWrite(sb.from("doc_assignments").insert(userIds.map(uid => ({ doc_id: String(docId), user_id: String(uid) }))), "doc assignments");
+    const sid = String(docId);
+    const want = [...new Set((userIds || []).map(String))];
+    const { data, error } = await sb.from("doc_assignments").query(`select=user_id&doc_id=eq.${encodeURIComponent(sid)}`);
+    if (error) { notify("Document assignments weren't saved. Please try again.", { kind: "error" }); return false; }
+    const have = new Set((data || []).map(r => String(r.user_id)));
+    const add = want.filter(u => !have.has(u));
+    const drop = [...have].filter(u => !want.includes(u));
+    let ok = true;
+    if (add.length) ok = (await insertNew("doc_assignments", add.map(u => ({ doc_id: sid, user_id: u })), "doc assignments")) && ok;
+    for (const u of drop) ok = (await dbWrite(sb.from("doc_assignments").delete().match({ doc_id: sid, user_id: u }), "doc assignments remove")) !== false && ok;
+    return ok;
   }
 
   // Saves document metadata, uploading the file first if one is supplied.
@@ -1644,11 +1834,26 @@ export default function App() {
 
   // Rewrites ALL of a user's DSE reports; report_idx = position in the array (so order matters —
   // admin responses reference reports by this index).
-  async function dbSaveDseReport(userId, reports) {
-    await dbWrite(sb.from("dse_reports").delete().eq("user_id", userId), "DSE reports clear");
-    if (reports.length) {
-      await dbWrite(sb.from("dse_reports").insert(reports.map((r, i) => ({ user_id: String(userId), report_idx: i, data: r }))), "DSE reports");
+  // One row per assessment (report_idx = position). Compare with what's stored: add new
+  // assessments, update changed ones, remove only rows past the end — never clear first.
+  function dbSaveDseReport(userId, reports) { return inTurn(`dse:${userId}`, () => saveDseReportNow(userId, reports)); }
+  async function saveDseReportNow(userId, reports) {
+    const sid = String(userId);
+    const { data, error } = await sb.from("dse_reports").query(`select=report_idx,data&user_id=eq.${encodeURIComponent(sid)}`);
+    if (error) { notify("The DSE assessment wasn't saved. Please try again.", { kind: "error" }); return false; }
+    const stored = new Map((data || []).map(r => [Number(r.report_idx), r.data]));
+    const list = reports || [];
+    let ok = true;
+    const add = list.map((r, i) => [r, i]).filter(([, i]) => !stored.has(i));
+    if (add.length) ok = (await insertNew("dse_reports", add.map(([r, i]) => ({ user_id: sid, report_idx: i, data: r })), "DSE reports",
+      row => dbWrite(sb.from("dse_reports").update({ data: row.data }).match({ user_id: sid, report_idx: row.report_idx }), "DSE report"))) && ok;
+    for (const [r, i] of list.map((r, i) => [r, i]).filter(([, i]) => stored.has(i))) {
+      if (stableJSON(stored.get(i)) === stableJSON(r)) continue;
+      ok = (await dbWrite(sb.from("dse_reports").update({ data: r }).match({ user_id: sid, report_idx: i }), "DSE report")) !== false && ok;
     }
+    const extra = [...stored.keys()].filter(i => i >= list.length);
+    for (const i of extra) ok = (await dbWrite(sb.from("dse_reports").delete().match({ user_id: sid, report_idx: i }), "DSE reports remove")) !== false && ok;
+    return ok;
   }
 
   async function dbSaveDseAdminResponse(userId, reportIdx, issueIdx, rec) {
@@ -1686,7 +1891,7 @@ export default function App() {
     const merged = { ...(existing?.data || {}), theme: themeKey };
     window.__userProfiles = profiles.map(r => String(r.user_id)===sid ? {...r, data:merged} : r);
     if (!existing) window.__userProfiles.push({ user_id: sid, data: merged });
-    await dbWrite(sb.from("user_profiles").upsert({ user_id: sid, data: merged }, { onConflict: "user_id" }), "theme preference");
+    return dbWrite(sb.from("user_profiles").upsert({ user_id: sid, data: merged }, { onConflict: "user_id" }), "theme preference");
   }
 
   // ── Mobile permits view model ───────────────────────────────────────────────
@@ -1771,11 +1976,10 @@ export default function App() {
     },
 
     // ── Inspections, permits, RIDDOR (mobile-only writes) ───────────────────
-    // dbSaveSiteInspections() upserts AND prunes anything not in the array it
-    // is given, so a single record must never be passed to it. Instead we put
-    // the record into state (deduped by id, because the offline queue may
-    // replay a write we already applied optimistically) and let the existing
-    // [siteInspections] effect persist the whole array.
+    // The record is saved here, directly, and the result returned (false = not saved), so the
+    // phone's offline queue keeps it and tries again. It also goes into state (deduped by id,
+    // because the queue may replay a write already applied), marked as saved so the
+    // [siteInspections] effect doesn't write it a second time.
     saveInspection: async (record) => {
       // site_inspections stores the whole record as jsonb, so the photos have
       // to become URLs before the record goes into state.
@@ -1784,7 +1988,10 @@ export default function App() {
         photos: await uploadPhotos(PHOTO_BUCKET, `insp_${record.id}_${i}`, nc.photos),
       })));
       const next = { ...record, nonConformances: ncs };
+      const ok = await dbWrite(sb.from("site_inspections").upsert({ id: next.id, data: next }, { onConflict: "id" }), "site inspection");
+      if (ok) markSaved(regRef.current.inspections, next);
       setSiteInspections(p => [next, ...p.filter(r => r.id !== next.id)]);
+      return ok;
     },
 
     savePermitSignOn: (entry) => {
@@ -1848,6 +2055,29 @@ export default function App() {
     await dbWrite(sb.from("user_profiles").upsert({ user_id: sid, data: merged }, { onConflict: "user_id" }), "emoji mode preference");
   }
 
+  // Same merge pattern, for an unfinished DSE assessment (null = none / finished).
+  async function dbSaveDseDraft(userId, draft) {
+    const sid = String(userId);
+    const profiles = Array.isArray(window.__userProfiles) ? window.__userProfiles : [];
+    const existing = profiles.find(r => String(r.user_id) === sid);
+    const merged = { ...(existing?.data || {}) };
+    if (draft) merged.dseDraft = draft; else delete merged.dseDraft;
+    window.__userProfiles = profiles.map(r => String(r.user_id)===sid ? {...r, data:merged} : r);
+    if (!existing) window.__userProfiles.push({ user_id: sid, data: merged });
+    await dbWrite(sb.from("user_profiles").upsert({ user_id: sid, data: merged }, { onConflict: "user_id" }), "DSE progress");
+  }
+  function saveDseProgress(draft) {
+    if (!user) return;
+    setDseDraft(draft);
+    dbSaveDseDraft(user.id, draft);
+  }
+  // Opens the DSE wizard: carries on from saved progress if there is some, otherwise starts fresh.
+  function openDse() {
+    const d = dseDraft;
+    setDseAnswers(d?.answers || {}); setDseComments(d?.comments || {}); setDseSection(d?.section || 0);
+    setDseSubmitted(false); setDseActive(true);
+  }
+
   // users table: { id: TEXT, data: JSON user object }. `user` here shadows the logged-in user — it's the record being saved.
   async function dbSaveUser(user) {
     const ok = await dbWrite(sb.from("users").upsert({ id: String(user.id), data: user }, { onConflict: "id" }), "user", { alertOnError: true });
@@ -1876,8 +2106,16 @@ export default function App() {
 
   // ⚠ Writes the WHOLE user object into user_profiles.data — this overwrites any saved
   // theme/emojiMode for that user. Only called on create/edit of staff records.
+  // Merge into what's there: the profile also holds the person's own preferences
+  // (theme, emojiMode, an unfinished DSE), which an admin edit must not wipe.
   async function dbSaveUserProfile(user) {
-    await dbWrite(sb.from("user_profiles").upsert({ user_id: String(user.id), data: user }, { onConflict: "user_id" }), "user profile");
+    const sid = String(user.id);
+    const profiles = Array.isArray(window.__userProfiles) ? window.__userProfiles : [];
+    const existing = profiles.find(r => String(r.user_id) === sid);
+    const merged = { ...(existing?.data || {}), ...user };
+    window.__userProfiles = profiles.map(r => String(r.user_id)===sid ? {...r, data:merged} : r);
+    if (!existing) window.__userProfiles.push({ user_id: sid, data: merged });
+    await dbWrite(sb.from("user_profiles").upsert({ user_id: sid, data: merged }, { onConflict: "user_id" }), "user profile");
   }
 
   // Remove (not Leaver): delete everything the portal holds about one person, so
@@ -1907,7 +2145,7 @@ export default function App() {
   async function dbSaveContractorVisits(cid,data) { await dbWrite(sb.from("contractor_visits").upsert({contractor_id:cid,data},{onConflict:"contractor_id"}), "contractor visits"); }
 
   async function dbSavePermit(p) {
-    await dbWrite(sb.from("permits").upsert({ id: p.id, data: p }, { onConflict: "id" }), "permit", { alertOnError: true });
+    return dbWrite(sb.from("permits").upsert({ id: p.id, data: p }, { onConflict: "id" }), "permit", { alertOnError: true });
   }
   async function dbDeletePermit(id) {
     await dbWrite(sb.from("permits").delete().eq("id", id), "permit delete");
@@ -2007,10 +2245,9 @@ export default function App() {
   function managerSignOffAction(incidentId, action, member, note) {
     const inv = investigations[incidentId]; if (!inv) return;
     const today = todayISO();
-    const done = action.status === "complete" || action.status === "closed";
+    const done = isActionDone(action);
     const next = { ...inv, actions: (inv.actions || []).map(a => a.id !== action.id ? a : {
-      ...a,
-      ...(done ? {} : { status: "complete", completedDate: today, completedBy: user.name }),
+      ...completeAction(a, user.name, today),
       managerSignOff: { by: user.name, date: today, note: note || "" },
     }) };
     primeAudit("investigation", incidentId, next);
@@ -2113,7 +2350,7 @@ export default function App() {
 
   // Whole first aid register saved as one JSON document (row id "singleton").
   async function dbSaveFirstAidData(data) {
-    await dbWrite(sb.from("first_aid_register").upsert({ id: "singleton", data }, { onConflict: "id" }), "first aid register");
+    return dbWrite(sb.from("first_aid_register").upsert({ id: "singleton", data }, { onConflict: "id" }), "first aid register");
   }
 
   // Saves the six fire-safety lists to their six tables using upsert-and-prune.
@@ -2302,10 +2539,9 @@ export default function App() {
     // Restore saved theme for this user
     const profiles = Array.isArray(window.__userProfiles) ? window.__userProfiles : [];
     const profile = profiles.find(r => String(r.user_id) === String(u.id));
-    if (profile?.data?.theme) {
-      setTheme(profile.data.theme);
-      setDarkMode(["dark","slate","forest","graphite"].includes(profile.data.theme));
-    }
+    // Their saved theme, or the default, so a shared computer doesn't keep the last person's.
+    setTheme(profile?.data?.theme || "dark");
+    setDseDraft(profile?.data?.dseDraft || null);
     if (profile?.data?.emojiMode === false) setEmojiMode(false);
     setUser(u); setErr("");
     // Back to the page in the address (refresh / bookmark / link) if this person may see it.
@@ -2329,7 +2565,7 @@ export default function App() {
     clearDrafts(user && user.id);
     hideWelcome(); setWelcomePending(false);
     if (AUTH_MODE === "supabase") { signOut().finally(() => window.location.reload()); return; }
-    setMustChangePw(false); setUser(null); setViewRaw("login"); setMod(null);
+    setMustChangePw(false); setUser(null); setViewRaw("login"); setMod(null); setDseDraft(null); setDseActive(false);
     setAdminReportView("staff"); setShowHiddenModules(false); setStaffFilterManager("all"); setDocFolder("all"); setStaffFilterProgress("all");
     setStaffGroupByTeam(false); setStaffStatusFilter("all"); setBulkTarget("individual"); setBulkManager(""); setStaffFilterSearch(""); setStaffSel([]);
   }
@@ -2350,8 +2586,8 @@ export default function App() {
     const toAdmin = (tab, then) => jump(() => { setMod(null); setViewRaw("admin"); setAtabRaw(tab); if (then) then(); });
     const fmt = d => (d ? String(d).slice(0, 10).split("-").reverse().join("/") : "");
     // pages
-    const STAFF_PAGES = { dashboard: "Dashboard", training: "My Training", history: "Training history & certificates", documents: "Documents", incidents: "Report Incident", dse: "My DSE", machinery: "My Machinery", actions: "My Actions", team: "My Team", account: "My Account" };
-    const staffTabs = ["dashboard", "training", "history", "documents", "incidents", "dse", ...(isWarehouseWorker(user) ? ["machinery"] : []), "actions", ...(user.role === "manager" ? ["team"] : []), "account"];
+    const STAFF_PAGES = { dashboard: "Dashboard", training: "My Training", history: "Training history & certificates", documents: "Documents", incidents: "Report Incident", dse: "My DSE", machinery: "My Machinery", mequip: "Machinery & Equipment", actions: "My Actions", team: "My Team", account: "My Account" };
+    const staffTabs = ["dashboard", "training", "history", "documents", "incidents", "dse", ...(isWarehouseWorker(user) ? ["machinery"] : []), "actions", ...(user.role === "manager" ? ["team"] : []), ...(user.role !== "admin" && hasMachineryAccess(user) ? ["mequip"] : []), "account"];
     staffTabs.forEach(t => items.push({ id: `p:s:${t}`, group: "Pages", icon: "📄", label: STAFF_PAGES[t], sub: isAdmin ? "Your own training view" : "Page", words: t === "history" ? "certificates certificate history" : t === "incidents" ? "report hazard near miss" : "", run: () => toStaff(t) }));
     if (isAdmin) {
       const ADMIN_PAGES = [["dashboard", "Admin dashboard", ""], ["users", "Staff", "staff accounts people users"], ["assign", "Assign Training", "training"], ["modules", "Training Library", "modules training"],
@@ -2595,6 +2831,7 @@ export default function App() {
         docAssignments={docAssignments}
         docAcknowledgements={docAcknowledgements}
         dseReports={dseReports}
+        extCerts={extCerts}
         incidents={incidents}
         investigations={investigations}
         allUsers={allUsers}
@@ -2625,6 +2862,7 @@ export default function App() {
       adminResponses={adminResponses}
       darkMode={darkMode}
       onClose={()=>{ setDseActive(false); setDseAnswers({}); setDseComments({}); setDseSection(0); setDseSubmitted(false); }}
+      onSaveProgress={saveDseProgress}
       Z={T} font={font}
     />;
   }
@@ -2657,7 +2895,7 @@ export default function App() {
       <>
       {/* Certificate from "View Certificate" after a pass — this screen must render it
           itself, because the staff views (which also show it) aren't on screen here. */}
-      <CertificateModal cert={cert} user={user} onClose={() => setCert(null)} T={T} font={font}/>
+      {cert && <CertificateModal cert={cert} user={user} onClose={() => setCert(null)} T={T} font={font}/>}
       <div style={{minHeight:"100vh",background:T.bg,fontFamily:font,color:T.white,overflowX:"hidden"}}>
 
         {/* Celebration Overlay */}
@@ -3008,7 +3246,7 @@ export default function App() {
   }
   // Certificate viewer / print: domains/training/CertificateModal.jsx. Shown whenever
   // `cert` is set — in the staff views AND in the module player (see below).
-  const CertModal = () => <CertificateModal cert={cert} user={user} onClose={() => setCert(null)} T={T} font={font}/>;
+  const CertModal = () => cert ? <CertificateModal cert={cert} user={user} onClose={() => setCert(null)} T={T} font={font}/> : null;
 
   // ══════════════════════════════════════════════════════════════════════════
   // STAFF PORTAL
@@ -3044,8 +3282,7 @@ export default function App() {
     const lastDseRi      = myDseReports.length-1;
     const myAdminResps   = adminResponses[user.id]||{};
     const dseCompleted   = !!lastDseReport;
-    // DSE renewal — recommended annually
-    const DSE_RENEWAL_MONTHS = 12;
+    // DSE renewal — recommended annually (data/seedDse.js)
     const dseExpiryStatus = dseCompleted ? getExpiryStatus(lastDseReport.date, DSE_RENEWAL_MONTHS) : null;
     const dseExpired  = dseExpiryStatus?.status==="expired";
     const dseExpiring = dseExpiryStatus?.status==="expiring";
@@ -3063,14 +3300,13 @@ export default function App() {
     // Quick hazard reports this user still has to complete in the full form
     const myQuickToComplete = myIncompleteQuickReports(incidents, user.id);
     const openQuickReport = (inc) => { setStab("incidents"); setQuickEditId(inc.id); };
-    // Compliance % = good items / all items (assigned modules + uploaded ext. certs + 1 for DSE).
+    // Compliance % = in-date items / all items (assigned modules + uploaded ext. certs + 1 for DSE).
     // Bands: 100% green, ≥70% amber, otherwise red.
-    // Overall health score — includes DSE as one item
-    const totalItems = myMods.length + myCertTypes.length + 1; // +1 for DSE
-    const goodItems  = upToDate.length + myCertTypes.filter(ct=>!expiredCerts.find(e=>e.id===ct.id)&&!expiringCerts.find(e=>e.id===ct.id)).length + (dseCompleted&&!dseExpired?1:0);
-    const healthPct  = totalItems ? Math.round(goodItems/totalItems*100) : 100;
-    const healthColor = healthPct===100?"#10b981":healthPct>=70?"#f59e0b":"#ef4444";
-    const healthLabel = healthPct===100?"Fully Compliant":healthPct>=70?"Mostly Compliant":"Needs Attention";
+    // (domains/training/compliance.js — the same rules as the phone, My Team, the matrix and reports)
+    const myCompliance = personalCompliance({ mods: myMods, comps: myC, certs: Object.fromEntries(myCertTypes.map(ct => [ct.id, myExtCerts[ct.id]])),
+      lastDse: lastDseReport || null, dseRenewalMonths: DSE_RENEWAL_MONTHS });
+    const healthPct  = myCompliance.pct;
+    const { color: healthColor, label: healthLabel } = complianceBand(healthPct);
     const totalActionNeeded = actionNeeded.length + (dseNeedsAction?1:0);
 
     // Staff menu bar widths: the tabs must never be hidden behind the bell. Wider than
@@ -3078,8 +3314,8 @@ export default function App() {
     // the first name goes, the labels drop "My" and the tabs tighten up. At 1024px and
     // below the ☰ menu takes over (CSS below).
     const sTight = winW < 1700, sTiny = winW < 1400;
-    const STAFF_TAB_LABEL = {dashboard:"Dashboard",training:"My Training",history:"History",documents:"Documents",incidents:"Report Incident",dse:"My DSE",machinery:"My Machinery",actions:"My Actions",team:"My Team"};
-    const STAFF_TAB_SHORT = {dashboard:"Dashboard",training:"Training",history:"History",documents:"Documents",incidents:"Report",dse:"DSE",machinery:"Machinery",actions:"Actions",team:"Team"};
+    const STAFF_TAB_LABEL = {dashboard:"Dashboard",training:"My Training",history:"History",documents:"Documents",incidents:"Report Incident",dse:"My DSE",machinery:"My Machinery",mequip:"Machinery & Equipment",actions:"My Actions",team:"My Team"};
+    const STAFF_TAB_SHORT = {dashboard:"Dashboard",training:"Training",history:"History",documents:"Documents",incidents:"Report",dse:"DSE",machinery:"Machinery",mequip:"Equipment",actions:"Actions",team:"Team"};
     return (
       <EmojiCtx.Provider value={emojiMode}>
       <div style={{minHeight:"100vh",background:T.bg,fontFamily:font,color:T.white}}>
@@ -3091,7 +3327,7 @@ export default function App() {
         <div style={{background:`linear-gradient(90deg,${T.navyDk},${T.navyMd})`,borderBottom:`1px solid ${T.border}`,padding:sTiny?"0 14px":"0 24px",display:"flex",alignItems:"center",position:"relative"}}>
           <div style={{marginRight:sTiny?10:20,padding:"10px 0",flexShrink:0}}><ZeusLogo darkMode={darkMode}/></div>
           <div style={{display:"flex",alignItems:"center",gap:sTiny?0:2,flex:1,minWidth:0,overflowX:"auto"}} className="staff-nav-tabs" data-testid="staff-tabs">
-            {["dashboard","training","history","documents","incidents","dse",...(isWarehouseWorker(user)?["machinery"]:[]),"actions",...(user.role==="manager"?["team"]:[])].map(t=>(
+            {["dashboard","training","history","documents","incidents","dse",...(isWarehouseWorker(user)?["machinery"]:[]),"actions",...(user.role==="manager"?["team"]:[]),...(user.role!=="admin"&&hasMachineryAccess(user)?["mequip"]:[])].map(t=>(
               <button key={t} onClick={()=>setStab(t)} title={STAFF_TAB_LABEL[t]}
                 style={{background:"none",border:"none",borderBottom:stab===t?`2px solid ${T.accent}`:"2px solid transparent",color:stab===t?T.white:T.muted,fontWeight:stab===t?700:400,fontSize:13,cursor:"pointer",padding:sTiny?"14px 8px 12px":sTight?"14px 10px 12px":"14px 14px 12px",fontFamily:font,whiteSpace:"nowrap",letterSpacing:.3,transition:"color .15s"}}>
                 {(sTiny?STAFF_TAB_SHORT:STAFF_TAB_LABEL)[t]}
@@ -3130,7 +3366,8 @@ export default function App() {
               docs.filter(d=>(docAssignments[String(d.id)]||[]).includes(String(user.id))&&!(docAcknowledgements[user.id]||{})[d.id])
                 .forEach(d=>notifications.push({type:"document",urgent:true,title:`Read & confirm: ${d.title}`,detail:"Required reading — confirmation pending",nav:{tab:"documents"}}));
               // DSE not completed
-              if(!(dseReports[user.id]||[]).length) notifications.push({type:"dse",urgent:false,title:"Complete your DSE workstation assessment",detail:"DSE Regulations 1992 — required for all screen users",nav:{tab:"dse"}});
+              if(dseDraft) notifications.push({type:"dse",urgent:false,title:"Finish your DSE workstation assessment",detail:`In progress — ${Object.keys(dseDraft.answers||{}).length} of ${DSE_QUESTION_COUNT} questions answered`,nav:{tab:"dse"}});
+              else if(!(dseReports[user.id]||[]).length) notifications.push({type:"dse",urgent:false,title:"Complete your DSE workstation assessment",detail:"DSE Regulations 1992 — required for all screen users",nav:{tab:"dse"}});
               // Open DSE issues with no admin response
               const latestDse=(dseReports[user.id]||[])[( dseReports[user.id]||[]).length-1];
               if(latestDse){
@@ -3138,10 +3375,10 @@ export default function App() {
                 const openIssues=latestDse.issues.filter((_,ii)=>!(adminResponses[user.id]||{})[`${ri}_${ii}`]?.resolved&&latestDse.issueCount>0);
                 if(openIssues.length) notifications.push({type:"dse",urgent:false,title:`${openIssues.length} open DSE issue${openIssues.length!==1?"s":""}`,detail:"Check My DSE for H&S team responses",nav:{tab:"dse"}});
               }
-              // NB: action owners are matched by NAME (a.owner===user.name), not id — renaming a user orphans their actions.
+              // NB: action owners are matched by NAME (lib/openActions sameName: ignoring case and extra spaces), not id — renaming a user orphans their actions.
               // Investigation corrective actions assigned to this user
               const myActions = Object.values(investigations).flatMap(inv=>
-                (inv.actions||[]).filter(a=>a.owner===user.name&&a.status!=="complete"&&a.status!=="closed")
+                (inv.actions||[]).filter(a=>sameName(a.owner,user.name)&&!isActionDone(a))
               );
               const overdueActions = myActions.filter(a=>a.dueDate&&a.dueDate<todayISO());
               // Line managers: team items waiting for their sign-off
@@ -3150,7 +3387,7 @@ export default function App() {
                 const teamNames = new Set(team.map(u=>String(u.name).trim().toLowerCase()));
                 const dseOpen = team.reduce((n,u)=>{ const reps=dseReports[u.id]||dseReports[String(u.id)]||[]; const ri=reps.length-1; if(ri<0) return n;
                   const resp=adminResponses[u.id]||adminResponses[String(u.id)]||{}; return n+(reps[ri].issues||[]).filter((_,ii)=>!(resp[`${ri}_${ii}`]||{}).resolved).length; },0);
-                const actsToSign = Object.values(investigations).flatMap(inv=>(inv.actions||[]).filter(a=>teamNames.has(String(a.owner||"").trim().toLowerCase())&&(a.status==="complete"||a.status==="closed")&&!a.managerSignOff)).length;
+                const actsToSign = Object.values(investigations).flatMap(inv=>(inv.actions||[]).filter(a=>teamNames.has(String(a.owner||"").trim().toLowerCase())&&isActionDone(a)&&!a.managerSignOff)).length;
                 if (dseOpen) notifications.push({type:"dse",urgent:false,title:`${dseOpen} team DSE issue${dseOpen!==1?"s":""} to sign off`,detail:"Open My Team to review and sign off",nav:{tab:"team"}});
                 if (actsToSign) notifications.push({type:"report",urgent:false,title:`${actsToSign} completed team action${actsToSign!==1?"s":""} awaiting your sign-off`,detail:"Open My Team to sign them off",nav:{tab:"team"}});
               }
@@ -3160,15 +3397,13 @@ export default function App() {
             })()}
             <QuickSearch getItems={quickItems} Z={T} font={font} compact={isMobile||sTight}/>
             <div style={{width:1,height:20,background:T.headerBgMd,margin:"0 4px"}}/>
-            <button title={`Theme: ${theme} — click to cycle`} onClick={()=>{
-              const order=["dark","light","slate","forest","graphite","arctic","sand","rose"];
-              const next=order[(order.indexOf(theme)+1)%order.length];
+            {(()=>{ const next=oppositeTheme(theme); const lbl=`Switch to ${getTheme(next).label} (${darkMode?"light":"dark"}). More themes in My Account.`; return (
+            <button title={lbl} aria-label={lbl} data-zp-theme-toggle="" onClick={()=>{
               setTheme(next);
-              setDarkMode(["dark","slate","forest","graphite"].includes(next));
               dbSaveTheme(user.id,next);
             }} style={{background:T.overlay,border:`1px solid ${T.borderMd}`,borderRadius:8,padding:"5px 10px",color:T.muted,cursor:"pointer",fontSize:14,fontFamily:font,display:"flex",alignItems:"center",gap:4,transition:"all .15s"}}>
-              {theme==="dark"?"🌙":theme==="light"?"☀️":theme==="slate"?"◼":theme==="forest"?"🌲":theme==="graphite"?"⬛":theme==="arctic"?"🌌":theme==="sand"?"🏜":"🌸"}
-            </button>
+              {darkMode?"☀️":"🌙"}
+            </button>); })()}
             {user.role==="admin" && (<>
               <button onClick={()=>setView("admin")}
                 title="Back to the admin panel"
@@ -3194,10 +3429,10 @@ export default function App() {
       {/* Mobile nav drawer */}
         {mobileMenuOpen && (
           <div className="mobile-nav-drawer" style={{position:"relative"}}>
-            {["dashboard","training","history","documents","incidents","dse",...(isWarehouseWorker(user)?["machinery"]:[]),"actions",...(user.role==="manager"?["team"]:[])].map(t=>(
+            {["dashboard","training","history","documents","incidents","dse",...(isWarehouseWorker(user)?["machinery"]:[]),"actions",...(user.role==="manager"?["team"]:[]),...(user.role!=="admin"&&hasMachineryAccess(user)?["mequip"]:[])].map(t=>(
               <button key={t} onClick={()=>{setStab(t);setMobileMenuOpen(false);}}
                 style={{display:"block",width:"100%",textAlign:"left",padding:"12px 24px",background:stab===t?"rgba(37,99,235,0.15)":"transparent",border:"none",borderBottom:`1px solid rgba(255,255,255,0.05)`,color:stab===t?T.white:T.muted,fontWeight:stab===t?700:400,fontSize:14,cursor:"pointer",fontFamily:font}}>
-                {{dashboard:E("🏠 ","")+"Dashboard",training:E("📚 ","")+"My Training",history:E("📋 ","")+"History",documents:E("📄 ","")+"Documents",incidents:E("🚨 ","")+"Report Incident",dse:"🖥️ My DSE",machinery:"⚙️ My Machinery",actions:"✅ My Actions",team:E("👥 ","")+"My Team"}[t]}
+                {{dashboard:E("🏠 ","")+"Dashboard",training:E("📚 ","")+"My Training",history:E("📋 ","")+"History",documents:E("📄 ","")+"Documents",incidents:E("🚨 ","")+"Report Incident",dse:"🖥️ My DSE",machinery:"⚙️ My Machinery",mequip:"🛠 Machinery & Equipment",actions:"✅ My Actions",team:E("👥 ","")+"My Team"}[t]}
               </button>
             ))}
           </div>
@@ -3282,23 +3517,23 @@ export default function App() {
                       </div>
                     ); })}
                     {!dseCompleted && (
-                      <div style={{display:"flex",alignItems:"center",gap:12,background:"rgba(139,92,246,0.1)",borderRadius:8,padding:"8px 12px",cursor:"pointer"}} onClick={()=>{ setDseAnswers({}); setDseComments({}); setDseSection(0); setDseSubmitted(false); setDseActive(true); }}>
+                      <div style={{display:"flex",alignItems:"center",gap:12,background:"rgba(139,92,246,0.1)",borderRadius:8,padding:"8px 12px",cursor:"pointer"}} onClick={openDse}>
                         <span style={{fontSize:20}}>🖥️</span>
                         <div style={{flex:1}}>
                           <div style={{fontSize:13,fontWeight:700,color:T.white}}>DSE Workstation Self-Assessment</div>
-                          <div style={{fontSize:11,color:"#c4b5fd"}}>Required — DSE Regulations 1992 · not yet completed</div>
+                          <div style={{fontSize:11,color:"#c4b5fd"}}>{dseDraft?`In progress — ${Object.keys(dseDraft.answers||{}).length} of ${DSE_QUESTION_COUNT} questions answered`:"Required — DSE Regulations 1992 · not yet completed"}</div>
                         </div>
-                        <button style={{background:"linear-gradient(135deg,#8b5cf6,#7c3aed)",border:"none",borderRadius:8,padding:"5px 14px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,whiteSpace:"nowrap"}}>Start →</button>
+                        <button style={{background:"linear-gradient(135deg,#8b5cf6,#7c3aed)",border:"none",borderRadius:8,padding:"5px 14px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,whiteSpace:"nowrap"}}>{dseDraft?"Continue →":"Start →"}</button>
                       </div>
                     )}
                     {dseExpired && (
-                      <div style={{display:"flex",alignItems:"center",gap:12,background:"rgba(239,68,68,0.08)",borderRadius:8,padding:"8px 12px",cursor:"pointer"}} onClick={()=>{ setDseAnswers({}); setDseComments({}); setDseSection(0); setDseSubmitted(false); setDseActive(true); }}>
+                      <div style={{display:"flex",alignItems:"center",gap:12,background:"rgba(239,68,68,0.08)",borderRadius:8,padding:"8px 12px",cursor:"pointer"}} onClick={openDse}>
                         <span style={{fontSize:20}}>🖥️</span>
                         <div style={{flex:1}}>
                           <div style={{fontSize:13,fontWeight:700,color:T.white}}>DSE Workstation Self-Assessment</div>
-                          <div style={{fontSize:11,color:"#f87171"}}>Annual re-assessment due — last completed {lastDseReport.date}</div>
+                          <div style={{fontSize:11,color:"#f87171"}}>Annual re-assessment due — last completed {lastDseReport.date}{dseDraft?` · in progress, ${Object.keys(dseDraft.answers||{}).length} of ${DSE_QUESTION_COUNT} answered`:""}</div>
                         </div>
-                        <button style={{background:"linear-gradient(135deg,#ef4444,#dc2626)",border:"none",borderRadius:8,padding:"5px 14px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,whiteSpace:"nowrap"}}>Retake →</button>
+                        <button style={{background:"linear-gradient(135deg,#ef4444,#dc2626)",border:"none",borderRadius:8,padding:"5px 14px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,whiteSpace:"nowrap"}}>{dseDraft?"Continue →":"Retake →"}</button>
                       </div>
                     )}
                     {dseExpiring && !dseExpired && (
@@ -3396,9 +3631,9 @@ export default function App() {
                 {/* DSE row */}
                 {(()=>{
                   const dseStatusColor = !dseCompleted?"#8b5cf6":dseExpired?"#ef4444":dseExpiring?"#f59e0b":"#10b981";
-                  const dseStatusLabel = !dseCompleted?"Not completed":dseExpired?"Re-assessment due":dseExpiring?dseExpiryStatus?.label:"Completed";
+                  const dseStatusLabel = dseDraft?"In progress":!dseCompleted?"Not completed":dseExpired?"Re-assessment due":dseExpiring?dseExpiryStatus?.label:"Completed";
                   return (
-                    <div onClick={()=>{ setDseAnswers({}); setDseComments({}); setDseSection(0); setDseSubmitted(false); setDseActive(true); }}
+                    <div onClick={openDse}
                       style={{background:T.overlay,border:`1px solid ${dseExpired?"rgba(239,68,68,0.25)":T.borderMd}`,borderRadius:10,padding:"10px 16px",cursor:"pointer",display:"flex",alignItems:"center",gap:12,transition:"background .15s"}}
                       onMouseEnter={e=>e.currentTarget.style.background=T.navyMd}
                       onMouseLeave={e=>e.currentTarget.style.background=T.overlay}>
@@ -3532,9 +3767,9 @@ export default function App() {
                           <p style={{color:T.muted,fontSize:11,margin:0}}>Last completed: {lastReport.date}</p>
                         </div>
                       )}
-                      <button onClick={()=>{ setDseAnswers({}); setDseComments({}); setDseSection(0); setDseSubmitted(false); setDseActive(true); }}
+                      <button onClick={openDse}
                         style={{width:"100%",background:lastReport?T.overlay:`linear-gradient(135deg,#8b5cf6,#7c3aed)`,color:lastReport?"#8b5cf6":"#fff",border:lastReport?`1px solid ${T.borderMd}`:"none",borderRadius:10,padding:"10px",fontWeight:700,cursor:"pointer",fontSize:13,fontFamily:font}}>
-                        {lastReport?"Retake Assessment →":"Start Assessment →"}
+                        {dseDraft?"Continue Assessment →":lastReport?"Retake Assessment →":"Start Assessment →"}
                       </button>
                     </div>
                   );
@@ -3587,7 +3822,7 @@ export default function App() {
               {/* Passed results for EARLIER versions of a module (kept when a module is
                   updated — see saveModuleVersion). Certificates stay viewable. */}
               {(()=>{
-                const earlier = compHistory.filter(h=>String(h.user_id)===String(user.id) && h.score>=70 && (()=>{
+                const earlier = compHistory.filter(h=>String(h.user_id)===String(user.id) && (h.cert_id || h.recorded || Number(h.score)>=PASS_MARK) && (()=>{
                   const m = allModules.find(x=>String(x.id)===String(h.module_id));
                   return m && (h.module_version||1) < (m.version||1);
                 })()).sort((a,b)=>String(b.date).localeCompare(String(a.date)));
@@ -3763,10 +3998,27 @@ export default function App() {
               setDseSection={setDseSection}
               setDseSubmitted={setDseSubmitted}
               setDseActive={setDseActive}
+              dseDraft={dseDraft} onStartDse={openDse}
               Z={T} font={font}
             />
             </React.Suspense>
           )}
+          {/* Machinery & Equipment for people an admin has given access (Edit Staff): the same
+              Machinery Competence and Equipment Register pages admins use. */}
+          {stab==="mequip" && user.role!=="admin" && hasMachineryAccess(user) && (
+            <MachineryEquipmentPage Z={T} font={font} initial={pagePreset&&pagePreset.tab==="equipment"?"equipment":"machinery"}
+              machinery={
+                <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
+                <LazyAdminMachineryTab allStaff={allUsers.filter(u=>u.id!==1)} machineComps={machineComps} setMachineComps={setMachineComps} allMachineTypes={allMachineTypes} allMachineCategories={allMachineCategories} customMachineTypes={customMachineTypes} preset={pagePreset&&pagePreset.tab==="machinery"?pagePreset:null} clearPreset={()=>setPagePreset(null)} setCustomMachineTypes={setCustomMachineTypes} dbDeleteCustomMachineType={dbDeleteCustomMachineType} dbSaveMachineComp={dbSaveMachineComp} dbDeleteMachineComp={dbDeleteMachineComp} Z={T} font={font}/>
+                </React.Suspense>}
+              equipment={
+                <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
+                <LazyEquipmentTrackerTab equipment={equipment} setEquipment={setEquipment} preset={pagePreset&&pagePreset.tab==="equipment"?pagePreset:null} clearPreset={()=>setPagePreset(null)} staff={allUsers.filter(u=>u.id!==1)}
+                  extinguishers={(fireSafety&&fireSafety.extinguishers)||[]} Z={T} font={font}/>
+                </React.Suspense>}
+            />
+          )}
+
           {stab==="team" && user.role==="manager" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
             <LazyMyTeamTab manager={user} users={allUsers} allModules={allModules} assigns={assigns} comps={comps}
@@ -3799,6 +4051,7 @@ export default function App() {
               docAcknowledgements={docAcknowledgements}
               dseReports={dseReports}
               adminResponses={adminResponses}
+              dseDraft={dseDraft} onStartDse={openDse}
               setStab={setStab} setMod={setMod}
               Z={T} font={font}
             />
@@ -4255,16 +4508,14 @@ export default function App() {
             </button>
             {!navCompact && <div style={{width:1,height:20,background:T.headerBgMd,margin:"0 4px"}}/>}
             {/* Quick theme cycle button */}
-            {!navTiny && <button onClick={()=>{
-              const order=["dark","light","slate","forest","graphite","arctic","sand","rose"];
-              const next=order[(order.indexOf(theme)+1)%order.length];
+            {!navTiny && (()=>{ const next=oppositeTheme(theme); const lbl=`Switch to ${getTheme(next).label} (${darkMode?"light":"dark"}). More themes in My Account.`; return (
+            <button onClick={()=>{
               setTheme(next);
-              setDarkMode(["dark","slate","forest","graphite","aurora"].includes(next));
               dbSaveTheme(user.id,next);
             }} style={{background:T.overlay,border:`1px solid ${T.borderMd}`,borderRadius:8,padding:"5px 10px",color:T.muted,cursor:"pointer",fontSize:14,fontFamily:font,display:"flex",alignItems:"center",gap:4,transition:"all .15s"}}
-              title={`Theme: ${theme} — click to cycle`}>
-              {theme==="dark"?"🌙":theme==="light"?"☀️":theme==="slate"?"◼":theme==="forest"?"🌲":theme==="graphite"?"⬛":theme==="arctic"?"🌌":theme==="sand"?"🏜":"🌸"}
-            </button>}
+              title={lbl} aria-label={lbl} data-zp-theme-toggle="">
+              {darkMode?"☀️":"🌙"}
+            </button>); })()}
             {!navCompact && <div style={{width:1,height:20,background:T.headerBgMd,margin:"0 4px"}}/>}
             <button type="button" onClick={()=>setAtab(atab==="account"?"users":"account")}
               title={`My Account (${user.name})`} aria-label={`My Account (${user.name})`}
@@ -4325,9 +4576,8 @@ export default function App() {
             // ── Training stats ────────────────────────────────────────────────
             const staffList = staff;
             const overdueTraining = staffList.filter(u=>{
-              const a=(assigns[u.id]||[]).length;
-              const d=(assigns[u.id]||[]).filter(mid=>(comps[u.id]||{})[mid]).length;
-              return a>0 && d<a;
+              const _tr=staffTraining(u.id, assigns, comps, allModules);   // training/compliance.js
+              return _tr.total>0 && _tr.good<_tr.total;
             });
             const expiringTraining = staffList.filter(u=>
               (assigns[u.id]||[]).some(mid=>{
@@ -4468,38 +4718,12 @@ export default function App() {
                       return card(E("🔥",""),"Fire Safety",f.wardens.length,sub,null,f.issues>0,()=>setAtab("firesafety"));
                     })() },
                     { id:"firstAid", node: (()=>{
-                      const fa = firstAidData||{};
-                      const faAiders = fa.aiders||[];
-                      const faCustomZones = fa.customZones||[];
-                      const faAllZones = [...new Set([...getSiteLists().firstAidZones, ...faCustomZones])];
-                      const minPerShift = fa.assessment?.minPerShift||1;
-                      // Build combined aider list (manual + cert-detected), same logic as FirstAidRegisterTab
-                      const faCertAiders = [];
-                      Object.entries(extCerts||{}).forEach(([uid2, certs2])=>{
-                        if(certs2.first_aid){ const u2=staffList.find(s=>String(s.id)===String(uid2)); if(u2) faCertAiders.push({id:`cert_${uid2}`,expiryDate:certs2.first_aid.expiryDate||"",shifts:certs2.first_aid.shifts||[],zones:certs2.first_aid.zones||[]}); }
-                      });
-                      const manualIds = new Set(faAiders.filter(a=>a.staffId).map(a=>String(a.staffId)));
-                      const allFaAiders = [...faAiders, ...faCertAiders.filter(c=>!manualIds.has(String(c.staffId||c.id.replace("cert_",""))))];
-                      const validAiders = allFaAiders.filter(a=>{ if(!a.expiryDate) return false; return Math.ceil((new Date(a.expiryDate)-new Date())/86400000)>=0; });
-                      const expiredCount = allFaAiders.length - validAiders.length;
-                      // A "gap" = a zone/shift combination with fewer valid first aiders than minPerShift.
-                      // Keep in step with the equivalent logic in FirstAidRegisterTab.jsx.
-                      // Count coverage gaps
-                      const SHIFTS3 = coverShifts(getSiteLists().firstAidShifts);   // this site's shifts (Site Settings)
-                      let gapCount = 0;
-                      faAllZones.forEach(zone=>{
-                        SHIFTS3.forEach(shift=>{
-                          const count = validAiders.filter(a=>{
-                            const shiftsOk = !a.shifts?.length || a.shifts.some(isAllShift) || a.shifts.includes(shift);
-                            const zonesOk  = !a.zones?.length  || a.zones.includes(zone);
-                            return shiftsOk && zonesOk;
-                          }).length;
-                          if(count < minPerShift) gapCount++;
-                        });
-                      });
+                      // the same list and rules as the First Aid register (domains/firstAid/firstAidLogic.js)
+                      const faSum = firstAidSummary({ firstAidData, extCerts, staff: staffList, zones: getSiteLists().firstAidZones, shifts: getSiteLists().firstAidShifts });
+                      const validAiders = faSum.inDate, gapCount = faSum.gaps, expiredCount = faSum.expired.length + faSum.undated.length;
                       const sub = validAiders.length===0 ? "No qualified first aiders" :
                         gapCount>0 ? `${gapCount} zone/shift gap${gapCount!==1?"s":""}` :
-                        expiredCount>0 ? `${expiredCount} cert${expiredCount!==1?"s":""} expired` :
+                        expiredCount>0 ? `${expiredCount} cert${expiredCount!==1?"s":""} expired or undated` :
                         "All shifts covered";
                       const isAlert = validAiders.length===0 || gapCount>0 || expiredCount>0;
                       return card(E("🩺",""),"First Aid",validAiders.length,sub,null,isAlert,()=>setAtab("firstaid"));
@@ -4513,24 +4737,16 @@ export default function App() {
                   const order = [...savedOrder, ...defaultOrder.filter(id => !savedOrder.includes(id))];
                   const nodeById = Object.fromEntries(statCardDefs.map(c => [c.id, c.node]));
 
-                  const handleStatDragEnd = (event) => {
-                    const { active, over } = event;
-                    if (!over || active.id === over.id) return;
-                    const newOrder = arrayMove(order, order.indexOf(active.id), order.indexOf(over.id));
+                  const onReorder = newOrder => {
                     setDashboardLayouts(prev => ({ ...prev, [String(user.id)]: newOrder }));
                     dbWrite(sb.from("dashboard_layout").upsert({ user_id: String(user.id), card_order: newOrder }, { onConflict: "user_id" }), "dashboard layout");
                   };
-
+                  const gridStyle = {display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,1fr)",gap:14,marginBottom:28};
+                  // the drag-and-drop grid loads separately; until then the same cards show without handles
                   return (
-                    <DndContext sensors={statDragSensors} collisionDetection={closestCenter} onDragEnd={handleStatDragEnd}>
-                      <SortableContext items={order} strategy={rectSortingStrategy}>
-                        <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,1fr)",gap:14,marginBottom:28}}>
-                          {order.map(id => (
-                            <SortableStatCard key={id} id={id}>{nodeById[id]}</SortableStatCard>
-                          ))}
-                        </div>
-                      </SortableContext>
-                    </DndContext>
+                    <React.Suspense fallback={<div style={gridStyle}>{order.map(id => <div key={id}>{nodeById[id]}</div>)}</div>}>
+                      <LazySortableStatGrid order={order} nodeById={nodeById} onReorder={onReorder} gridStyle={gridStyle}/>
+                    </React.Suspense>
                   );
                 })()}
 
@@ -4538,9 +4754,7 @@ export default function App() {
                   {/* Incomplete training */}
                   {section("Staff with incomplete training",
                     listCard(overdueTraining,"All staff training complete",u=>{
-                      const a=(assigns[u.id]||[]).length;
-                      const d=(assigns[u.id]||[]).filter(mid=>(comps[u.id]||{})[mid]).length;
-                      const pct=a?Math.min(100,Math.round(d/a*100)):0;
+                      const _tr=staffTraining(u.id, assigns, comps, allModules), a=_tr.total, d=_tr.good, pct=_tr.pct;   // training/compliance.js
                       return (<>
                         <Avatar name={u.name} size={28}/>
                         <div style={{flex:1,minWidth:0}}>
@@ -4933,9 +5147,7 @@ export default function App() {
                     if (!u.name.toLowerCase().includes(q) && !u.email.toLowerCase().includes(q) && !(u.jobTitle||"").toLowerCase().includes(q)) return false;
                   }
                   if (staffFilterProgress!=="all") {
-                    const a=(assigns[u.id]||[]).length;
-                    const d=(assigns[u.id]||[]).filter(mid=>(comps[u.id]||{})[mid]).length;
-                    const pct=a?Math.min(100, Math.round(d/a*100)):0;
+                    const _tr=staffTraining(u.id, assigns, comps, allModules), a=_tr.total, d=_tr.good, pct=_tr.pct;   // training/compliance.js
                     if (staffFilterProgress==="compliant" && pct!==100) return false;
                     if (staffFilterProgress==="inprogress" && (pct===100||pct===0)) return false;
                     if (staffFilterProgress==="overdue" && (a===0 || pct!==0)) return false;   // nothing started (people with no modules are under "No Modules")
@@ -5045,9 +5257,8 @@ export default function App() {
                           </label>
                         )}
                         {ordered.map((u,i)=>{
-                          const a=(assigns[u.id]||[]).length, d=(assigns[u.id]||[]).filter(mid=>(comps[u.id]||{})[mid]).length;
-                          const pct=a?Math.min(100, Math.round(d/a*100)):0;
-                          const barColor=pct===100?T.green:pct>=50?T.accent:"#ef4444";
+                          const tr=staffTraining(u.id, assigns, comps, allModules), a=tr.total, d=tr.good, pct=tr.pct;   // training/compliance.js
+                          const barColor={green:T.green,amber:T.accent,red:"#ef4444"}[tr.band.key]||T.muted;
                           const lastActive=lastLoginMap[u.id];
                           return (
                             <React.Fragment key={u.id}>
@@ -5082,9 +5293,8 @@ export default function App() {
                       </div>
                       {filteredStaff.length===0 && <div style={{padding:"32px 20px",textAlign:"center",color:T.muted,fontSize:14}}>{staff.length===0?"No staff members yet. Add one above.":"No staff match the current filters."}</div>}
                       {ordered.map((u,i)=>{
-                        const a=(assigns[u.id]||[]).length, d=(assigns[u.id]||[]).filter(mid=>(comps[u.id]||{})[mid]).length;
-                        const pct=a?Math.min(100, Math.round(d/a*100)):0;
-                        const barColor=pct===100?T.green:pct>=50?T.accent:"#ef4444";
+                        const tr=staffTraining(u.id, assigns, comps, allModules), a=tr.total, d=tr.good, pct=tr.pct;   // training/compliance.js
+                        const barColor={green:T.green,amber:T.accent,red:"#ef4444"}[tr.band.key]||T.muted;
                         const lastActive=lastLoginMap[u.id];
                         const ticked=selIds.includes(String(u.id));
                         return (
@@ -5663,6 +5873,34 @@ export default function App() {
               {/* Document list: folder + search */}
               {(()=>{ const q=String(docSearch||"").trim().toLowerCase(); const inFolder=docs.filter(d=>docFolder==="all"||(d.type||"Document")===docFolder);
                 const shownDocs=q?inFolder.filter(d=>[d.title,d.description,d.fileName,d.type].some(v=>String(v||"").toLowerCase().includes(q))):inFolder;
+                // tick boxes + bulk actions (no bulk delete: deleting also removes read confirmations)
+                const docTicks = ticksFrom(docSel, setDocSel, shownDocs.map(d=>d.id), docs.map(d=>d.id));
+                const DOC_FOLDERS = ["Policy","Procedure","Guidance","User Manual","Risk Assessment","COSHH","Report","Presentation","Document"];
+                const ticked = ids => docs.filter(d=>ids.includes(String(d.id)));
+                const saveDocsMeta = async (ids, change, msg) => {
+                  const list = ticked(ids).filter(d=>!d.raId).map(d=>({ ...d, ...change }));
+                  const skipped = ids.length - list.length;
+                  setDocs(p=>p.map(d=>list.find(x=>x.id===d.id)||d));
+                  await Promise.all(list.map(d=>dbSaveDoc(d, null)));   // a failed save shows its own message
+                  notify(`${msg} (${list.length} document${list.length!==1?"s":""})${skipped?`. ${skipped} made from a risk assessment ${skipped===1?"was":"were"} left as ${skipped===1?"it is":"they are"}.`:"."}`, { kind:"success" });
+                };
+                const docActions = [
+                  { label: "📁 Move to folder…", run: async ids => {
+                      const v = await ask({ title:`Move ${ids.length} document${ids.length!==1?"s":""}`, ok:"Move", fields:[{ id:"type", label:"Folder", required:true, options: DOC_FOLDERS.map(f=>({ value:f, label:f })) }] });
+                      if (!v) return false; await saveDocsMeta(ids, { type: v.type }, `Moved to ${v.type}`); } },
+                  { label: "📅 Set review date…", run: async ids => {
+                      const v = await ask({ title:`Review date for ${ids.length} document${ids.length!==1?"s":""}`, ok:"Set date", fields:[{ id:"date", label:"Next review", type:"date", required:true }] });
+                      if (!v || !v.date) return false; await saveDocsMeta(ids, { reviewDate: v.date }, `Review date set to ${v.date}`); } },
+                  ...(docBundles.length ? [{ label: "📦 Add to bundle…", run: async ids => {
+                      const v = await ask({ title:`Add ${ids.length} document${ids.length!==1?"s":""} to a bundle`, ok:"Add", message:"Anyone the bundle has been given to is assigned the added documents too.",
+                        fields:[{ id:"bundle", label:"Bundle", required:true, options: docBundles.map(b=>({ value:b.id, label:b.name })) }] });
+                      if (!v) return false;
+                      const b = docBundles.find(x=>x.id===v.bundle); if (!b) return false;
+                      const add = ids.filter(id=>!b.docIds.map(String).includes(id));
+                      if (!add.length) { notify(`They're all in "${b.name}" already.`, { kind:"info" }); return; }
+                      if (await saveBundle({ ...b, docIds:[...b.docIds, ...add] }) !== false) notify(`${add.length} document${add.length!==1?"s":""} added to "${b.name}".`, { kind:"success" });
+                    } }] : []),
+                ];
                 return docs.length===0
                 ? <div style={{textAlign:"center",padding:40,color:T.muted,fontSize:14}}>No documents uploaded yet.</div>
                 : (
@@ -5670,9 +5908,11 @@ export default function App() {
                     <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
                       <input aria-label="Search documents" value={docSearch} onChange={e=>setDocSearch(e.target.value)} placeholder="🔍 Search documents by title, description or file name…"
                         style={{flex:1,minWidth:240,background:T.overlay,border:`1px solid ${T.borderMd}`,borderRadius:10,padding:"9px 14px",color:T.white,fontSize:13,outline:"none",fontFamily:font}}/>
+                      <TickAll ticks={docTicks} label={`Tick all ${shownDocs.length}`} T={T} font={font}/>
                       <span style={{fontSize:12,color:T.muted,whiteSpace:"nowrap"}}>{shownDocs.length} of {docs.length}</span>
                       {q && <button type="button" onClick={()=>setDocSearch("")} style={{background:"none",border:"none",color:T.accentLt,cursor:"pointer",fontFamily:font,fontSize:12,fontWeight:700}}>Clear</button>}
                     </div>
+                    <BulkBar ticks={docTicks} actions={docActions} T={T} font={font}/>
                     {shownDocs.length===0 && <div style={{textAlign:"center",padding:24,color:T.muted,fontSize:13}}>No documents match.</div>}
                     {shownDocs.map(d=>{
                       const extIcons={PDF:"📕",DOCX:"📘",DOC:"📘",XLSX:"📗",XLS:"📗",PPTX:"📙",PPT:"📙",PNG:"🖼️",JPG:"🖼️",JPEG:"🖼️",TXT:"📄",CSV:"📊"};
@@ -5683,7 +5923,7 @@ export default function App() {
                       const unreadCount = assignedStaff.length - readCount;
 
                       return (
-                        <DocCard key={d.id} d={d} staff={staff} assignedIds={assignedIds} assignedStaff={assignedStaff} readCount={readCount} unreadCount={unreadCount} icon={icon} docAcknowledgements={docAcknowledgements} setDocAcknowledgements={setDocAcknowledgements} setDocAssignments={setDocAssignments} dbSaveDocAssignments={dbSaveDocAssignments} setDocs={setDocs} dbDeleteDoc={dbDeleteDoc} dbSaveDoc={dbSaveDoc} setPreviewDoc={setPreviewDoc} docAckHistory={docAckHistory} bundleNames={bundleNamesOf(docBundles, d.id)} T={T} font={font}/>
+                        <DocCard key={d.id} tick={<Tick ticks={docTicks} id={d.id} label={`Tick ${d.title}`}/>} d={d} staff={staff} assignedIds={assignedIds} assignedStaff={assignedStaff} readCount={readCount} unreadCount={unreadCount} icon={icon} docAcknowledgements={docAcknowledgements} setDocAcknowledgements={setDocAcknowledgements} setDocAssignments={setDocAssignments} dbSaveDocAssignments={dbSaveDocAssignments} setDocs={setDocs} dbDeleteDoc={dbDeleteDoc} dbSaveDoc={dbSaveDoc} setPreviewDoc={setPreviewDoc} docAckHistory={docAckHistory} bundleNames={bundleNamesOf(docBundles, d.id)} T={T} font={font}/>
                       );
                     })}
                   </div>
@@ -5733,7 +5973,7 @@ export default function App() {
 
           {atab==="investigation" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
-            <LazyInvestigationTab incidents={incidents} setIncidents={setIncidents} staff={staff}
+            <LazyInvestigationTab userName={user?.name || ""} incidents={incidents} setIncidents={setIncidents} staff={staff}
               investigations={investigations} setInvestigations={setInvestigations}
               fetchInvestigation={fetchInvestigation} acceptInvestigationBase={acceptInvestigationBase}
               focusedId={investigationView} setFocusedId={setInvestigationView}

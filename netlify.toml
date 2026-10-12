@@ -1,0 +1,12 @@
+# Netlify settings kept with the code. Build settings (command, publish folder,
+# environment variables) stay in the Netlify dashboard as before.
+
+[functions]
+  # Lets the functions use the portal's own code (src/lib/reminders.js etc.)
+  node_bundler = "esbuild"
+
+# Email reminders: check every 15 minutes (live site only — Netlify doesn't run
+# schedules on branch deploys or previews). Times are UTC; the job itself waits
+# for the UK send hour set in Site Settings.
+[functions."zp-email-run"]
+  schedule = "*/15 * * * *"

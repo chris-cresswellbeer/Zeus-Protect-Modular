@@ -16,6 +16,7 @@
  */
 import { sb } from "./supabase";
 import { buildXlsx, zipStore } from "./xlsxWriter";
+import { getBrand, fileProduct } from "./brandCore";
 
 export const BACKUP_TABLES = [
   "users", "user_profiles", "last_logins", "dashboard_layout",
@@ -67,12 +68,12 @@ export async function buildBackup({ by = "", onProgress } = {}) {
   }
   const created = new Date().toISOString();
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
-  const json = JSON.stringify({ app: "Zeus Protect", kind: "full backup", format: 1, created, createdBy: by, counts, errors, tables }, null, 1);
+  const json = JSON.stringify({ app: getBrand().product, kind: "full backup", format: 1, created, createdBy: by, counts, errors, tables }, null, 1);
 
   const head = { bold: true, color: "FFFFFF", fill: "0D1F5C" };
   const sheets = [{
     name: "Contents", cols: [32, 12, 60],
-    rows: [[{ v: `Zeus Protect — full backup, ${created.slice(0, 16).replace("T", " ")} UTC${by ? `, by ${by}` : ""}`, s: { bold: true, size: 13 } }], [],
+    rows: [[{ v: `${getBrand().product} — full backup, ${created.slice(0, 16).replace("T", " ")} UTC${by ? `, by ${by}` : ""}`, s: { bold: true, size: 13 } }], [],
       [{ v: "Table", s: head }, { v: "Rows", s: head }, { v: "Note", s: head }],
       ...BACKUP_TABLES.map(t => [t, counts[t], errors[t] ? `Not read: ${errors[t]}` : ""])],
   }];
@@ -85,12 +86,12 @@ export async function buildBackup({ by = "", onProgress } = {}) {
   });
   const xlsx = new Uint8Array(await buildXlsx(sheets).arrayBuffer());
   const readme = [
-    "Zeus Protect — full backup",
+    `${getBrand().product} — full backup`,
     `Taken: ${created}${by ? ` by ${by}` : ""}`,
     `Records: ${total} in ${BACKUP_TABLES.length} tables${Object.keys(errors).length ? ` (${Object.keys(errors).length} could not be read — see the Contents sheet)` : ""}`,
     "",
-    "zeus-protect-backup.json  Every row of every table, exactly as stored. Keep this: it's the copy to restore from.",
-    "zeus-protect-backup.xlsx  The same records, one sheet per table, for reading. Very long values are cut short here.",
+    `${fileProduct()}-backup.json  Every row of every table, exactly as stored. Keep this: it's the copy to restore from.`,
+    `${fileProduct()}-backup.xlsx  The same records, one sheet per table, for reading. Very long values are cut short here.`,
     "",
     "Not included: uploaded files (documents, certificates, photos stay in Supabase Storage),",
     "and passwords (sign-in accounts are managed by Supabase).",
@@ -99,8 +100,8 @@ export async function buildBackup({ by = "", onProgress } = {}) {
   ].join("\r\n");
   const enc = new TextEncoder();
   const zip = zipStore([
-    { name: "zeus-protect-backup.json", data: enc.encode(json) },
-    { name: "zeus-protect-backup.xlsx", data: xlsx },
+    { name: `${fileProduct()}-backup.json`, data: enc.encode(json) },
+    { name: `${fileProduct()}-backup.xlsx`, data: xlsx },
     { name: "READ ME.txt", data: enc.encode(readme) },
   ]);
   return { blob: new Blob([zip], { type: "application/zip" }), counts, errors, total };

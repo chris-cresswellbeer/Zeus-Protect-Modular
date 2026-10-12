@@ -62,6 +62,8 @@ import { CONTRACTOR_CERT_TYPES } from "../data/seedContractors";
 import { latestByKey } from "../domains/inspections/inspectionDue";
 import { fireSummary, DRILL_INSPECTION, FRA_INSPECTION } from "../domains/fireSafety/fireLogic";
 import { renderEmail, ukDate } from "./emailTemplates";
+import { getBrand } from "./brandCore";
+const P = () => getBrand().product;   // the portal name (branding)
 
 // ── Settings (app_settings row "email") ─────────────────────────────────────
 export const EMAIL_SETTINGS_ROW = "email";
@@ -159,7 +161,7 @@ export function prepareData(rows = {}) {
   const staff = r("users").map(x => ({ ...(x.data || {}), id: String(x.id) })).filter(u => u.name);
   const custom = r("custom_modules").map(x => x.data).filter(Boolean);
   const modules = [
-    ...TRAINING_MODULES.map(m => custom.find(c => c.id === m.id && c._override) || m),
+    ...TRAINING_MODULES.map(m => custom.find(c => c.id === m.id && c._override) || m),   // (titles only are used in emails)
     ...custom.filter(c => !c._override),
   ].filter(m => m && !m._hidden);
   const customTypes = r("custom_machine_types").map(x => x.data).filter(Boolean);
@@ -427,7 +429,7 @@ export function planEmails({ data, settings, clock, sent = new Set(), portalUrl 
       const subject = `${stop ? "STOP WORK" : high ? "High-risk incident" : "New incident"}: ${What}${inc.location ? ` — ${clip(inc.location, 60)}` : ""}${inc.date && okDate(inc.date) !== today ? ` (${ukDate(inc.date)})` : ""}`;
       const facts = [
         { text: `${What}${inc.accidentCode ? ` (code ${inc.accidentCode})` : ""}`, sub: [okDate(inc.date) && ukDate(inc.date), inc.time && `at ${String(inc.time).slice(0, 5)}`, inc.location].filter(Boolean).join(" · ") },
-        named ? { text: `Reported by ${reporter.name}`, sub: reporter.jobTitle || "" } : { text: "Reported by a member of staff", sub: "Who reported it and who was involved are in Zeus Protect" },
+        named ? { text: `Reported by ${reporter.name}`, sub: reporter.jobTitle || "" } : { text: "Reported by a member of staff", sub: `Who reported it and who was involved are in ${P()}` },
         inc.quickReport && inc.description && { text: "The hazard, as reported", sub: clip(inc.description, 240) },
       ].filter(Boolean);
       const [kp, mp] = high ? ["inc", "incat"] : ["incn", "incatn"];
@@ -440,13 +442,13 @@ export function planEmails({ data, settings, clock, sent = new Set(), portalUrl 
         if (!s.incidentAlerts || late) { quietKeys.push(key, marker); return; }
         if (incFirst && okDate(inc.date) < today) { baselineKeys.push(key, marker); return; }   // older than today on the first run: note only
         const intro = r.manager && !r.admin
-          ? `${named ? `${reporter.name}, in your team,` : "Someone in your team"} has reported ${an} ${noun} in Zeus Protect${high ? " that needs attention now" : ""}.`
-          : `${high ? "A high-risk" : an[0].toUpperCase() + an.slice(1)} ${noun} has been reported in Zeus Protect.`;
+          ? `${named ? `${reporter.name}, in your team,` : "Someone in your team"} has reported ${an} ${noun} in ${P()}${high ? " that needs attention now" : ""}.`
+          : `${high ? "A high-risk" : an[0].toUpperCase() + an.slice(1)} ${noun} has been reported in ${P()}.`;
         emails.push({ kind: "incident", priority: -1, userId: /^x-/.test(String(r.id)) ? null : r.id, name: r.name, to: r.email, subject, keys: [key, marker],
           ...renderEmail({ preheader: high ? reasons[0] : `A new ${noun} has been reported`, greeting: r.name ? `Hi ${firstName(r)},` : "Hello,", intro,
             sections: [{ title: "What was reported", items: facts }, high && { title: "Why you're getting this", items: reasons.map(x => ({ text: x, flag: true })) }].filter(Boolean),
-            note: `${stop ? "If you haven't already, make sure the area is safe and work has stopped. " : ""}Details of what happened and who was involved are in Zeus Protect, not in this email.`,
-            button: r.admin ? { label: "Open Incidents", href: link("#/admin/incidents") } : { label: "Open Zeus Protect", href: link("") } }) });
+            note: `${stop ? "If you haven't already, make sure the area is safe and work has stopped. " : ""}Details of what happened and who was involved are in ${P()}, not in this email.`,
+            button: r.admin ? { label: "Open Incidents", href: link("#/admin/incidents") } : { label: `Open ${P()}`, href: link("") } }) });
       });
     });
   }
@@ -471,10 +473,10 @@ export function planEmails({ data, settings, clock, sent = new Set(), portalUrl 
     const rd = items.reading.filter(x => r.some(y => y.doc.id === x.docId));
     const n = tr.length + rd.length;
     const subject = n === 1 ? (tr.length ? `New training for you: ${tr[0].title}` : `Please read and confirm: ${rd[0].title}`)
-      : `${plural(n, "new item")} for you in Zeus Protect`;
+      : `${plural(n, "new item")} for you in ${P()}`;
     send({ kind: "new", priority: 1, userId: u.id, name: u.name, to: u.email.trim(), subject, keys,
       ...renderEmail({ preheader: subject, greeting: `Hi ${firstName(u)},`,
-        intro: n === 1 ? "There's something new for you to do in Zeus Protect, the H&S portal." : "There are some new things for you to do in Zeus Protect, the H&S portal.",
+        intro: n === 1 ? `There's something new for you to do in ${P()}, the H&S portal.` : `There are some new things for you to do in ${P()}, the H&S portal.`,
         sections: [tr.length && { title: "Training to complete", items: trainingItems(tr) }, rd.length && { title: "Documents to read and confirm", items: readingItems(rd) }].filter(Boolean),
         button: { label: tr.length ? "Start your training" : "Open your documents", href: link(tr.length ? "#/staff/training" : "#/staff/documents") } }) });
   });
@@ -496,15 +498,15 @@ export function planEmails({ data, settings, clock, sent = new Set(), portalUrl 
       if (!awake) return;                                   // put in their name at night: wait for the morning
       const list = mine.map(x => x.a).sort((x, y) => String(x.dueDate || "9999").localeCompare(String(y.dueDate || "9999")));
       const inv = list.some(a => a.source === "Incident investigation"), other = list.some(a => a.source !== "Incident investigation");
-      const subject = list.length === 1 ? `New action for you: ${clip(actionTitle(list[0]), 70)}` : `${plural(list.length, "new action")} for you in Zeus Protect`;
+      const subject = list.length === 1 ? `New action for you: ${clip(actionTitle(list[0]), 70)}` : `${plural(list.length, "new action")} for you in ${P()}`;
       send({ kind: "action", priority: 2, userId: u.id, name: u.name, to: u.email.trim(), subject, keys,
         ...renderEmail({ preheader: subject, greeting: `Hi ${firstName(u)},`,
-          intro: list.length === 1 ? "An H&S action has been put in your name in Zeus Protect." : "Some H&S actions have been put in your name in Zeus Protect.",
+          intro: list.length === 1 ? `An H&S action has been put in your name in ${P()}.` : `Some H&S actions have been put in your name in ${P()}.`,
           sections: [{ title: list.length === 1 ? "Your action" : "Your actions", items: list.map(a => ({ text: actionTitle(a),
             sub: [a.source, a.source !== "Incident investigation" && ukDates(a.ref), a.dueDate ? actLine(a) : "No due date set"].filter(Boolean).join(" · "), flag: a.daysOverdue > 0 })) }],
           note: [inv && "Incident investigation actions are under My Actions, where you can add notes and mark them complete.",
             other && "For inspection and risk assessment actions, tell the H&S team when they're done so they can be closed."].filter(Boolean).join(" "),
-          button: inv ? { label: "Open My Actions", href: link("#/staff/actions") } : { label: "Open Zeus Protect", href: link("#/staff/dashboard") } }) });
+          button: inv ? { label: "Open My Actions", href: link("#/staff/actions") } : { label: `Open ${P()}`, href: link("#/staff/dashboard") } }) });
     });
   }
 
@@ -531,7 +533,7 @@ export function planEmails({ data, settings, clock, sent = new Set(), portalUrl 
         intro: expired.length ? "Something on your H&S record has expired. Please arrange a renewal as soon as you can." : "Something on your H&S record is due for renewal soon.",
         sections: [{ title: "Renewals", items: renewalItems(personDue) }],
         note: "The H&S team has been told as well. If you've already renewed, send them the new certificate so your record can be updated.",
-        button: { label: "Open Zeus Protect", href: link("#/staff/dashboard") } }) });
+        button: { label: `Open ${P()}`, href: link("#/staff/dashboard") } }) });
   });
 
   // 3. ALERTS — renewals and RIDDOR deadlines to each admin (each admin's own keys, so one
@@ -552,10 +554,10 @@ export function planEmails({ data, settings, clock, sent = new Set(), portalUrl 
     send({ kind: "alerts", priority: 0, userId: a.id, name: a.name, to: a.email, subject,
       keys: [...(items.length ? renewKeys : []), ...rids.map(i => `riddor:${a.id}:${i.base}`)],
       ...renderEmail({ preheader: subject, greeting: a.name ? `Hi ${firstName(a)},` : "Hello,",
-        intro: "Today's H&S alerts from Zeus Protect.",
+        intro: `Today's H&S alerts from ${P()}.`,
         sections: [rids.length && { title: "RIDDOR reports to make", items: rids }, items.length && { title: "Certificates, licences and training due for renewal", items }].filter(Boolean),
         note: items.length ? "Staff with an email address have had their own reminder." : "",
-        button: { label: "Open Zeus Protect", href: link(rids.length ? "#/admin/incidents" : "#/admin/dashboard") } }) });
+        button: { label: `Open ${P()}`, href: link(rids.length ? "#/admin/incidents" : "#/admin/dashboard") } }) });
   });
 
   // 4. WEEKLY — each person's outstanding items; 5. MANAGER — team summary; 6. DIGEST — admins
@@ -571,12 +573,12 @@ export function planEmails({ data, settings, clock, sent = new Set(), portalUrl 
       const subject = overdue ? `Reminder: ${plural(n, "H&S item")} to do, ${overdue} overdue` : `Reminder: ${plural(n, "H&S item")} to do`;
       send({ kind: "weekly", priority: 5, userId: u.id, name: u.name, to: u.email.trim(), subject, keys: [key],
         ...renderEmail({ preheader: subject, greeting: `Hi ${firstName(u)},`,
-          intro: `Here's what you still have to do in Zeus Protect, the H&S portal.${overdue ? " Overdue items are marked in red." : ""}`,
+          intro: `Here's what you still have to do in ${P()}, the H&S portal.${overdue ? " Overdue items are marked in red." : ""}`,
           sections: [items.training.length && { title: "Training to complete", items: trainingItems(items.training) },
             items.reading.length && { title: "Documents to read and confirm", items: readingItems(items.reading) },
             items.renewals.length && { title: "Renewals", items: renewalItems(items.renewals) },
             items.actions.length && { title: "Actions you're responsible for", items: actionItems(items.actions) }].filter(Boolean),
-          button: { label: "Open Zeus Protect", href: link("#/staff/dashboard") } }) });
+          button: { label: `Open ${P()}`, href: link("#/staff/dashboard") } }) });
     });
 
     if (s.managerCopies) {
@@ -597,7 +599,7 @@ export function planEmails({ data, settings, clock, sent = new Set(), portalUrl 
         const subject = `Your team's H&S: ${plural(rows.length, "person", "people")} with items to do`;
         send({ kind: "manager", priority: 6, userId: m.id, name: m.name, to: m.email.trim(), subject, keys: [key],
           ...renderEmail({ preheader: subject, greeting: `Hi ${firstName(m)},`,
-            intro: "This week's summary of what your team still has to do in Zeus Protect. They've each had their own reminder.",
+            intro: `This week's summary of what your team still has to do in ${P()}. They've each had their own reminder.`,
             sections: [{ title: "Your team", items: rows }],
             button: { label: "Open My Team", href: link("#/staff/team") } }) });
       });
@@ -639,9 +641,9 @@ export function planEmails({ data, settings, clock, sent = new Set(), portalUrl 
         const subject = `H&S weekly summary — week of ${ukDate(weekStart)}`;
         send({ kind: "digest", priority: 4, userId: a.id, name: a.name, to: a.email, subject, keys: [key],
           ...renderEmail({ preheader: stats.filter(x => x.value).map(x => `${x.value} ${x.label.toLowerCase()}`).join(" · ") || "Nothing outstanding",
-            greeting: a.name ? `Hi ${firstName(a)},` : "Hello,", intro: "This week's summary from Zeus Protect.", stats,
+            greeting: a.name ? `Hi ${firstName(a)},` : "Hello,", intro: `This week's summary from ${P()}.`, stats,
             sections: sections.length ? sections : [{ title: "All clear", items: [{ text: "Nothing is overdue or due for renewal." }] }],
-            button: { label: "Open Zeus Protect", href: link("#/admin/dashboard") } }) });
+            button: { label: `Open ${P()}`, href: link("#/admin/dashboard") } }) });
       });
     }
   }

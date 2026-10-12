@@ -24,6 +24,7 @@ import { FeedbackHost } from "./shared/Feedback";
 import { WelcomeHost } from "./shared/WelcomeVideo";
 import { SessionWarningHost } from "./shared/SessionTimeout";
 import { registerServiceWorker, listenForInstall } from "./mobile/registerSW";
+import { startBrand } from "./lib/brand";
 import { watchStaleBuild } from "./lib/staleBuild";
 import { UpdateBar } from "./shared/UpdateBar";
 
@@ -36,6 +37,9 @@ startPrivateFiles();
 // module pictures, wakes queued saves, and offers "Install app". Production builds only.
 // A page left open across a new release reloads itself if a part fails to download
 // (lib/staleBuild.jsx), and gets a "New version — Reload" bar (UpdateBar below).
+// Company branding (names, logos, colours): this device's saved copy at once, then the
+// database copy (lib/brand.js). Works before sign-in, for the sign-in screen.
+startBrand();
 registerServiceWorker();
 listenForInstall();
 watchStaleBuild();

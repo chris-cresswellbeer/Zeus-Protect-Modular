@@ -17,6 +17,7 @@ import { MonthlyReportView } from "../reports/MonthlyReportView";
 import { useRemembered } from "../../lib/remembered";
 import { useSort, sortRows, SortButton } from "../../shared/Sortable";
 import { isActionDone } from "../../lib/actionStatus";
+import { getBrand, brandHtml, fileShort } from "../../lib/brandCore";
 import { trainingCompliance, complianceBand, staffTraining, PRINT_COLOR, moduleState, isInDateState } from "./compliance";
 
 /**
@@ -114,7 +115,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
   function exportStaffReport() {
     const today = todayISO();
     const rows = [
-      ["Zeus Protect — Staff Compliance Report"],
+      [`${getBrand().product} — Staff Compliance Report`],
       [`Generated: ${today}`],
       [],
       ["Name","Email","Job Title","Manager","Last Login","Modules Assigned","Modules Completed","Modules Pending","Compliance %","Status","Incomplete Modules","Certificates","First Aid Cert","First Aid Expiry","Fire Warden Cert","Fire Warden Expiry"],
@@ -141,7 +142,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
     });
     rows.push([]);
     rows.push([`Total Staff: ${staff.length}`, `Total Completions: ${staff.reduce((s,u)=>s+Object.keys(comps[u.id]||{}).length,0)}`, `Average Compliance: ${staff.length?Math.min(100, Math.round(staff.reduce((s,u)=>{const t=staffTraining(u.id, assigns, comps, allModules);return s+(t.total?t.good/t.total:0);},0)/staff.length*100)):0}%`]);
-    downloadCsv(`zeus-staff-report-${today}.csv`, rows);
+    downloadCsv(`${fileShort()}-staff-report-${today}.csv`, rows);
   }
 
   // Manager summary rows, then a per-member breakdown with every external cert type as a column.
@@ -149,7 +150,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
     const today = todayISO();
     const certCols = EXT_CERT_TYPES.map(ct => ct.label);
     const rows = [
-      ["Zeus Protect — Manager Performance Report"],
+      [`${getBrand().product} — Manager Performance Report`],
       [`Generated: ${today}`],
       [],
       ["Manager","Team Size","Modules Assigned","Modules Completed","Modules Pending","Compliance %","Fully Compliant Staff","Overdue Staff","No Modules Assigned","Status"],
@@ -185,7 +186,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
       });
       rows.push([]);
     });
-    downloadCsv(`zeus-manager-report-${today}.csv`, rows);
+    downloadCsv(`${fileShort()}-manager-report-${today}.csv`, rows);
   }
 
   const tabBtn = (id, label) => (
@@ -302,7 +303,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
                       return `<div class="page-break">
                         <div class="header">
                           <div><h1>${u.name}</h1><p>${u.jobTitle||""}${u.manager?" · Manager: "+u.manager:""}</p><p style="color:#94a3b8;font-size:12px">Generated: ${today}</p></div>
-                          <div style="text-align:right"><div style="font-size:11px;color:#94a3b8;margin-bottom:6px">Zeus Protect H&S Portal</div><div class="status-badge" style="color:${statusColor};border-color:${statusColor};background:${pct===100?"#f0fff4":pct>=50?"#fff8f0":"#fff2f2"}">${status} — ${pct}%</div></div>
+                          <div style="text-align:right"><div style="font-size:11px;color:#94a3b8;margin-bottom:6px">${brandHtml().product}</div><div class="status-badge" style="color:${statusColor};border-color:${statusColor};background:${pct===100?"#f0fff4":pct>=50?"#fff8f0":"#fff2f2"}">${status} — ${pct}%</div></div>
                         </div>
                         <div class="meta-grid">
                           <div class="meta-card"><div class="label">Assigned</div><div class="value">${a}</div></div>
@@ -1054,7 +1055,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
             </style></head><body>
             <div class="header">
               <div><h1>Overdue Actions Report</h1><p>All open corrective actions across incidents, inspections and risk assessments</p></div>
-              <div style="text-align:right"><div style="font-size:11px;color:#94a3b8">Zeus Protect H&S Portal</div><div style="font-size:12px;color:#64748b;margin-top:4px">Generated ${todayLong}</div></div>
+              <div style="text-align:right"><div style="font-size:11px;color:#94a3b8">${brandHtml().product}</div><div style="font-size:12px;color:#64748b;margin-top:4px">Generated ${todayLong}</div></div>
             </div>
             <div class="meta-grid">
               <div class="meta-card"><div class="label">Overdue</div><div class="value" style="color:#dc2626">${overdue.length}</div></div>
@@ -1065,7 +1066,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
               ? '<div class="no-data">No open actions — everything is up to date</div>'
               : section("Overdue",overdue,"#dc2626") + section("Upcoming",upcoming,"#b45309") + section("No Due Date",noDue,"#64748b")}
             <div class="footer">
-              <span>Zeus Protect Health & Safety Portal · Confidential</span>
+              <span>${brandHtml().foot} · Confidential</span>
               <span>Generated ${todayLong}</span>
             </div>
             </body></html>`;

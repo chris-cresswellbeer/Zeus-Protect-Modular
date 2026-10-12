@@ -29,6 +29,7 @@
  */
 import { prepareData, planEmails, ukClock, emailSettings, plusDays, EMAIL_SETTINGS_ROW, INCIDENT_ALERT_DAYS } from "../../src/lib/reminders.js";
 import { renderEmail } from "../../src/lib/emailTemplates.js";
+import { setBrand, getBrand, brandSender } from "../../src/lib/brandCore.js";
 import crypto from "crypto";
 
 // Day maths in the shared rules use the computer's clock: make that UK time (Netlify runs in UTC).
@@ -142,6 +143,9 @@ async function readOptional(c, table, skipped = []) {
 
 export async function loadSettings(c) {
   const { json } = await rest(c, `app_settings?select=data&id=eq.${EMAIL_SETTINGS_ROW}`);
+  // the portal's branding (names in emails, sender name) — Site Settings → Branding
+  try { const b = await rest(c, "app_settings?select=data&id=eq.brand"); setBrand((b.json && b.json[0] && b.json[0].data) || null); }
+  catch (e) { console.error("[email] couldn't read the branding — emails use the neutral name", e); }
   return emailSettings((json && json[0] && json[0].data) || {});
 }
 
@@ -178,7 +182,7 @@ function route(c, e) {
 }
 
 const hash = s => crypto.createHash("sha256").update(s).digest("hex").slice(0, 40);
-const payload = (c, e) => ({ from: c.from, to: [e.actualTo], subject: e.subject, html: e.html, text: e.text, ...(c.replyTo ? { reply_to: c.replyTo } : {}),
+const payload = (c, e) => ({ from: brandSender(c.from), to: [e.actualTo], subject: e.subject, html: e.html, text: e.text, ...(c.replyTo ? { reply_to: c.replyTo } : {}),
   tags: [{ name: "kind", value: e.kind }] });
 
 async function resend(c, path, body, idem) {
@@ -257,7 +261,7 @@ export function setupProblems(c, { forSending = true } = {}) {
   if (!c.base || !c.key) p.push("SUPABASE_SERVICE_ROLE_KEY (and VITE_SUPABASE_URL) aren't set in Netlify's environment variables.");
   if (forSending) {
     if (!c.resendKey) p.push("RESEND_API_KEY isn't set in Netlify's environment variables.");
-    if (!c.from) p.push("EMAIL_FROM isn't set (e.g. Zeus Protect <hs-portal@yourdomain.co.uk>).");
+    if (!c.from) p.push("EMAIL_FROM isn't set (e.g. H&S Portal <hs-portal@yourdomain.co.uk>).");
     if (!c.live && !c.testTo) p.push(c.forcedTest ? "This isn't the live site, so staff aren't emailed from here: set EMAIL_TEST_TO for this deploy to try reminders out."
       : "EMAIL_TEST_TO isn't set, and EMAIL_SEND_TO_STAFF isn't \"yes\" — so there's nowhere safe to send.");
   }
@@ -340,15 +344,15 @@ export async function sendTestEmail({ to, name, portalUrl, forceTest = false } =
   const problems = setupProblems(c);
   if (problems.length) return { ok: false, message: problems.join(" ") };
   const settings = await loadSettings(c);
-  const { html, text } = renderEmail({ preheader: "Test email from Zeus Protect", greeting: name ? `Hi ${String(name).split(/\s+/)[0]},` : "Hello,",
-    intro: "This is a test email from Zeus Protect. If you can read it, email reminders are set up correctly.",
+  const { html, text } = renderEmail({ preheader: `Test email from ${getBrand().product}`, greeting: name ? `Hi ${String(name).split(/\s+/)[0]},` : "Hello,",
+    intro: `This is a test email from ${getBrand().product}. If you can read it, email reminders are set up correctly.`,
     sections: [{ title: "Set-up", items: [
-      { text: `Sending from ${c.from}`, sub: c.replyTo ? `Replies go to ${c.replyTo}` : "Replies: not set (EMAIL_REPLY_TO)" },
+      { text: `Sending from ${brandSender(c.from)}`, sub: c.replyTo ? `Replies go to ${c.replyTo}` : "Replies: not set (EMAIL_REPLY_TO)" },
       { text: c.live ? "Sending to staff: yes" : "Sending to staff: no — test mode", sub: c.live ? "Reminders go to each person's own address." : `Every email goes to ${c.testTo}.` },
       { text: `Reminders are ${settings.enabled ? "switched on" : "switched off"}`, sub: "Site Settings → Email reminders" },
     ] }],
-    button: { label: "Open Zeus Protect", href: `${String(portalUrl || c.portalUrl).replace(/\/+$/, "")}/#/admin/settings` } });
-  const e = route(c, { kind: "test", to, name, subject: "Zeus Protect test email", html, text, keys: [`test:${Date.now()}`] });   // unique, so a second test isn't treated as a repeat
+    button: { label: `Open ${getBrand().product}`, href: `${String(portalUrl || c.portalUrl).replace(/\/+$/, "")}/#/admin/settings` } });
+  const e = route(c, { kind: "test", to, name, subject: `${getBrand().product} test email`, html, text, keys: [`test:${Date.now()}`] });   // unique, so a second test isn't treated as a repeat
   const [r] = await deliver(c, [e], Date.now());
   await addLog(c, [{ day: ukClock().today, kind: "test", user_id: null, to_addr: e.actualTo, intended_to: to, subject: e.subject, status: r.ok ? e.status : "failed",
     error: r.ok ? null : r.error, resend_id: r.id || null, mode: "test" }]).catch(() => {});

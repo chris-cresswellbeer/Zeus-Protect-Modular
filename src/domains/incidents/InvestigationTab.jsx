@@ -9,6 +9,7 @@ import { mergeInvestigation, changedSince } from "./investigationMerge";
 import { useFormGuard, DraftBanner } from "../../lib/unsaved";
 
 import { todayISO } from "../../lib/dates";
+import { brandHtml } from "../../lib/brandCore";
 import { photosFromFiles, toStoredPhotos } from "../../lib/photos";
 import { embedFiles } from "../../lib/fileAccess";
 import { isActionDone, actionDoneDate, completeAction, reopenAction } from "../../lib/actionStatus";
@@ -245,7 +246,7 @@ function InvestigationTab({ userName = "", incidents, setIncidents, staff, inves
       </div>
     `:""}
     <div class="footer">
-      <span>Zeus Protect — Health & Safety Portal · Investigation Report</span>
+      <span>${brandHtml().foot} · Investigation Report</span>
       <span>Generated: ${today}</span>
     </div>
     </body></html>`;

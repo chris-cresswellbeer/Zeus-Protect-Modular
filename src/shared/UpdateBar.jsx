@@ -1,5 +1,5 @@
 /**
- * UpdateBar — "A new version of Zeus Protect is ready · Reload"
+ * UpdateBar — "A new version of <portal name> is ready · Reload"
  * Shown when a new release takes over while the portal is open (mobile/registerSW.js
  * sends "zp-update-ready"; lib/staleBuild.jsx sends it with {stale:true} when a part of an
  * old page can't be downloaded, and {reconnect:true} when signal returns after a part
@@ -7,6 +7,7 @@
  * form; "Later" hides it until the next release.
  */
 import React from "react";
+import { getBrand } from "../lib/brandCore";
 
 export function UpdateBar() {
   const [show, setShow] = React.useState(false);   // false | "new" | "stale" | "reconnect"
@@ -26,10 +27,10 @@ export function UpdateBar() {
       fontFamily: "system-ui, -apple-system, Segoe UI, sans-serif", fontSize: 13.5,
     }}>
       <span style={{ flex: 1, lineHeight: 1.4 }}>{show === "stale"
-        ? "Zeus Protect has been updated since this page was opened. Save anything you're working on, then Reload."
+        ? `${getBrand().product} has been updated since this page was opened. Save anything you're working on, then Reload.`
         : show === "reconnect"
         ? "You're back online. Save anything you're working on, then Reload to open the rest of the portal."
-        : "A new version of Zeus Protect is ready. Reload when you've finished what you're doing."}</span>
+        : `A new version of ${getBrand().product} is ready. Reload when you've finished what you're doing.`}</span>
       <button style={{ ...btn, background: "transparent", color: "#cbd5e1" }} onClick={() => setShow(false)}>Later</button>
       <button style={{ ...btn, background: "#f59e0b", color: "#111827" }} onClick={() => window.location.reload()}>Reload</button>
     </div>

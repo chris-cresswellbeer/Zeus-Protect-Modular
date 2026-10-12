@@ -91,7 +91,7 @@ function EditStaffModal({ staffUser, allUsers, setAllUsers, passwords, onSetPass
           </div>
           <div>
             <label style={labelStyle}>EMAIL ADDRESS *</label>
-            <input value={email} onChange={e=>{setEmail(e.target.value);setErr("");setSaved(false);}} style={inputStyle} placeholder="email@zeus.com"/>
+            <input value={email} onChange={e=>{setEmail(e.target.value);setErr("");setSaved(false);}} style={inputStyle} placeholder="email@company.co.uk"/>
           </div>
           <div>
             <label style={labelStyle}>JOB TITLE</label>

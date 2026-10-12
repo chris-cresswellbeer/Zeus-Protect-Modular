@@ -85,7 +85,7 @@ function PermitForm({ existing, staff, contractors, onSave, onCancel, T, font })
         </div>
         <div><label style={lbl}>Start Date & Time *</label><input type="datetime-local" style={inp} value={form.startDateTime} onChange={e=>setForm(p=>({...p,startDateTime:e.target.value}))}/></div>
         <div><label style={lbl}>End Date & Time *</label><input type="datetime-local" style={inp} value={form.endDateTime} onChange={e=>setForm(p=>({...p,endDateTime:e.target.value}))}/></div>
-        <div><label style={lbl}>Authorised By (Zeus Staff) *</label>
+        <div><label style={lbl}>Authorised By (our staff) *</label>
           <select style={inp} value={form.authorisedBy} onChange={e=>setForm(p=>({...p,authorisedBy:e.target.value}))}>
             <option value="">Select authorising person...</option>
             {staff.filter(u=>u.role==="admin"||u.manager).map(u=><option key={u.id} value={u.name}>{u.name}{u.jobTitle?` — ${u.jobTitle}`:""}</option>)}

@@ -20,6 +20,7 @@ import { videoSource } from "../../lib/videoLink";
 import { PASS_MARK, passMarkOf } from "../../domains/training/completion";
 
 import { todayISO } from "../../lib/dates";
+import { certNumber } from "../../lib/brandCore";
 function ModulePlayer({
   mod, user, initialSlide = 0, offline,
   onExit, onProgress, onComplete,
@@ -104,7 +105,7 @@ function ModulePlayer({
               <p style={{ margin: 0, color: Z.slate, lineHeight: 1.7, fontSize: 13.5 }}>
                 Take your time — each slide saves as you go. You need{" "}
                 <strong style={{ color: Z.green }}>{passMark}% or above</strong> on the knowledge
-                check to earn your Zeus certificate, and you can retake it as many times as you need.
+                check to earn your certificate, and you can retake it as many times as you need.
               </p>
             </div>
             {offline && (
@@ -707,10 +708,10 @@ function AnswerReview({ quiz, answers, Z }) {
 // Generated client-side so the certificate can be shown before it syncs; the
 // server should still enforce uniqueness.
 // NB: differs from the desktop format (App.jsx builds ZSL- + last 8 chars of a base-36
-// string). Both start with "ZSL-"; nothing parses them, they're reference numbers only.
+// string). Both start with the branding prefix (e.g. "ZSL-"); nothing parses them, they're reference numbers only.
 function makeCertId(userId, moduleId) {
   const rand = Math.random().toString(36).toUpperCase().slice(2, 8);
-  return `ZSL-${userId}${String(moduleId).toUpperCase()}${rand}`;
+  return certNumber(`${userId}${String(moduleId).toUpperCase()}${rand}`);   // prefix from the branding
 }
 
 export { ModulePlayer, PASS_MARK };

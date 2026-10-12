@@ -136,7 +136,7 @@ function ContractorDetail({ selCon, contractorInductions, setContractorInduction
                 </div>
                 <div><label style={lbl}>Purpose / Job Description *</label><input style={inp} value={visitForm.purpose} onChange={e=>setVisitForm(p=>({...p,purpose:e.target.value}))} placeholder="e.g. Annual boiler service"/></div>
                 <div><label style={lbl}>Areas Accessed</label><input style={inp} value={visitForm.areas} onChange={e=>setVisitForm(p=>({...p,areas:e.target.value}))} placeholder="e.g. Boiler room, Plant room"/></div>
-                <div><label style={lbl}>Signed In By (Zeus Staff)</label>
+                <div><label style={lbl}>Signed In By (our staff)</label>
                   <select style={inp} value={visitForm.signedInBy} onChange={e=>setVisitForm(p=>({...p,signedInBy:e.target.value}))}>
                     <option value="">Select staff member...</option>
                     {staff.map(u=><option key={u.id} value={u.name}>{u.name}</option>)}

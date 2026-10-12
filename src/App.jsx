@@ -152,7 +152,9 @@ import { AUTH_MODE, signIn, signOut, meta as authMeta, adminCall, makeTempPasswo
 import { ForcePasswordChange } from "./shared/ForcePasswordChange";
 import { uploadPhotos, PHOTO_BUCKET } from "./lib/photos";
 import { HelpTip } from "./shared/HelpTip";
-import { ZeusLogo, ZeusProtectLogo, ZEUS_LOGO_LIGHT_SRC } from "./shared/Logo";
+import { BrandLogo, BrandSignInLogo } from "./shared/Logo";
+import { useBrand } from "./lib/brand";
+import { isSuperAdmin, certNumber, withCompany } from "./lib/brandCore";
 import { NotificationBell } from "./shared/NotificationBell";
 import { useWindowWidth, MobileCard, MobileCardRow } from "./shared/hooks";
 import { Pill, Avatar, Bar } from "./shared/primitives";
@@ -293,6 +295,7 @@ const INCIDENT_CORE_KEYS = new Set([
 // what is in the database. The demo data now lives in demo/ for the test scripts.
 
 export default function App() {
+  const brand = useBrand();   // company names/logos/colours (lib/brand.js); re-renders when they change
   const [theme, setTheme] = useState("dark"); // a key from THEMES in theme/tokens.js
   const T = getThemeTokens(theme); // active theme tokens
   // darkMode (logo artwork, a few older screens) follows the theme's mode.
@@ -414,7 +417,7 @@ export default function App() {
   const allModules = [
     ...TRAINING_MODULES.map(m => customModules.find(c=>c.id===m.id&&c._override) || m),
     ...customModules.filter(c=>!c._override),
-  ];
+  ].map(withCompany);   // "{company}" in built-in training text → the company's name (branding)
   // allMachineTypes: same override/merge pattern as allModules
   const allMachineTypes = [
     ...MACHINERY_TYPES.map(m => customMachineTypes.find(c=>c.id===m.id&&c._override) || m),
@@ -515,7 +518,7 @@ export default function App() {
   // Light themes: darken the pale dark-theme text colours so admin text stays readable.
   // The phone layout does this itself, because "Follow system" can show a different theme.
   const phoneLayout = isPhone && !!user && !forceDesktop;
-  useEffect(() => { if (!phoneLayout) { applyLightThemeFix(isLightTheme(theme)); applyThemeVars(theme); } }, [theme, phoneLayout]);
+  useEffect(() => { if (!phoneLayout) { applyLightThemeFix(isLightTheme(theme)); applyThemeVars(theme); } }, [theme, phoneLayout, brand]);   // brand: its colours change the default theme
   const routerOn = !!user && (view === "admin" || view === "staff") && !(isPhone && !forceDesktop);
   // Keep the address in step with the page; each page change is a new Back/Forward step.
   // (After Back/Forward the address already matches, so nothing is added.)
@@ -2097,7 +2100,8 @@ export default function App() {
   }
 
   async function dbDeleteUser(userId) {
-    await dbWrite(sb.from("users").delete().eq("id", String(userId)), "user delete", { alertOnError: true });
+    const ok = await dbWrite(sb.from("users").delete().eq("id", String(userId)), "user delete", { alertOnError: true });
+    if (!ok) return false;   // refused (e.g. a super admin's record): leave their sign-in alone too
     if (AUTH_MODE === "supabase") {
       const r = await adminCall("remove", { userId: String(userId) });
       if (!r.ok) notify(`The staff record was removed, but their sign-in account wasn't:\n${r.error}`, { kind: "error" });
@@ -2414,7 +2418,7 @@ export default function App() {
   //  is loaded after sign-in, with the person's token.)
   if (!dbReady && !(AUTH_MODE === "supabase" && view === "login")) return (
     <div style={{minHeight:"100vh",background:Z.bg,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Barlow','Trebuchet MS',system-ui,sans-serif",flexDirection:"column",gap:20}}>
-      <ZeusProtectLogo/>
+      <BrandSignInLogo/>
       <div style={{color:Z.muted,fontSize:14,letterSpacing:1}}>CONNECTING TO DATABASE…</div>
       <div style={{width:200,height:3,background:Z.border,borderRadius:99,overflow:"hidden"}}>
         <div style={{height:"100%",width:"60%",background:`linear-gradient(90deg,${Z.accent},${Z.accentLt})`,borderRadius:99,animation:"slide 1.2s ease-in-out infinite"}}/>
@@ -2698,7 +2702,7 @@ export default function App() {
 
   // Scores the quiz against the module's own pass mark (passMarkOf: default 70%,
   // set per module in Create/Edit Module). The phone player does the same.
-  // A pass creates a certificate id "ZSL-XXXXXXXX" and becomes their result. A fail
+  // A pass creates a certificate id "<prefix>-XXXXXXXX" (prefix: branding) and becomes their result. A fail
   // is logged to quiz_failures only — it never replaces an earlier pass, and it
   // doesn't count as completed.
   function submitQuiz() {
@@ -2707,7 +2711,7 @@ export default function App() {
     const pct=Math.round(score/mod.quiz.length*100);
     const mark = passMarkOf(mod);
     setQsub(true);
-    const certId = pct>=mark ? "ZSL-" + (user.id.toString(36) + mod.id + Date.now().toString(36)).toUpperCase().slice(-8) : null;
+    const certId = pct>=mark ? certNumber((user.id.toString(36) + mod.id + Date.now().toString(36)).toUpperCase().slice(-8)) : null;   // prefix from the branding
     if (pct>=mark) {
       clearProgress(user.id, mod);   // passed: no place to carry on from (lib/moduleProgress.js)
       setShowCelebration(true);
@@ -2767,7 +2771,7 @@ export default function App() {
       <div style={{background:"linear-gradient(160deg,#152370,#0d1f5c)",borderRadius:isMobile?16:24,padding:isMobile?"28px 20px":"48px 44px",width:"100%",maxWidth:440,boxShadow:"0 30px 80px rgba(0,0,0,.6)",border:"1px solid rgba(255,255,255,0.08)",position:"relative",zIndex:1}}>
         {/* Logo */}
         <div style={{marginBottom:32,paddingBottom:24,borderBottom:"1px solid rgba(255,255,255,0.10)"}}>
-          <ZeusProtectLogo/>
+          <BrandSignInLogo/>
         </div>
 
         <div style={{marginBottom:28}}>
@@ -2777,7 +2781,7 @@ export default function App() {
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
           <div>
             <label style={{color:"#94a3b8",fontSize:11,fontWeight:700,letterSpacing:1}}>EMAIL ADDRESS</label>
-            <input value={email} onChange={e=>setEmail(e.target.value)} placeholder="your@zeus.com"
+            <input value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@company.co.uk"
               style={{width:"100%",marginTop:6,padding:"11px 14px",background:"rgba(0,0,0,0.3)",border:"1px solid rgba(255,255,255,0.12)",borderRadius:10,color:"#ffffff",fontSize:14,outline:"none",boxSizing:"border-box",fontFamily:font}}/>
           </div>
           <div>
@@ -3002,7 +3006,7 @@ export default function App() {
 
         {/* Header */}
         <div style={{background:`linear-gradient(90deg,${T.navyDk},${T.navyMd})`,borderBottom:`1px solid ${T.border}`,padding:"12px 24px",display:"flex",alignItems:"center",gap:16}}>
-          <ZeusLogo darkMode={darkMode}/>
+          <BrandLogo darkMode={darkMode}/>
           <div style={{width:1,height:28,background:T.headerBgMd,margin:"0 8px"}}/>
           <button onClick={()=>setMod(null)} style={{background:T.headerBgMd,border:`1px solid ${T.borderMd}`,borderRadius:8,padding:"6px 14px",color:T.muted,cursor:"pointer",fontWeight:700,fontFamily:font,fontSize:12}}>← Back</button>
           <span style={{fontSize:18}}>{mod.icon}</span>
@@ -3022,7 +3026,7 @@ export default function App() {
               <h1 style={{fontSize:32,fontWeight:900,letterSpacing:-1,marginBottom:6}}>{mod.title}</h1>
               <p style={{color:T.muted,fontSize:15,marginBottom:28}}>{mod.category} · {mod.duration} · <span style={{color:mod.level==="Mandatory"?"#f87171":T.accentLt}}>{mod.level}</span> · {totalSlides} slides · {mod.quiz.length} quiz questions</p>
               <div style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:16,padding:28,textAlign:"left",border:`1px solid ${T.border}`}}>
-                <p style={{margin:0,color:T.slate,lineHeight:1.8,fontSize:15}}>Read through each slide carefully, then complete the knowledge check. A score of <strong style={{color:T.green}}>{passMarkOf(mod)}% or above</strong> is required to pass and receive your Zeus certificate.</p>
+                <p style={{margin:0,color:T.slate,lineHeight:1.8,fontSize:15}}>Read through each slide carefully, then complete the knowledge check. A score of <strong style={{color:T.green}}>{passMarkOf(mod)}% or above</strong> is required to pass and receive your certificate.</p>
               </div>
               {(()=>{ const p = getProgress(user.id, mod); if (!p) return null; return (
                 <div style={{marginTop:28,display:"flex",gap:12,justifyContent:"center",flexWrap:"wrap",alignItems:"center"}} data-testid="resume">
@@ -3325,7 +3329,7 @@ export default function App() {
         <ScrollNav bottom={isMobile && stab!=="dashboard" ? 92 : 24} Z={T} font={font}/>
         {/* Nav */}
         <div style={{background:`linear-gradient(90deg,${T.navyDk},${T.navyMd})`,borderBottom:`1px solid ${T.border}`,padding:sTiny?"0 14px":"0 24px",display:"flex",alignItems:"center",position:"relative"}}>
-          <div style={{marginRight:sTiny?10:20,padding:"10px 0",flexShrink:0}}><ZeusLogo darkMode={darkMode}/></div>
+          <div style={{marginRight:sTiny?10:20,padding:"10px 0",flexShrink:0}}><BrandLogo darkMode={darkMode}/></div>
           <div style={{display:"flex",alignItems:"center",gap:sTiny?0:2,flex:1,minWidth:0,overflowX:"auto"}} className="staff-nav-tabs" data-testid="staff-tabs">
             {["dashboard","training","history","documents","incidents","dse",...(isWarehouseWorker(user)?["machinery"]:[]),"actions",...(user.role==="manager"?["team"]:[]),...(user.role!=="admin"&&hasMachineryAccess(user)?["mequip"]:[])].map(t=>(
               <button key={t} onClick={()=>setStab(t)} title={STAFF_TAB_LABEL[t]}
@@ -4367,7 +4371,7 @@ export default function App() {
         {showWelcomeSettings && <WelcomeVideoSettings user={user} onClose={()=>setShowWelcomeSettings(false)} Z={T} font={font}/>}
         {/* Nav */}
         <div style={{background:`linear-gradient(90deg,${T.navyDk},${T.navyMd})`,borderBottom:`1px solid ${T.border}`,padding:isMobile?"0 12px":navTight?"0 16px":"0 28px",display:"flex",alignItems:"center",position:"relative",flexWrap:isMobile?"nowrap":"wrap",rowGap:0}}>
-          <div style={{marginRight:isMobile?8:navTight?14:28,padding:"12px 0",flexShrink:0}}><ZeusLogo darkMode={darkMode}/></div>
+          <div style={{marginRight:isMobile?8:navTight?14:28,padding:"12px 0",flexShrink:0}}><BrandLogo darkMode={darkMode}/></div>
           {!isMobile && !navCompact && <><div style={{width:1,height:28,background:T.headerBgMd,marginRight:8}}/><Pill label="ADMIN" col="navy"/><div style={{width:1,height:20,background:T.headerBgMd,margin:"0 12px"}}/></>}
           {!isMobile && (()=>{
             const TRAINING_TABS=["assign","modules","create","reports"]; const trainingActive=TRAINING_TABS.includes(atab);
@@ -5069,7 +5073,7 @@ export default function App() {
                     </div>
                     <div>
                       <label style={{color:T.muted,fontSize:11,fontWeight:700,letterSpacing:.5,display:"block",marginBottom:6}}>EMAIL ADDRESS *</label>
-                      <input value={newEmail} onChange={e=>setNewEmail(e.target.value)} placeholder="jane@zeus.com"
+                      <input value={newEmail} onChange={e=>setNewEmail(e.target.value)} placeholder="jane@company.co.uk"
                         style={{width:"100%",background:T.overlay,border:`1px solid ${T.borderMd}`,borderRadius:10,padding:"10px 14px",color:T.white,fontSize:13,outline:"none",fontFamily:font,boxSizing:"border-box"}}/>
                     </div>
                     <div>
@@ -5616,7 +5620,7 @@ export default function App() {
           {atab==="modules" && (
             <div>
               <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",flexWrap:"wrap",gap:12,marginBottom:24}}>
-                <h2 style={{fontSize:22,fontWeight:900,letterSpacing:-.5,margin:0}}>Training Library <HelpTip dark={false} text="All available training modules. Built-in modules are provided by Zeus Protect. Custom modules are ones you've created. Modules with a renewal period will show as expired when due for re-completion. Hidden modules are removed from this library and the assignment picker, but staff who already have them stay unaffected."/></h2>
+                <h2 style={{fontSize:22,fontWeight:900,letterSpacing:-.5,margin:0}}>Training Library <HelpTip dark={false} text="All available training modules. Built-in modules come with the portal. Custom modules are ones you've created. Modules with a renewal period will show as expired when due for re-completion. Hidden modules are removed from this library and the assignment picker, but staff who already have them stay unaffected."/></h2>
                 {allModules.some(m=>m._hidden) && (
                   <button onClick={()=>setShowHiddenModules(v=>!v)}
                     style={{background:showHiddenModules?"rgba(37,99,235,0.1)":T.overlay,color:showHiddenModules?T.accentLt:T.muted,border:`1px solid ${showHiddenModules?"rgba(37,99,235,0.25)":T.borderMd}`,borderRadius:10,padding:"8px 16px",cursor:"pointer",fontFamily:font,fontWeight:700,fontSize:12,whiteSpace:"nowrap"}}>
@@ -5941,7 +5945,7 @@ export default function App() {
 
           {atab==="settings" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
-            <LazySiteSettingsTab Z={T} font={font}/>
+            <LazySiteSettingsTab Z={T} font={font} superAdmin={isSuperAdmin(user)}/>
             </React.Suspense>
           )}
 

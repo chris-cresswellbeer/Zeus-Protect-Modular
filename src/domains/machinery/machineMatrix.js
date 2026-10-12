@@ -13,6 +13,7 @@ import { isWarehouseWorker, machineState, compsFor, MACHINE_STATE } from "../../
 import { buildXlsx, downloadBlob, colName } from "../../lib/xlsxWriter";
 
 import { todayISO } from "../../lib/dates";
+import { getBrand } from "../../lib/brandCore";
 export const SHOW_OPTIONS = [
   ["all", "Everyone"],
   ["attention", "Needs attention (expired or expiring)"],
@@ -70,7 +71,7 @@ function cellText(c) {
   return ex ? `${c.st.sym} ${fmt(ex.expiryDate)}` : c.st.sym;
 }
 
-export function exportMachineMatrixXlsx(matrix, { filterText = "", companyName = "Zeus Protect", filename } = {}) {
+export function exportMachineMatrixXlsx(matrix, { filterText = "", companyName = getBrand().product, filename } = {}) {
   const { cols, rows, totals } = matrix;
   const today = todayISO();
   const FIXED = 3;

@@ -1,4 +1,5 @@
 import { staffTraining, PRINT_COLOR } from "./compliance";
+import { brandHtml } from "../../lib/brandCore";
 import { isPassed, scoreText } from "./completion";
 import { getExpiryStatus, todayISO } from "../../lib/dates";
 import { EXT_CERT_TYPES } from "../../data/seedExtCerts";
@@ -154,7 +155,7 @@ async function generateStaffPDF(u, allModules, assigns, comps, docs, docAssignme
       <p style="margin-top:4px;color:#94a3b8">Report generated: ${today}</p>
     </div>
     <div class="header-right">
-      <div style="font-size:11px;color:#94a3b8;margin-bottom:6px">Zeus Protect H&S Portal</div>
+      <div style="font-size:11px;color:#94a3b8;margin-bottom:6px">${brandHtml().product}</div>
       <div class="status-badge">${status} — ${pct}%</div>
       <div style="font-size:11px;color:#94a3b8;margin-top:6px">Last active: ${lastLogin}</div>
     </div>
@@ -189,7 +190,7 @@ async function generateStaffPDF(u, allModules, assigns, comps, docs, docAssignme
   ${files.length ? `<div class="apx-index"><b>Appendices</b> — copies of the certificates on file: ${files.map((f,i)=>`${i+1}. ${f.title}`).join(" · ")}</div>` : ""}
 
   <div class="footer">
-    <span>Zeus Protect Health & Safety Portal · Confidential</span>
+    <span>${brandHtml().foot} · Confidential</span>
     <span>${u.email}</span>
     <span>Generated ${today}</span>
   </div>

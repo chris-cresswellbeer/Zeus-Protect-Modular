@@ -1,6 +1,7 @@
 import React from "react";
 import { E } from "../../lib/emoji";
-import { ZEUS_LOGO_LIGHT_SRC } from "../../shared/Logo";
+import { brandLightLogo } from "../../shared/Logo";
+import { getBrand, brandCompany, brandShort, certNumber } from "../../lib/brandCore";
 
 /**
  * CertificateModal — certificate viewer / print (moved out of App.jsx).
@@ -17,7 +18,7 @@ import { ZEUS_LOGO_LIGHT_SRC } from "../../shared/Logo";
 function CertificateModal({ cert, user, onClose, T, font }) {
   const certRef = React.useRef(null);   // hooks first, before any early return
   if (!cert) return null;
-    const certId = cert.certId || "ZSL-"+Math.random().toString(36).slice(2,8).toUpperCase();
+    const certId = cert.certId || certNumber(Math.random().toString(36).slice(2,8));
     const issueDate = cert.date;
     const moduleIcon = cert.module.icon || "🏅";
 
@@ -74,7 +75,7 @@ function CertificateModal({ cert, user, onClose, T, font }) {
             {/* Watermark */}
             <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none",zIndex:0}}>
               <div style={{fontSize:72,fontWeight:900,color:"rgba(245,158,11,0.04)",letterSpacing:8,textTransform:"uppercase",transform:"rotate(-30deg)",whiteSpace:"nowrap",userSelect:"none"}}>
-                ZEUS PROTECT
+                {getBrand().product}
               </div>
             </div>
 
@@ -86,9 +87,9 @@ function CertificateModal({ cert, user, onClose, T, font }) {
 
               {/* Logo + title row */}
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:24}}>
-                <img src={ZEUS_LOGO_LIGHT_SRC} alt="Zeus" style={{height:44,objectFit:"contain"}}/>
+                {brandLightLogo() ? <img src={brandLightLogo()} alt={brandCompany()} style={{height:44,objectFit:"contain"}}/> : <span style={{fontSize:18,fontWeight:900,color:"#ffffff"}}>{brandCompany()}</span>}
                 <div style={{textAlign:"right"}}>
-                  <div style={{fontSize:9,fontWeight:700,letterSpacing:3,color:"rgba(245,158,11,0.7)",textTransform:"uppercase",marginBottom:2}}>Zeus Protect</div>
+                  <div style={{fontSize:9,fontWeight:700,letterSpacing:3,color:"rgba(245,158,11,0.7)",textTransform:"uppercase",marginBottom:2}}>{getBrand().product}</div>
                   <div style={{fontSize:9,color:"rgba(255,255,255,0.3)",letterSpacing:1}}>Health & Safety Training</div>
                 </div>
               </div>
@@ -141,7 +142,7 @@ function CertificateModal({ cert, user, onClose, T, font }) {
               <div style={{display:"flex",alignItems:"flex-end",justifyContent:"space-between",borderTop:"1px solid rgba(255,255,255,0.08)",paddingTop:20}}>
                 {/* Signature */}
                 <div style={{textAlign:"left"}}>
-                  <div style={{fontFamily:"Georgia,serif",fontSize:22,color:"rgba(255,255,255,0.7)",letterSpacing:1,marginBottom:4,fontStyle:"italic"}}>Zeus Protect</div>
+                  <div style={{fontFamily:"Georgia,serif",fontSize:22,color:"rgba(255,255,255,0.7)",letterSpacing:1,marginBottom:4,fontStyle:"italic"}}>{getBrand().product}</div>
                   <div style={{width:120,height:1,background:"rgba(255,255,255,0.2)",marginBottom:6}}/>
                   <div style={{fontSize:10,color:"rgba(255,255,255,0.35)",letterSpacing:1,textTransform:"uppercase"}}>Authorised Signature</div>
                 </div>
@@ -159,7 +160,7 @@ function CertificateModal({ cert, user, onClose, T, font }) {
                       return <polygon key={i} points={`40,40 ${x1},${y1} ${x2},${y2} ${x3},${y3}`} fill="#f59e0b" opacity="0.9"/>;
                     })}
                     <circle cx="40" cy="40" r="24" fill="#0d1f5c" stroke="#f59e0b" strokeWidth="1.5"/>
-                    <text x="40" y="35" textAnchor="middle" fill="#f59e0b" fontSize="7" fontWeight="700" fontFamily="Barlow,sans-serif" letterSpacing="1">ZEUS</text>
+                    <text x="40" y="35" textAnchor="middle" fill="#f59e0b" fontSize="7" fontWeight="700" fontFamily="Barlow,sans-serif" letterSpacing="1">{brandShort().toUpperCase().slice(0, 9)}</text>
                     <text x="40" y="44" textAnchor="middle" fill="#fbbf24" fontSize="5.5" fontFamily="Barlow,sans-serif" letterSpacing="0.5">PROTECT</text>
                     <text x="40" y="53" textAnchor="middle" fill="rgba(245,158,11,0.6)" fontSize="4.5" fontFamily="Barlow,sans-serif">VERIFIED</text>
                   </svg>

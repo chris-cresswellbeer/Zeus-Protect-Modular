@@ -39,6 +39,7 @@ import { openFile } from "../../lib/fileAccess";
 import { checkMachineFiles } from "../machinery/machineEvidence";
 
 import { localISO, todayISO } from "../../lib/dates";
+import { brandHtml, fileShort } from "../../lib/brandCore";
 // The HSE's RIDDOR notification for an incident (PDF or photo) goes in the private
 // "incident-photos" bucket as riddor_<incident id>_… — a name only admins can open
 // (db_rules.sql can_read_file has no rule for "riddor_", so only admins and the uploader).
@@ -277,7 +278,7 @@ function AdminIncidentTab({ user, incidents, setIncidents, dbDeleteIncident, sta
           autoFilter:`A1:${colName(headers.length - 1)}${rows.length + 1}`, rowHeights:{ 0:30 } },
         { name:"Monthly Summary", cols:[14,6,12,12,18,12,8,8], rows:[head(summaryHeaders), ...summaryRows, totals], freeze:{ row:1 } },
       ]);
-      downloadBlob(blob, `zeus-incident-report-${today}${source === incidents ? "" : "-selected"}.xlsx`);
+      downloadBlob(blob, `${fileShort()}-incident-report-${today}${source === incidents ? "" : "-selected"}.xlsx`);
     } catch (e) {
       notify("The Excel file couldn't be created. Please try again.", { kind:"error" });
     }
@@ -313,7 +314,7 @@ function AdminIncidentTab({ user, incidents, setIncidents, dbDeleteIncident, sta
     }).join("");
 
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
-    <title>Accident Book — Zeus Packaging UK</title>
+    <title>Accident Book — ${brandHtml().company}</title>
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
       body { font-family: Arial, sans-serif; font-size: 12px; color: #1e293b; padding: 24px; }
@@ -336,7 +337,7 @@ function AdminIncidentTab({ user, incidents, setIncidents, dbDeleteIncident, sta
     </style></head><body>
     <div class="header">
       <div class="header-left">
-        <h1>ACCIDENT BOOK — ZEUS PACKAGING UK</h1>
+        <h1>ACCIDENT BOOK — ${brandHtml().company.toUpperCase()}</h1>
         <p>Period: ${abDateFrom} to ${abDateTo} &nbsp;|&nbsp; ${bookIncidents.length} record${bookIncidents.length!==1?"s":""}</p>
       </div>
       <div class="header-right">
@@ -372,7 +373,7 @@ function AdminIncidentTab({ user, incidents, setIncidents, dbDeleteIncident, sta
       ${bookIncidents.filter(i=>i.riddor).map(i=>`${i.date} — ${i.location} (${i.hseReference?`Ref: ${i.hseReference}`:"Awaiting HSE reference"})`).join("; ")}
     </div>` : ""}
     <div class="footer">
-      <span>Zeus Packaging UK &mdash; Accident Book &mdash; Confidential</span>
+      <span>${brandHtml().footer} &mdash; Accident Book &mdash; Confidential</span>
       <span>Printed ${today} by authorised person</span>
     </div>
     <script>window.onload=()=>window.print();</script>

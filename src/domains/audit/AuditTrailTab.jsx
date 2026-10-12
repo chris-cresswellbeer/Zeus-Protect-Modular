@@ -3,6 +3,7 @@ import { HelpTip } from "../../shared/HelpTip";
 import { loadAuditLog, AUDIT_ENTITY_LABELS } from "../../lib/audit";
 
 import { localISO, todayISO } from "../../lib/dates";
+import { fileProduct } from "../../lib/brandCore";
 /**
  * AuditTrailTab — admin view of the audit_log table (lib/audit.js).
  * Filters: record type, person, free text (label / summary / record id), date range.
@@ -121,7 +122,7 @@ function AuditTrailTab({ Z, font, entityIds = null, compact = false }) {
     const blob = new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `zeus-protect-audit-trail-${todayISO()}.csv`;
+    a.download = `${fileProduct()}-audit-trail-${todayISO()}.csv`;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   }

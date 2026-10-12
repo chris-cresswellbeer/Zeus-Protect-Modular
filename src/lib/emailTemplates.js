@@ -1,3 +1,4 @@
+import { getBrand, brandHtml } from "./brandCore";
 /**
  * lib/emailTemplates.js — the look of every reminder email (lib/reminders.js).
  *
@@ -41,7 +42,7 @@ ${banner ? `<div style="background:#fff3cd;border-bottom:1px solid #f0d58a;paddi
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f7"><tr><td align="center" style="padding:20px 10px">
   <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid ${LINE}">
     <tr><td style="background:${NAVY};padding:16px 24px;font-family:${FONT}">
-      <span style="font-size:18px;font-weight:bold;color:#ffffff">Zeus Protect</span>
+      <span style="font-size:18px;font-weight:bold;color:#ffffff">${brandHtml().product}</span>
       <span style="font-size:12px;color:#aab6dd;padding-left:8px">Health &amp; Safety</span></td></tr>
     <tr><td style="padding:22px 24px 26px">
       ${greeting ? `<p style="margin:0 0 10px;font-family:${FONT};font-size:15px;color:#111827">${esc(greeting)}</p>` : ""}
@@ -52,7 +53,7 @@ ${banner ? `<div style="background:#fff3cd;border-bottom:1px solid #f0d58a;paddi
       ${button && button.href ? `<p style="margin:6px 0 0;font-family:${FONT};font-size:11.5px;color:${MUTED}">You'll be asked to sign in first.</p>` : ""}
     </td></tr>
     <tr><td style="background:#f6f8fc;border-top:1px solid ${LINE};padding:14px 24px;font-family:${FONT};font-size:11.5px;line-height:1.5;color:${MUTED}">
-      This is an automatic message from Zeus Protect, the H&amp;S portal. Please don't reply to it: if something looks wrong, speak to the H&amp;S team.
+      This is an automatic message from ${brandHtml().product}, the H&amp;S portal. Please don't reply to it: if something looks wrong, speak to the H&amp;S team.
     </td></tr>
   </table>
 </td></tr></table></body></html>`;
@@ -61,7 +62,7 @@ ${banner ? `<div style="background:#fff3cd;border-bottom:1px solid #f0d58a;paddi
     stats.length ? stats.map(x => `${x.label}: ${x.value}`).join("\n") : "",
     ...sections.map(sec => `${sec.title.toUpperCase()}\n${sec.items.map(it => `${it.flag ? "! " : "- "}${it.text}${it.sub ? `\n    ${it.sub}` : ""}`).join("\n")}`),
     note, button && button.href ? `${button.label}: ${button.href}\n(You'll be asked to sign in first.)` : "",
-    "--\nThis is an automatic message from Zeus Protect, the H&S portal. Please don't reply to it: if something looks wrong, speak to the H&S team."]
+    `--\nThis is an automatic message from ${getBrand().product}, the H&S portal. Please don't reply to it: if something looks wrong, speak to the H&S team.`]
     .filter(Boolean).join("\n\n");
   return { html, text };
 }

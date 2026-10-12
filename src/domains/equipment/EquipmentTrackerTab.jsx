@@ -8,6 +8,7 @@ import { E } from "../../lib/emoji";
 import { EQ_CATEGORIES } from "../../data/seedEquipment";
 
 import { localISO, todayISO } from "../../lib/dates";
+import { fileShort } from "../../lib/brandCore";
 /**
  * EquipmentTrackerTab — admin asset register for work equipment (FLTs, MEWPs,
  * racking, ladders, etc.) supporting PUWER / LOLER record-keeping.
@@ -262,7 +263,7 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPres
         sheet("Maintenance Log", serviceHeaders, serviceRows, [12,36,16,22,14,28,28,10,50]),
         sheet("Defects", defectHeaders, defectRows, [12,36,16,22,10,14,20,10,12,50,40]),
       ]);
-      downloadBlob(blob, `zeus-equipment-register-${today}${all === equipment ? "" : "-selected"}.xlsx`);
+      downloadBlob(blob, `${fileShort()}-equipment-register-${today}${all === equipment ? "" : "-selected"}.xlsx`);
     } catch (e) {
       notify("The Excel file couldn't be created. Please try again.", { kind:"error" });
     }

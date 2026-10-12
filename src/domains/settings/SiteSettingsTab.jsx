@@ -4,12 +4,14 @@ import { useFormGuard } from "../../lib/unsaved";
 import { auditEvent } from "../../lib/audit";
 import { useSiteLists, saveSiteLists, loadSiteLists, SITE_LIST_DEFAULTS } from "../../lib/siteLists";
 import { EmailSettings } from "./EmailSettings";
+import { BrandingCard } from "./BrandingCard";
 
 /**
  * SiteSettingsTab — Documents ▼ → Site Settings (admins).
  * The lists that differ from site to site, kept in the database (lib/siteLists.js):
  * first aid zones, first aid shifts and the hazard report locations; and the
- * email reminder settings (EmailSettings.jsx).
+ * email reminder settings (EmailSettings.jsx); and, for super admins only, the
+ * branding (BrandingCard.jsx).
  */
 const LISTS = [
   { key: "reportLocations", title: "Hazard report locations", help: "The \"Where was it?\" choices when someone makes a quick hazard report, on a phone or computer. They can always type somewhere else.", add: "e.g. Racking Aisle 4" },
@@ -57,7 +59,7 @@ function ListEditor({ list, items, onChange, Z, font }) {
   );
 }
 
-function SiteSettingsTab({ Z, font }) {
+function SiteSettingsTab({ Z, font, superAdmin = false }) {
   const site = useSiteLists();
   const pick = s => ({ reportLocations: [...s.reportLocations], firstAidZones: [...s.firstAidZones], firstAidShifts: [...s.firstAidShifts] });
   const [form, setForm] = useState(() => pick(site));
@@ -92,6 +94,8 @@ function SiteSettingsTab({ Z, font }) {
       {!site.saved && <div role="status" style={{ padding: "10px 14px", borderRadius: 12, background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.35)", fontSize: 13, color: Z.white, marginBottom: 14 }}>
         These are the starting lists. Change them to suit this site and save.
       </div>}
+      {/* Branding: super admins only (super_admin.sql); not shown to anyone else at all */}
+      {superAdmin && <BrandingCard Z={Z} font={font}/>}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))", gap: 14 }}>
         {LISTS.map(l => <ListEditor key={l.key} list={l} items={form[l.key]} onChange={v => setForm(f => ({ ...f, [l.key]: v }))} Z={Z} font={font}/>)}
       </div>

@@ -12,12 +12,14 @@ import { WelcomeReplay } from "../../shared/WelcomeVideo";
 
 import { todayISO } from "../../lib/dates";
 import { getBrand } from "../../lib/brandCore";
+import { t, tNodes, langInfo } from "../../lib/i18n";
+const tr = t;   // in Appearance, `t` is the theme being drawn
 // ─── More ────────────────────────────────────────────────────────────────────
 
 function More({
   user, counts, queue, onRetryQueued, canInstall,
   onOpenDocs, onOpenCerts, onOpenActions, onOpenHistory, onOpenAppearance,
-  onOpenInspections, onOpenPermits,
+  onOpenInspections, onOpenPermits, onOpenLanguage, language = "en",
   onSignOut, onSwitchToDesktop, Z, font,
 }) {
   return (
@@ -31,17 +33,17 @@ function More({
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 17, fontWeight: 800, color: Z.white }}>{user.name}</div>
           <div style={{ fontSize: 12, color: Z.muted }}>
-            {user.jobTitle}{user.manager ? ` · reports to ${user.manager}` : ""}
+            {user.jobTitle}{user.manager ? ` · ${t("reports to {name}", { name: user.manager })}` : ""}
           </div>
         </div>
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 18 }}>
-        <Row Z={Z} font={font} icon="📄" title="H&S documents" onClick={onOpenDocs}
+        <Row Z={Z} font={font} icon="📄" title={t("H&S documents")} onClick={onOpenDocs}
           right={<Chevron Z={Z} badge={counts.unreadDocs} badgeColor={Z.gold} />} />
-        <Row Z={Z} font={font} icon="🎓" title="My certificates" onClick={onOpenCerts}
+        <Row Z={Z} font={font} icon="🎓" title={t("My certificates")} onClick={onOpenCerts}
           right={<Chevron Z={Z} badge={counts.certificates} badgeColor={Z.green} />} />
-        <Row Z={Z} font={font} icon="✅" title="My corrective actions" onClick={onOpenActions}
+        <Row Z={Z} font={font} icon="✅" title={t("My corrective actions")} onClick={onOpenActions}
           right={<Chevron Z={Z} badge={counts.openActions} badgeColor={Z.gold} />} />
         {(onOpenInspections || onOpenPermits) && <SectionLabel Z={Z}>Supervisors</SectionLabel>}
         {onOpenInspections && (
@@ -52,16 +54,20 @@ function More({
           <Row Z={Z} font={font} icon="🔥" title="Permits to work" onClick={onOpenPermits}
             right={<Chevron Z={Z} badge={counts.permitsToSign} badgeColor="#ef4444" />} />
         )}
-        <Row Z={Z} font={font} icon="📋" title="Training history" onClick={onOpenHistory}
+        <Row Z={Z} font={font} icon="📋" title={t("Training history")} onClick={onOpenHistory}
           right={<Chevron Z={Z} />} />
-        <Row Z={Z} font={font} icon="⚙️" title="Appearance & theme" onClick={onOpenAppearance}
+        {onOpenLanguage && (
+          <Row Z={Z} font={font} icon="🌐" title={t("Language")} onClick={onOpenLanguage}
+            right={<Chevron Z={Z} chip={<span data-testid="more-language" style={{ fontSize: 12, fontWeight: 700, color: Z.muted }}>{langInfo(language).native}</span>} />} />
+        )}
+        <Row Z={Z} font={font} icon="⚙️" title={t("Appearance & theme")} onClick={onOpenAppearance}
           right={<Chevron Z={Z} />} />
       </div>
 
       {canInstall && !isStandalone() && (
         <div style={{ marginBottom: 18 }}>
           <PrimaryButton onClick={promptInstall} Z={Z} font={font}>
-            Add {getBrand().product} to your home screen
+            {t("Add {product} to your home screen", { product: getBrand().product })}
           </PrimaryButton>
         </div>
       )}
@@ -70,9 +76,9 @@ function More({
         background: Z.overlaySm, border: `1px solid ${Z.border}`,
         borderRadius: 14, padding: 14, marginBottom: 18,
       }}>
-        <SectionLabel Z={Z}>Offline queue</SectionLabel>
+        <SectionLabel Z={Z}>{t("Offline queue")}</SectionLabel>
         {queue.length === 0 && (
-          <div style={{ fontSize: 12.5, color: Z.muted }}>Everything is synced.</div>
+          <div style={{ fontSize: 12.5, color: Z.muted }}>{t("Everything is synced.")}</div>
         )}
         {queue.map((item) => { const stuck = isStuck(item); return (
           <div key={item.id} data-testid="queue-item" style={{
@@ -80,19 +86,19 @@ function More({
             fontSize: 12.5, color: Z.slate, flexWrap: "wrap",
           }}>
             <span>{stuck ? "⚠️" : "⏳"}</span>
-            <span style={{ flex: 1, minWidth: 0 }}>{item.label}</span>
+            <span style={{ flex: 1, minWidth: 0 }}>{t(item.label)}</span>
             {stuck ? (
               <>
-                <span style={{ color: Z.red, fontWeight: 700 }}>Couldn&rsquo;t be sent</span>
+                <span style={{ color: Z.red, fontWeight: 700 }}>{t("Couldn\u2019t be sent")}</span>
                 {onRetryQueued && <button type="button" onClick={() => onRetryQueued(item.id)}
-                  style={{ background: Z.overlay, border: `1px solid ${Z.borderMd}`, borderRadius: 8, color: Z.white, fontWeight: 700, fontSize: 12, padding: "5px 10px", fontFamily: font, cursor: "pointer" }}>Try again</button>}
+                  style={{ background: Z.overlay, border: `1px solid ${Z.borderMd}`, borderRadius: 8, color: Z.white, fontWeight: 700, fontSize: 12, padding: "5px 10px", fontFamily: font, cursor: "pointer" }}>{t("Try again")}</button>}
               </>
-            ) : <span style={{ color: Z.gold, fontWeight: 700 }}>Waiting</span>}
+            ) : <span style={{ color: Z.gold, fontWeight: 700 }}>{t("Waiting")}</span>}
           </div>
         ); })}
         {queue.some(isStuck) && (
           <div style={{ fontSize: 11.5, color: Z.muted, marginTop: 6, lineHeight: 1.45 }}>
-            Something couldn&rsquo;t be sent after many tries. Tap <b>Try again</b>, and if it still won&rsquo;t send, tell your H&amp;S team what it was.
+            {tNodes("Something couldn\u2019t be sent after many tries. Tap {btn}, and if it still won\u2019t send, tell your H&S team what it was.", { btn: <b>{t("Try again")}</b> })}
           </div>
         )}
       </div>
@@ -109,7 +115,7 @@ function More({
             fontSize: 13.5, fontWeight: 700, fontFamily: font, cursor: "pointer",
           }}
         >
-          Use the full portal instead
+          {t("Use the full portal instead")}
         </button>
       )}
 
@@ -120,7 +126,7 @@ function More({
           color: Z.muted, fontSize: 13, fontFamily: font, cursor: "pointer",
         }}
       >
-        Sign out
+        {t("Sign out")}
       </button>
     </Screen>
   );
@@ -155,18 +161,18 @@ function Certificates({ certificates, holder, Z, font }) {
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 15.5, fontWeight: 800, color: Z.white }}>
-            {valid.length} certificate{valid.length !== 1 ? "s" : ""}, all yours
+            {valid.length === 1 ? t("1 certificate, all yours") : t("{n} certificates, all yours", { n: valid.length })}
           </div>
           <div style={{ fontSize: 12, color: Z.muted, marginTop: 2, lineHeight: 1.4 }}>
-            Tap any one to show it full screen to an auditor.
+            {t("Tap any one to show it full screen to an auditor.")}
           </div>
         </div>
       </div>
 
-      {valid.length > 0 && <SectionLabel Z={Z}>In date</SectionLabel>}
+      {valid.length > 0 && <SectionLabel Z={Z}>{t("In date")}</SectionLabel>}
       <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
         {valid.map((c) => (
-          <button type="button" key={c.certId || c.moduleId} onClick={(e) => { lastBtn.current = e.currentTarget; setShown(c); }} aria-label={`Show ${c.title} certificate full screen`} style={{
+          <button type="button" key={c.certId || c.moduleId} onClick={(e) => { lastBtn.current = e.currentTarget; setShown(c); }} aria-label={t("Show {title} certificate full screen", { title: c.title })} style={{
             background: "linear-gradient(160deg,#0d1f5c,#091548)",
             border: "1px solid rgba(245,158,11,0.35)", borderRadius: 16, width: "100%", textAlign: "left", cursor: "pointer", fontFamily: font,
             padding: 15, display: "flex", alignItems: "center", gap: 13, minHeight: 64,
@@ -175,17 +181,17 @@ function Certificates({ certificates, holder, Z, font }) {
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 14, fontWeight: 800, color: "#ffffff" }}>{c.title}</div>
               <div style={{ fontSize: 11, color: "#cbd5e1", marginTop: 2 }}>
-                {c.certId} · {c.score}%{c.validUntil ? ` · valid to ${c.validUntil}` : ""}
+                {c.certId} · {c.score}%{c.validUntil ? ` · ${t("valid to {date}", { date: c.validUntil })}` : ""}
               </div>
             </div>
-            <span style={{ fontSize: 13, fontWeight: 800, color: Z.gold, whiteSpace: "nowrap" }}>Show ›</span>
+            <span style={{ fontSize: 13, fontWeight: 800, color: Z.gold, whiteSpace: "nowrap" }}>{t("Show")} ›</span>
           </button>
         ))}
       </div>
 
       {lapsed.length > 0 && (
         <>
-          <SectionLabel Z={Z}>Lapsed</SectionLabel>
+          <SectionLabel Z={Z}>{t("Lapsed")}</SectionLabel>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {lapsed.map((c) => (
               <div key={c.certId || c.moduleId} style={{
@@ -197,7 +203,7 @@ function Certificates({ certificates, holder, Z, font }) {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 14, fontWeight: 800, color: Z.white }}>{c.title}</div>
                   <div style={{ fontSize: 11, color: "#f87171", marginTop: 2 }}>
-                    Expired {c.expiredOn} · retake to reissue
+                    {t("Expired {date} · retake to reissue", { date: c.expiredOn })}
                   </div>
                 </div>
               </div>
@@ -208,7 +214,7 @@ function Certificates({ certificates, holder, Z, font }) {
 
       {certificates.length === 0 && (
         <div style={{ textAlign: "center", padding: 48, color: Z.muted, fontSize: 14 }}>
-          No certificates yet — finish a module and one appears here.
+          {t("No certificates yet — finish a module and one appears here.")}
         </div>
       )}
       {shown && (
@@ -245,7 +251,7 @@ function CorrectiveActions({ open, closed, onComplete, onAddProof, Z, font }) {
   return (
     <Screen Z={Z}>
       <SectionLabel Z={Z} color={open.length ? Z.gold : Z.green}>
-        Open · {open.length}
+        {t("Open")} · {open.length}
       </SectionLabel>
       <div style={{ display: "flex", flexDirection: "column", gap: 11, marginBottom: 20 }}>
         {open.map((a) => {
@@ -259,7 +265,7 @@ function CorrectiveActions({ open, closed, onComplete, onAddProof, Z, font }) {
             }}>
               <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 12, flexWrap: "wrap" }}>
                 <StatusChip
-                  label={overdue ? `${Math.abs(days)} days overdue` : days != null ? `Due in ${days} days` : "No due date"}
+                  label={overdue ? t("{n} days overdue", { n: Math.abs(days) }) : days != null ? t("Due in {n} days", { n: days }) : t("No due date")}
                   color={overdue ? "#ef4444" : "#f59e0b"}
                 />
                 {a.ref && <StatusChip label={a.ref} color="#94a3b8" />}
@@ -275,7 +281,7 @@ function CorrectiveActions({ open, closed, onComplete, onAddProof, Z, font }) {
                   tone="green" onClick={() => onComplete(a)} Z={Z} font={font}
                   style={{ flex: 1, minHeight: 50, padding: 14, fontSize: 13.5, borderRadius: 12 }}
                 >
-                  ✓ Mark done
+                  ✓ {t("Mark done")}
                 </PrimaryButton>
                 <button
                   onClick={() => onAddProof(a)}
@@ -285,7 +291,7 @@ function CorrectiveActions({ open, closed, onComplete, onAddProof, Z, font }) {
                     fontSize: 13.5, fontFamily: font, cursor: "pointer",
                   }}
                 >
-                  📷 Add proof
+                  📷 {t("Add proof")}
                 </button>
               </div>
             </div>
@@ -293,20 +299,20 @@ function CorrectiveActions({ open, closed, onComplete, onAddProof, Z, font }) {
         })}
         {open.length === 0 && (
           <div style={{ fontSize: 13.5, color: Z.muted, padding: "8px 0" }}>
-            Nothing assigned to you right now.
+            {t("Nothing assigned to you right now.")}
           </div>
         )}
       </div>
 
       {closed.length > 0 && (
         <>
-          <SectionLabel Z={Z}>Closed</SectionLabel>
+          <SectionLabel Z={Z}>{t("Closed")}</SectionLabel>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {closed.map((a) => (
               <Row
                 key={a.id} Z={Z} font={font} icon={<span style={{ color: Z.green }}>✓</span>}
                 title={a.title}
-                sub={`Closed ${a.closedOn}${a.verifiedBy ? ` · verified by ${a.verifiedBy}` : ""}`}
+                sub={`${t("Closed {date}", { date: a.closedOn })}${a.verifiedBy ? ` · ${t("verified by {name}", { name: a.verifiedBy })}` : ""}`}
               />
             ))}
           </div>
@@ -329,9 +335,9 @@ function TrainingHistory({ entries, stats, Z, font }) {
   return (
     <Screen Z={Z}>
       <div style={{ display: "flex", gap: 7, marginBottom: 18 }}>
-        <HistStat value={stats.passed} label="Modules passed" color="#10b981" Z={Z} />
-        <HistStat value={`${stats.average}%`} label="Average score" color={Z.accentLt} Z={Z} />
-        <HistStat value={stats.retakes} label="Retakes" color="#f59e0b" Z={Z} />
+        <HistStat value={stats.passed} label={t("Modules passed")} color="#10b981" Z={Z} />
+        <HistStat value={`${stats.average}%`} label={t("Average score")} color={Z.accentLt} Z={Z} />
+        <HistStat value={stats.retakes} label={t("Retakes")} color="#f59e0b" Z={Z} />
       </div>
 
       {years.map((year) => (
@@ -348,7 +354,7 @@ function TrainingHistory({ entries, stats, Z, font }) {
                 <div style={{ fontSize: 11, color: Z.muted, fontWeight: 700, marginBottom: 2 }}>{e.date}</div>
                 <div style={{ fontSize: 13.5, fontWeight: 700, color: Z.white }}>{e.title}</div>
                 <div style={{ fontSize: 11.5, color: e.lapsed ? "#f59e0b" : "#10b981", marginTop: 1 }}>
-                  {e.outcome}
+                  {t(e.outcome)}
                 </div>
               </div>
             ))}
@@ -358,7 +364,7 @@ function TrainingHistory({ entries, stats, Z, font }) {
 
       {entries.length === 0 && (
         <div style={{ textAlign: "center", padding: 48, color: Z.muted, fontSize: 14 }}>
-          Nothing here yet.
+          {t("Nothing here yet.")}
         </div>
       )}
     </Screen>
@@ -377,7 +383,7 @@ function Appearance({
 }) {
   return (
     <Screen Z={Z}>
-      <SectionLabel Z={Z}>Theme</SectionLabel>
+      <SectionLabel Z={Z}>{t("Theme")}</SectionLabel>
       <div style={{ display: "flex", flexDirection: "column", gap: 9, marginBottom: 22 }}>
         <button
           onClick={onFollowSystem}
@@ -393,9 +399,9 @@ function Appearance({
             <span style={{ width: 14, height: 28, borderRadius: "0 4px 4px 0", background: "#e8edf7" }} />
           </div>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 14.5, fontWeight: 800, color: Z.white }}>Follow system</div>
+            <div style={{ fontSize: 14.5, fontWeight: 800, color: Z.white }}>{t("Follow system")}</div>
             <div style={{ fontSize: 11.5, color: followSystem ? Z.accentLt : Z.muted, marginTop: 1 }}>
-              Matches your phone's light or dark setting
+              {t("Matches your phone's light or dark setting")}
             </div>
           </div>
           {followSystem && <span style={{ color: Z.accentLt, fontSize: 17 }}>✓</span>}
@@ -404,7 +410,7 @@ function Appearance({
         {["light", "dark"].map((mode) => (
           <React.Fragment key={mode}>
           <div style={{ fontSize: 12, fontWeight: 800, color: Z.muted, margin: "8px 2px 0" }}>
-            {mode === "light" ? "Light" : "Dark"}
+            {mode === "light" ? t("Light") : t("Dark")}
           </div>
         {THEMES.filter((t) => t.mode === mode).map((t) => {
           const on = !followSystem && theme === t.key;
@@ -429,8 +435,8 @@ function Appearance({
                 ))}
               </div>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 14.5, fontWeight: on ? 800 : 700, color: Z.white }}>{t.label}</div>
-                <div style={{ fontSize: 11.5, color: Z.muted, marginTop: 1 }}>{t.desc}</div>
+                <div style={{ fontSize: 14.5, fontWeight: on ? 800 : 700, color: Z.white }}>{tr(t.label)}</div>
+                <div style={{ fontSize: 11.5, color: Z.muted, marginTop: 1 }}>{tr(t.desc)}</div>
               </div>
               {on && <span style={{ color: Z.accentLt, fontSize: 17 }}>✓</span>}
             </button>
@@ -440,15 +446,15 @@ function Appearance({
         ))}
       </div>
 
-      <SectionLabel Z={Z}>Reading</SectionLabel>
+      <SectionLabel Z={Z}>{t("Reading")}</SectionLabel>
       <div style={{
         background: Z.overlay, border: `1px solid ${Z.borderMd}`,
         borderRadius: 15, padding: 16, marginBottom: 22,
       }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-          <span style={{ fontSize: 14, fontWeight: 700, color: Z.white }}>Text size</span>
+          <span style={{ fontSize: 14, fontWeight: 700, color: Z.white }}>{t("Text size")}</span>
           <span style={{ fontSize: 12.5, color: Z.muted, fontWeight: 700 }}>
-            {textScale <= 0.95 ? "Small" : textScale >= 1.15 ? "Large" : "Default"}
+            {textScale <= 0.95 ? t("Small") : textScale >= 1.15 ? t("Large") : t("Default")}
           </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -462,21 +468,21 @@ function Appearance({
         </div>
       </div>
 
-      <SectionLabel Z={Z}>Sync &amp; storage</SectionLabel>
+      <SectionLabel Z={Z}>{t("Sync & storage")}</SectionLabel>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <Toggle
-          label="Download over mobile data"
+          label={t("Download over mobile data")}
           on={prefs.mobileData}
           onChange={() => onPrefChange("mobileData", !prefs.mobileData)}
           Z={Z}
         />
         <Toggle
-          label="Keep modules offline"
+          label={t("Keep modules offline")}
           on={prefs.keepOffline}
           onChange={() => onPrefChange("keepOffline", !prefs.keepOffline)}
           Z={Z}
         />
-        <Row Z={Z} font={font} title="Storage used"
+        <Row Z={Z} font={font} title={t("Storage used")}
           right={<span style={{ fontSize: 12.5, color: Z.muted, fontWeight: 700 }}>{storageUsed}</span>} />
       </div>
     </Screen>

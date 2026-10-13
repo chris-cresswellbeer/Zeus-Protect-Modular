@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { notify, ask } from "../../shared/Feedback";
 import { E } from "../../lib/emoji";
 import { cleanBundle, bundleProgress } from "./bundles";
+import { t } from "../../lib/i18n";
 
 /**
  * DocBundles — the "Document bundles" view of the admin Documents tab.
@@ -348,7 +349,7 @@ function MyBundles({ bundles, userId, docs, acks, Z, font, compact }) {
                 <div style={{ fontWeight: 800, fontSize: 14, color: Z.white }}>{b.name}</div>
                 {b.description && <div style={{ fontSize: 12, color: Z.muted, marginTop: 1 }}>{b.description}</div>}
               </div>
-              <span style={{ fontSize: 12, fontWeight: 800, color: p.done ? Z.green : Z.gold || "#f59e0b", whiteSpace: "nowrap" }}>{p.done ? "All read ✓" : `${p.read} of ${p.total} read`}</span>
+              <span style={{ fontSize: 12, fontWeight: 800, color: p.done ? Z.green : Z.gold || "#f59e0b", whiteSpace: "nowrap" }}>{p.done ? `${t("All read")} ✓` : t("{n} of {of} read", { n: p.read, of: p.total })}</span>
             </div>
             <div style={{ height: 6, borderRadius: 4, background: Z.overlay, marginTop: 9, overflow: "hidden" }}>
               <div style={{ width: `${pct}%`, height: "100%", background: p.done ? Z.green : Z.accent || "#2563eb" }} />

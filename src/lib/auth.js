@@ -30,6 +30,7 @@ const ENV = (typeof import.meta !== "undefined" && import.meta.env) || {};
 const AUTH_MODE = ENV.VITE_AUTH_MODE === "supabase" ? "supabase" : "legacy";
 const ADMIN_FN = "/.netlify/functions/zp-admin";
 const EMAIL_FN = "/.netlify/functions/zp-email";   // email reminders (netlify/functions/zp-email.mjs)
+const TRANSLATE_FN = "/.netlify/functions/zp-translate";   // module translation (netlify/functions/zp-translate.mjs)
 
 let session = null;          // { access_token, refresh_token, expires_at (ms), user }
 let refreshTimer = null;
@@ -121,6 +122,9 @@ async function adminCall(action, payload = {}) { return serverCall(ADMIN_FN, "ac
 /** Email reminders: status, preview, test, sendNow (administrators only). Same reply shape as adminCall. */
 async function emailCall(action, payload = {}) { return serverCall(EMAIL_FN, "email service", action, payload); }
 
+/** Training translations: status, translate { target, items } (administrators only). */
+async function translateCall(action, payload = {}) { return serverCall(TRANSLATE_FN, "translation service", action, payload); }
+
 async function serverCall(fn, label, action, payload) {
   if (!session) return { ok: false, error: "You're not signed in." };
   let res;
@@ -143,4 +147,4 @@ function makeTempPassword() {
   return `${pick(4)}-${pick(4)}-${pick(4)}`;
 }
 
-export { AUTH_MODE, signIn, signOut, checkPassword, changeOwnPassword, currentAuthUser, meta, adminCall, emailCall, makeTempPassword };
+export { AUTH_MODE, signIn, signOut, checkPassword, changeOwnPassword, currentAuthUser, meta, adminCall, emailCall, translateCall, makeTempPassword };

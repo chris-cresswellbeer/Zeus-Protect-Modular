@@ -8,6 +8,7 @@ import React from "react";
 import { useSiteLists } from "../../lib/siteLists";
 import { Screen, SectionLabel, PrimaryButton } from "../ui";
 import { compressToDataUrl } from "../../lib/photos";
+import { t, langInfo } from "../../lib/i18n";
 
 import { todayISO } from "../../lib/dates";
 const URGENCY_OPTIONS = [
@@ -22,7 +23,7 @@ const URGENCY_OPTIONS = [
 // (changes the confirmation wording), onSubmit(record), onDone, Z, font.
 // Photos are compressed on the phone (lib/photos.js) and uploaded when the incident is
 // saved (App.jsx dbSaveIncident → uploadPhotos).
-function ReportHazard({ user, managerName, suggestedLocation, online, onSubmit, onDone, Z, font }) {
+function ReportHazard({ user, managerName, suggestedLocation, online, onSubmit, onDone, language = "en", Z, font }) {
   const siteLists = useSiteLists();                 // "Where was it?" choices: Site Settings
   const [step, setStep] = React.useState(1);
   const [what, setWhat] = React.useState("");
@@ -48,10 +49,10 @@ function ReportHazard({ user, managerName, suggestedLocation, online, onSubmit, 
         const good = urls.filter(Boolean);
         if (good.length) setPhotos((p) => [...p, ...good]);
         if (good.length < files.length) {
-          setPhotoError("Some photos couldn't be read. Try taking them again.");
+          setPhotoError(t("Some photos couldn't be read. Try taking them again."));
         }
       })
-      .catch(() => setPhotoError("Couldn't read that photo. Try again."))
+      .catch(() => setPhotoError(t("Couldn't read that photo. Try again.")))
       .finally(() => setPhotoBusy(false));
   }
 
@@ -98,17 +99,16 @@ function ReportHazard({ user, managerName, suggestedLocation, online, onSubmit, 
       {step === 1 && (
         <>
           <h2 style={{ fontSize: 23, fontWeight: 900, letterSpacing: -0.5, margin: "0 0 5px", color: Z.white }}>
-            What did you see?
+            {t("What did you see?")}
           </h2>
           <p style={{ color: Z.muted, fontSize: 13, margin: "0 0 18px", lineHeight: 1.5 }}>
-            A sentence is plenty. Thanks for flagging it — this is exactly how we stop
-            someone getting hurt.
+            {t("A sentence is plenty. Thanks for flagging it — this is exactly how we stop someone getting hurt.")}
           </p>
           <textarea
             value={what}
             onChange={(e) => setWhat(e.target.value)}
             rows={4}
-            placeholder="Describe the hazard or unsafe condition briefly…"
+            placeholder={t("Describe the hazard or unsafe condition briefly…")}
             style={{
               width: "100%", boxSizing: "border-box", background: Z.overlay,
               border: `1px solid ${Z.borderMd}`, borderRadius: 14, padding: 14,
@@ -117,7 +117,7 @@ function ReportHazard({ user, managerName, suggestedLocation, online, onSubmit, 
             }}
           />
           <div style={{ display: "flex", gap: 9, marginBottom: 18 }}>
-            <VoiceButton onResult={(t) => setWhat((w) => (w ? w + " " : "") + t)} Z={Z} font={font} />
+            <VoiceButton lang={language} onResult={(txt) => setWhat((w) => (w ? w + " " : "") + txt)} Z={Z} font={font} />
             <button
               onClick={() => fileRef.current && fileRef.current.click()}
               disabled={photoBusy}
@@ -128,7 +128,7 @@ function ReportHazard({ user, managerName, suggestedLocation, online, onSubmit, 
                 opacity: photoBusy ? 0.6 : 1,
               }}
             >
-              {photoBusy ? "Preparing…" : "📷 Add photo"}
+              {photoBusy ? t("Preparing…") : `📷 ${t("Add photo")}`}
             </button>
             <input
               ref={fileRef} type="file" accept="image/*"
@@ -154,7 +154,7 @@ function ReportHazard({ user, managerName, suggestedLocation, online, onSubmit, 
                   />
                   <button
                     onClick={() => setPhotos((p) => p.filter((_, j) => j !== i))}
-                    aria-label="Remove photo"
+                    aria-label={t("Remove photo")}
                     style={{
                       position: "absolute", top: -6, right: -6, width: 24, height: 24,
                       borderRadius: "50%", background: Z.navy, border: `1px solid ${Z.borderMd}`,
@@ -168,7 +168,7 @@ function ReportHazard({ user, managerName, suggestedLocation, online, onSubmit, 
             </div>
           )}
           <PrimaryButton onClick={() => setStep(2)} disabled={!canAdvance} Z={Z} font={font}>
-            Next — where was it?
+            {t("Next — where was it?")}
           </PrimaryButton>
         </>
       )}
@@ -176,10 +176,10 @@ function ReportHazard({ user, managerName, suggestedLocation, online, onSubmit, 
       {step === 2 && (
         <>
           <h2 style={{ fontSize: 23, fontWeight: 900, letterSpacing: -0.5, margin: "0 0 5px", color: Z.white }}>
-            Where was it?
+            {t("Where was it?")}
           </h2>
           <p style={{ color: Z.muted, fontSize: 13, margin: "0 0 16px" }}>
-            {suggestedLocation ? "We've guessed from your last sign-in. Tap to change." : "Pick the closest match."}
+            {suggestedLocation ? t("We've guessed from your last sign-in. Tap to change.") : t("Pick the closest match.")}
           </p>
           <div style={{ display: "flex", flexDirection: "column", gap: 9, marginBottom: 18 }}>
             {siteLists.reportLocations.map((loc) => {
@@ -199,10 +199,10 @@ function ReportHazard({ user, managerName, suggestedLocation, online, onSubmit, 
                   <span style={{ fontSize: 21 }}>{loc === "Other" ? "✎" : "📍"}</span>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 14.5, fontWeight: on ? 800 : 600, color: Z.white }}>
-                      {loc === "Other" ? "Somewhere else…" : loc}
+                      {loc === "Other" ? t("Somewhere else…") : loc}
                     </div>
                     {suggested && (
-                      <div style={{ fontSize: 11.5, color: "#a5b4fc", marginTop: 1 }}>Detected from last sign-in</div>
+                      <div style={{ fontSize: 11.5, color: "#a5b4fc", marginTop: 1 }}>{t("Detected from last sign-in")}</div>
                     )}
                   </div>
                   {on && <span style={{ color: Z.accentLt, fontSize: 17 }}>✓</span>}
@@ -214,7 +214,7 @@ function ReportHazard({ user, managerName, suggestedLocation, online, onSubmit, 
             <input
               value={whereOther}
               onChange={(e) => setWhereOther(e.target.value)}
-              placeholder="Describe the location…"
+              placeholder={t("Describe the location…")}
               style={{
                 width: "100%", boxSizing: "border-box", background: Z.overlay,
                 border: `1px solid ${Z.borderMd}`, borderRadius: 14, padding: 15,
@@ -223,7 +223,7 @@ function ReportHazard({ user, managerName, suggestedLocation, online, onSubmit, 
             />
           )}
           <PrimaryButton onClick={() => setStep(3)} disabled={!canAdvance} Z={Z} font={font}>
-            Next — how urgent?
+            {t("Next — how urgent?")}
           </PrimaryButton>
         </>
       )}
@@ -231,10 +231,10 @@ function ReportHazard({ user, managerName, suggestedLocation, online, onSubmit, 
       {step === 3 && (
         <>
           <h2 style={{ fontSize: 23, fontWeight: 900, letterSpacing: -0.5, margin: "0 0 5px", color: Z.white }}>
-            How urgent is it?
+            {t("How urgent is it?")}
           </h2>
           <p style={{ color: Z.muted, fontSize: 13, margin: "0 0 16px" }}>
-            Your call — you&rsquo;re the one stood there.
+            {t("Your call — you\u2019re the one stood there.")}
           </p>
           <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
             {URGENCY_OPTIONS.map((opt) => {
@@ -253,9 +253,9 @@ function ReportHazard({ user, managerName, suggestedLocation, online, onSubmit, 
                   <span style={{ fontSize: 24, flexShrink: 0 }}>{opt.icon}</span>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: on ? 800 : 700, fontSize: 15, color: on ? opt.color : Z.white }}>
-                      {opt.label}
+                      {t(opt.label)}
                     </div>
-                    <div style={{ fontSize: 12, color: Z.muted, marginTop: 1 }}>{opt.desc}</div>
+                    <div style={{ fontSize: 12, color: Z.muted, marginTop: 1 }}>{t(opt.desc)}</div>
                   </div>
                   {on && <span style={{ color: opt.color, fontSize: 17 }}>✓</span>}
                 </button>
@@ -263,7 +263,7 @@ function ReportHazard({ user, managerName, suggestedLocation, online, onSubmit, 
             })}
           </div>
           <PrimaryButton tone="gold" onClick={submit} disabled={!canAdvance} Z={Z} font={font}>
-            Send hazard report
+            {t("Send hazard report")}
           </PrimaryButton>
         </>
       )}
@@ -278,12 +278,12 @@ function ReportHazard({ user, managerName, suggestedLocation, online, onSubmit, 
             ✓
           </div>
           <h2 style={{ fontSize: 24, fontWeight: 900, color: Z.white, margin: "0 0 8px", letterSpacing: -0.5 }}>
-            Thank you, {(user.name || "").split(" ")[0]}
+            {t("Thank you, {name}", { name: (user.name || "").split(" ")[0] })}
           </h2>
           <p style={{ color: Z.muted, fontSize: 13.5, lineHeight: 1.6, margin: "0 0 20px" }}>
-            You&rsquo;ve done the important bit. {online
-              ? `It's logged in the portal for ${managerName || "your H&S manager"} to review.`
-              : `It's stored on your phone and will reach the portal as soon as you have signal.`}
+            {t("You\u2019ve done the important bit.")} {online
+              ? (managerName ? t("It's logged in the portal for {name} to review.", { name: managerName }) : t("It's logged in the portal for your H&S manager to review."))
+              : t("It's stored on your phone and will reach the portal as soon as you have signal.")}
           </p>
           {/* No alert, text or email is sent for any report — so for STOP WORK,
               tell the person to escalate in person rather than implying someone knows. */}
@@ -293,35 +293,35 @@ function ReportHazard({ user, managerName, suggestedLocation, online, onSubmit, 
             padding: "11px 14px", marginBottom: 12, fontSize: 12.5, color: Z.slate, textAlign: "left", lineHeight: 1.5,
           }}>
             {urgency === "high"
-              ? <><b style={{ color: Z.red }}>STOP WORK — tell someone now.</b> The H&amp;S team may be emailed about it too, but don&rsquo;t wait for that. Make the area safe if you can do so without risk, and tell your supervisor or manager in person straight away.</>
-              : <>This report doesn&rsquo;t send an alarm or a text. If it needs sorting quickly, tell your supervisor too.</>}
+              ? <><b style={{ color: Z.red }}>{t("STOP WORK — tell someone now.")}</b> {t("The H&S team may be emailed about it too, but don\u2019t wait for that. Make the area safe if you can do so without risk, and tell your supervisor or manager in person straight away.")}</>
+              : <>{t("This report doesn\u2019t send an alarm or a text. If it needs sorting quickly, tell your supervisor too.")}</>}
           </div>
           <div style={{
             background: `${Z.amber}14`, border: `1px solid ${Z.amber}55`, borderRadius: 14,
             padding: "11px 14px", marginBottom: 18, fontSize: 12.5, color: Z.slate, textAlign: "left", lineHeight: 1.5,
           }}>
-            <b style={{ color: Z.amber }}>Next step:</b> finish the full incident report on a computer by the end of tomorrow. It stays on your Today screen until it&rsquo;s done.
+            <b style={{ color: Z.amber }}>{t("Next step:")}</b> {t("finish the full incident report on a computer by the end of tomorrow. It stays on your Today screen until it\u2019s done.")}
           </div>
           <div style={{
             background: Z.overlay, border: `1px solid ${Z.borderMd}`, borderRadius: 15,
             padding: 15, textAlign: "left", marginBottom: 20,
           }}>
-            <SummaryRow label="Reference" value={reference} Z={Z} />
-            <SummaryRow label="Location" value={where === "Other" ? whereOther : where} Z={Z} />
+            <SummaryRow label={t("Reference")} value={reference} Z={Z} />
+            <SummaryRow label={t("Location")} value={where === "Other" ? whereOther : where} Z={Z} />
             <SummaryRow
-              label="Urgency"
-              value={(URGENCY_OPTIONS.find((o) => o.id === urgency) || {}).label}
+              label={t("Urgency")}
+              value={t((URGENCY_OPTIONS.find((o) => o.id === urgency) || {}).label)}
               color={(URGENCY_OPTIONS.find((o) => o.id === urgency) || {}).color}
               Z={Z}
             />
             <SummaryRow
-              label="Status"
-              value={online ? "✓ Sent" : "⏳ Queued to send"}
+              label={t("Status")}
+              value={online ? `✓ ${t("Sent")}` : `⏳ ${t("Queued to send")}`}
               color={online ? Z.green : Z.gold}
               Z={Z}
             />
           </div>
-          <PrimaryButton onClick={onDone} Z={Z} font={font}>Done</PrimaryButton>
+          <PrimaryButton onClick={onDone} Z={Z} font={font}>{t("Done")}</PrimaryButton>
         </div>
       )}
     </Screen>
@@ -341,7 +341,7 @@ function SummaryRow({ label, value, color, Z }) {
 // pretending. Frontline staff use this with gloves on.
 // Dictation via the Web Speech API (Chrome/Android, Safari 14.1+). Greys out when
 // the browser doesn't support it. Audio is processed by the browser vendor's service.
-function VoiceButton({ onResult, Z, font }) {
+function VoiceButton({ onResult, lang = "en", Z, font }) {
   const Rec = typeof window !== "undefined"
     ? window.SpeechRecognition || window.webkitSpeechRecognition
     : null;
@@ -352,7 +352,7 @@ function VoiceButton({ onResult, Z, font }) {
     if (!Rec) return;
     if (listening) { recRef.current && recRef.current.stop(); return; }
     const rec = new Rec();
-    rec.lang = "en-GB";
+    rec.lang = langInfo(lang).speech;   // dictate in the person's own language
     rec.interimResults = false;
     rec.onresult = (e) => onResult(e.results[0][0].transcript);
     rec.onend = () => setListening(false);
@@ -365,7 +365,7 @@ function VoiceButton({ onResult, Z, font }) {
     <button
       onClick={toggle}
       disabled={!Rec}
-      title={Rec ? "Dictate" : "Voice input is not available on this device"}
+      title={Rec ? t("Dictate") : t("Voice input is not available on this device")}
       style={{
         flex: 1, minHeight: 50, borderRadius: 13, padding: 14, cursor: Rec ? "pointer" : "not-allowed",
         background: listening ? "rgba(239,68,68,0.15)" : Z.overlay,
@@ -374,7 +374,7 @@ function VoiceButton({ onResult, Z, font }) {
         fontWeight: 700, fontSize: 13.5, fontFamily: font, opacity: Rec ? 1 : 0.4,
       }}
     >
-      {listening ? "● Listening…" : "🎙 Speak it"}
+      {listening ? `● ${t("Listening…")}` : `🎙 ${t("Speak it")}`}
     </button>
   );
 }

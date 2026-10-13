@@ -17,7 +17,9 @@ import { isSuperAdmin } from "../../lib/brandCore";
  * (App.jsx savePasswordFor → user_passwords).
  * Strength meter is length-only: <6 too short, 6–7 weak, 8–11 good, 12+ strong.
  */
-function AccountTab({ user, passwords, onSetPassword, authMode, onChangeOwnPassword, darkMode, setDarkMode, theme, setTheme, onSaveTheme, emojiMode, onSaveEmojiMode, Z, font }) {
+import { t } from "../../lib/i18n";
+import { LanguageChooser } from "../../shared/LanguageBits";
+function AccountTab({ user, passwords, onSetPassword, authMode, onChangeOwnPassword, darkMode, setDarkMode, theme, setTheme, onSaveTheme, emojiMode, onSaveEmojiMode, language, onChangeLanguage, Z, font }) {
   const isMobile = useWindowWidth() <= 1024;
   const [oldPw,    setOldPw]    = useState("");
   const [newPw,    setNewPw]    = useState("");
@@ -138,6 +140,15 @@ function AccountTab({ user, passwords, onSetPassword, authMode, onChangeOwnPassw
           </button>
         </div>
 
+
+          {/* Language — training, the phone app and these screens' staff wording (lib/i18n.js) */}
+        {onChangeLanguage && (
+        <div style={{...card,gridColumn:isMobile?"1":"1 / -1",padding:24}} data-testid="account-language">
+          <h3 style={{fontSize:13,fontWeight:700,letterSpacing:.5,color:Z.muted,margin:"0 0 4px",textTransform:"uppercase"}}>{t("Language")}</h3>
+          <p style={{fontSize:12,color:Z.muted,margin:"0 0 16px",lineHeight:1.5}}>{t("Training and the phone app are shown in this language where a translation is ready. Certificates and records stay in English.")}</p>
+          <div style={{maxWidth:420}}><LanguageChooser value={language||"en"} onChange={onChangeLanguage} Z={Z} font={font}/></div>
+        </div>
+        )}
 
           {/* Theme toggle — spans full width of grid */}
         <div style={{...card,gridColumn:isMobile?"1":"1 / -1",padding:24}}>

@@ -46,6 +46,8 @@ import { dueInfo } from "../lib/dueDates";
 import { latestByKey } from "../domains/inspections/inspectionDue";
 import { isPassed } from "../domains/training/completion";
 import { sameName } from "../lib/openActions";
+import { t, useLang } from "../lib/i18n";
+import { LanguageChooser } from "../shared/LanguageBits";
 
 
 const FONT = "'Barlow','Trebuchet MS',system-ui,sans-serif";
@@ -71,6 +73,7 @@ const TITLES = {
   actions: ["Account", "Corrective actions"],
   history: ["Account", "Training history"],
   appearance: ["Account", "Appearance & theme"],
+  language: ["Account", "Language"],
   inspections: ["Inspections", "Due & recent"],
   inspection: ["Inspection", ""],
   permits: ["Permits to work", ""],
@@ -80,7 +83,7 @@ const TITLES = {
 // Sub-screen → owning tab, used by back() and to highlight the right tab.
 const PARENT_TAB = {
   module: "training", documents: "more",
-  certificates: "more", actions: "more", history: "more", appearance: "more",
+  certificates: "more", actions: "more", history: "more", appearance: "more", language: "more",
   inspections: "more", inspection: "inspections",
   permits: "more", permit: "permits",
 };
@@ -110,10 +113,13 @@ function MobileApp({
   siteInspections = [], permits = [],
   // theme
   theme, setTheme, setDarkMode,
+  // language ("en" | "fr" | "pl" | "ro") and how to change it (App.jsx chooseLanguage)
+  language = "en", onChangeLanguage,
   // writes — the existing App.jsx functions
   db,
 }) {
   const [online] = useOnline();
+  useLang();   // re-render in the new language when it changes
   const [followSystem, setFollowSystem] = React.useState(() => loadPrefs().followSystem !== false);
   const [systemDark, setSystemDark] = React.useState(
     () => !window.matchMedia || window.matchMedia("(prefers-color-scheme: dark)").matches
@@ -263,7 +269,7 @@ function MobileApp({
       const c = myComps[m.id];
       const ex = m.renewalMonths ? getExpiryStatus(c.date, m.renewalMonths) : null;
       return {
-        moduleId: m.id, title: m.title, icon: m.icon, score: c.score, certId: c.certId, completed: c.date || "",
+        moduleId: m.id, title: (m._en || m).title, icon: m.icon, score: c.score, certId: c.certId, completed: c.date || "",   // certificates stay in English
         validUntil: ex ? ex.expiryDate : null,
         lapsed: ex ? ex.status === "expired" : false,
         expiredOn: ex ? ex.expiryDate : null,
@@ -336,7 +342,8 @@ function MobileApp({
     if (!record.passed) return;
     write(
       "completion",
-      { userId: user.id, moduleId: record.moduleId, record: { score: record.score, date: record.date, certId: record.certId } },
+      { userId: user.id, moduleId: record.moduleId, record: { score: record.score, date: record.date, certId: record.certId,
+        ...(record.lang ? { lang: record.lang, translation: record.translation } : {}) } },   // the language it was done in
       `Certificate · ${(activeModule || {}).title || record.moduleId}`,
       () => db.optimisticCompletion && db.optimisticCompletion(user.id, record)
     );
@@ -419,8 +426,8 @@ function MobileApp({
   // ── Header ────────────────────────────────────────────────────────────────
   const [kicker, fixedTitle] = TITLES[screen] || TITLES.today;
   const title =
-    fixedTitle ||
-    (screen === "training" ? `${myMods.length} modules assigned`
+    (fixedTitle && t(fixedTitle)) ||
+    (screen === "training" ? t("{n} modules assigned", { n: myMods.length })
       : screen === "module" ? (activeModule || {}).title
       : screen === "more" ? user.name
       : screen === "inspection" ? typeLabel((activeInspection || {}).typeId)
@@ -428,7 +435,7 @@ function MobileApp({
       : screen === "permit" ? `${(activePermit || {}).ref || ""} · sign on`
       : "");
 
-  const tabs = STAFF_TABS;
+  const tabs = STAFF_TABS.map((tb) => ({ ...tb, label: t(tb.label) }));
   const activeTab = PARENT_TAB[screen] || screen;
 
   return (
@@ -438,7 +445,7 @@ function MobileApp({
       fontSize: `${textScale}rem`, overscrollBehavior: "none",
     }}>
       <MobileHeader
-        kicker={kicker === null ? getBrand().product : kicker}
+        kicker={kicker === null ? getBrand().product : t(kicker)}
         title={title}
         onBack={PARENT_TAB[screen] ? back : undefined}
         Z={T} font={FONT}
@@ -469,7 +476,7 @@ function MobileApp({
 
         {screen === "module" && activeModule && (
           <ModulePlayer
-            mod={activeModule} user={user}
+            mod={activeModule} user={user} language={language}
             initialSlide={progress[activeModule.id] || 0}
             offline={!!prefs.keepOffline}
             onExit={() => go("today")}
@@ -481,7 +488,7 @@ function MobileApp({
 
         {screen === "report" && (
           <ReportHazard
-            user={user}
+            user={user} language={language}
             managerName={user.manager}
             suggestedLocation={prefs.lastLocation}
             online={online}
@@ -521,6 +528,8 @@ function MobileApp({
             onOpenPermits={isAdmin ? () => go("permits") : undefined}
             onOpenHistory={() => go("history")}
             onOpenAppearance={() => go("appearance")}
+            onOpenLanguage={onChangeLanguage ? () => go("language") : undefined}
+            language={language}
             onSignOut={onSignOut}
             onSwitchToDesktop={onSwitchToDesktop}
             Z={T} font={FONT}
@@ -555,6 +564,15 @@ function MobileApp({
             storageUsed={prefs.storageUsed || "—"}
             Z={T} font={FONT}
           />
+        )}
+
+        {screen === "language" && (
+          <div style={{ padding: "18px 18px 28px" }} data-testid="language-screen">
+            <div style={{ fontSize: 13, color: T.muted, lineHeight: 1.5, marginBottom: 14 }}>
+              {t("Training and this app are shown in your language where a translation is ready. Certificates and records stay in English.")}
+            </div>
+            <LanguageChooser value={language} onChange={(code) => { onChangeLanguage && onChangeLanguage(code); }} Z={T} font={FONT} />
+          </div>
         )}
 
         {isAdmin && screen === "inspections" && (

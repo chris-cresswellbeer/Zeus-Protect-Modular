@@ -10,6 +10,7 @@ import { getExpiryStatus } from "../../lib/dates";
 import { Screen, SectionLabel, Row, StatusChip, PrimaryButton } from "../ui";
 import { isQuickReportOverdue, quickReportDueLabel } from "../../domains/incidents/quickReportStatus";
 import { dueText } from "../../lib/dueDates";
+import { t } from "../../lib/i18n";
 
 // ⚠ One deliberate difference from desktop: the compliance % here counts TRAINING only;
 // the desktop staff dashboard also counts external certificates and the DSE assessment,
@@ -53,15 +54,15 @@ function Today({
 
   const headline =
     actionCount === 0
-      ? "You're all clear"
+      ? t("You're all clear")
       : actionCount === 1
-        ? "One thing needs you"
-        : `${actionCount} things need you`;
+        ? t("One thing needs you")
+        : t("{n} things need you", { n: actionCount });
 
   const subline =
     actionCount === 0
-      ? "Nothing outstanding. We'll let you know when something comes up."
-      : "Clear them and you're fully compliant again.";
+      ? t("Nothing outstanding. We'll let you know when something comes up.")
+      : t("Clear them and you're fully compliant again.");
 
   return (
     <Screen Z={Z}>
@@ -70,7 +71,7 @@ function Today({
         <Avatar name={user.name} size={46} />
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 20, fontWeight: 900, letterSpacing: -0.5, lineHeight: 1.15, color: Z.white }}>
-            {greeting}, {firstName}
+            {t(greeting === "Morning" ? "Morning, {name}" : greeting === "Afternoon" ? "Afternoon, {name}" : "Evening, {name}", { name: firstName })}
           </div>
           <div style={{ fontSize: 12, color: Z.muted, marginTop: 1 }}>
             {user.jobTitle || user.email}
@@ -107,7 +108,7 @@ function Today({
       {nextUp && (
         <>
           <SectionLabel Z={Z}>
-            {inProgress ? "Pick up where you left off" : "Up next"}
+            {inProgress ? t("Pick up where you left off") : t("Up next")}
           </SectionLabel>
           <button
             onClick={() => (inProgress ? onResume(nextUp) : onOpenModule(nextUp))}
@@ -125,7 +126,7 @@ function Today({
                   {nextUp.title}
                 </div>
                 <div style={{ fontSize: 12, color: "#a5b4fc", marginTop: 3 }}>
-                  {nextUp.due ? `${dueText(nextUp.due)} · ` : ""}{nextUp.duration} · {nextUp.level} · {(nextUp.content || []).length} slides
+                  {nextUp.due ? `${t(dueText(nextUp.due))} · ` : ""}{t(nextUp.duration)} · {t(nextUp.level)} · {t("{n} slides", { n: (nextUp.content || []).length })}
                 </div>
               </div>
             </div>
@@ -143,14 +144,14 @@ function Today({
                 </div>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
                   <span style={{ fontSize: 11.5, fontWeight: 700, color: "#cbd5e1" }}>
-                    Slide {nextUp.progressSlide} of {(nextUp.content || []).length}
-                    {nextUp.offline ? " · saved on this phone ↓" : ""}
+                    {t("Slide {n} of {of}", { n: nextUp.progressSlide, of: (nextUp.content || []).length })}
+                    {nextUp.offline ? ` · ${t("saved on this phone")} ↓` : ""}
                   </span>
                   <span style={{
                     background: `linear-gradient(135deg,${Z.accent},${Z.blue})`, borderRadius: 11,
                     padding: "10px 18px", color: "#fff", fontSize: 13.5, fontWeight: 800,
                   }}>
-                    Resume
+                    {t("Resume")}
                   </span>
                 </div>
               </>
@@ -162,35 +163,35 @@ function Today({
       {/* Action required */}
       {actionCount > 0 && (
         <>
-          <SectionLabel Z={Z}>Action required</SectionLabel>
+          <SectionLabel Z={Z}>{t("Action required")}</SectionLabel>
           <div style={{ display: "flex", flexDirection: "column", gap: 9, marginBottom: 20 }}>
             {quickToComplete.map((inc) => {
               const late = isQuickReportOverdue(inc);
               return (
                 <Row
                   key={inc.id} Z={Z} font={font} tone={late ? "danger" : "warn"} icon="⚡"
-                  title={`Finish your hazard report — ${inc.location}`}
-                  sub={`Needs full details on a computer · ${quickReportDueLabel(inc)}`}
+                  title={t("Finish your hazard report — {location}", { location: inc.location })}
+                  sub={`${t("Needs full details on a computer")} · ${t(quickReportDueLabel(inc))}`}
                   onClick={onCompleteQuickReport ? () => onCompleteQuickReport(inc) : undefined}
-                  right={<Cta label="Finish" color={late ? Z.red : Z.amber} solid={late} />}
+                  right={<Cta label={t("Finish")} color={late ? Z.red : Z.amber} solid={late} />}
                 />
               );
             })}
             {expired.map((m) => (
               <Row
                 key={m.id} Z={Z} font={font} tone="danger" icon={m.icon}
-                title={m.title} sub="Certificate expired — renewal required"
+                title={m.title} sub={t("Certificate expired — renewal required")}
                 onClick={() => onOpenModule(m)}
-                right={<Cta label="Retake" color="#ef4444" solid />}
+                right={<Cta label={t("Retake")} color="#ef4444" solid />}
               />
             ))}
             {unreadDocs.length > 0 && (
               <Row
                 Z={Z} font={font} tone="warn" icon="📄"
-                title={`${unreadDocs.length} document${unreadDocs.length !== 1 ? "s" : ""} to read & confirm`}
+                title={unreadDocs.length === 1 ? t("1 document to read & confirm") : t("{n} documents to read & confirm", { n: unreadDocs.length })}
                 sub={unreadDocs.slice(0, 2).map((d) => d.title).join(" · ")}
                 onClick={onOpenDocs}
-                right={<Cta label="Review" color="#f59e0b" />}
+                right={<Cta label={t("Review")} color="#f59e0b" />}
               />
             )}
             {notStarted.filter((m) => m !== nextUp).map((m) => {
@@ -198,9 +199,9 @@ function Today({
               return (
                 <Row
                   key={m.id} Z={Z} font={font} icon={m.icon} tone={late ? "danger" : undefined}
-                  title={m.title} sub={m.due ? `${dueText(m.due)} · ${m.duration}` : `${m.category} · ${m.duration}`}
+                  title={m.title} sub={m.due ? `${t(dueText(m.due))} · ${t(m.duration)}` : `${t(m.category)} · ${t(m.duration)}`}
                   onClick={() => onOpenModule(m)}
-                  right={<StatusChip label={late ? "Overdue" : "Not started"} color={late ? "#ef4444" : "#f59e0b"} />}
+                  right={<StatusChip label={late ? t("Overdue") : t("Not started")} color={late ? "#ef4444" : "#f59e0b"} />}
                 />
               );
             })}
@@ -211,12 +212,12 @@ function Today({
       {/* All clear */}
       {upToDate.length > 0 && (
         <>
-          <SectionLabel Z={Z}>All clear</SectionLabel>
+          <SectionLabel Z={Z}>{t("All clear")}</SectionLabel>
           <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
             {upToDate.map((m) => (
               <Row
                 key={m.id} Z={Z} font={font} icon={m.icon} title={m.title}
-                right={<StatusChip label={myComps[m.id].recorded ? "Done" : `${myComps[m.id].score}%`} color="#10b981" />}
+                right={<StatusChip label={myComps[m.id].recorded ? t("Done") : `${myComps[m.id].score}%`} color="#10b981" />}
               />
             ))}
           </div>
@@ -225,13 +226,13 @@ function Today({
 
       {myMods.length === 0 && (
         <div style={{ textAlign: "center", padding: "40px 0", color: Z.muted, fontSize: 14 }}>
-          No training assigned yet. We&rsquo;ll let you know when there is.
+          {t("No training assigned yet. We\u2019ll let you know when there is.")}
         </div>
       )}
 
       <div style={{ marginTop: 22 }}>
         <PrimaryButton tone="gold" onClick={onReport} Z={Z} font={font}>
-          ⚠ Report a hazard
+          ⚠ {t("Report a hazard")}
         </PrimaryButton>
       </div>
     </Screen>

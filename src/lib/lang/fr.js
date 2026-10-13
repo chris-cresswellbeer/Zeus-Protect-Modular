@@ -80,6 +80,7 @@ export default {
   "View Certificate": "Voir le certificat",
   "Continue": "Continuer",
   "Show in my language": "Afficher dans ma langue",
+  "No sound? Turn the volume up, and on an iPhone switch off silent mode (the switch or Action button on the side).": "Pas de son ? Montez le volume et, sur iPhone, désactivez le mode silencieux (le bouton sur le côté).",
   "Read aloud": "Lire à voix haute",
   "Stop": "Arrêter",
   "No {language} voice on this device yet": "Pas encore de voix {language} sur cet appareil",

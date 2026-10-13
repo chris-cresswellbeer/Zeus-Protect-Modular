@@ -154,21 +154,56 @@ export function speakable(html) {
   return (d.textContent || "").replace(/\n{2,}/g, "\n").trim();
 }
 
-/** Speak text in a language. onEnd is called when it finishes or is stopped. */
-export function speak(text, code, onEnd) {
-  if (!canSpeak()) { if (onEnd) onEnd(); return false; }
+/** Split text into short pieces at sentence ends: phones (Chrome on Android especially)
+ *  stop or refuse to start on one long piece of speech. */
+export function speechChunks(text, max = 180) {
+  const out = [];
+  String(text || "").replace(/\n+/g, " \u0000 ").replace(/\s+/g, " ").replace(/([.!?:;…]) /g, "$1\u0000").split(/\u0000/).forEach(sentence => {
+    let rest = sentence.trim();
+    while (rest.length > max) {   // a very long sentence: break at the last comma or space
+      let cut = Math.max(rest.lastIndexOf(", ", max), rest.lastIndexOf(" ", max));
+      if (cut < max / 3) cut = max;
+      out.push(rest.slice(0, cut + 1).trim()); rest = rest.slice(cut + 1).trim();
+    }
+    if (rest) out.push(rest);
+  });
+  return out;
+}
+
+let speaking = [];   // the pieces being read (kept here so the browser doesn't drop them mid-way)
+let run = 0;
+/**
+ * Speak text in a language. onEnd(result) is called once, when it finishes or is stopped:
+ * result = { ok: true } | { ok: false, error } ("interrupted" when stopped on purpose).
+ * onStart() is called when sound actually starts.
+ */
+export function speak(text, code, onEnd, onStart) {
+  if (!canSpeak()) { if (onEnd) onEnd({ ok: false, error: "unsupported" }); return false; }
   const synth = window.speechSynthesis;
-  synth.cancel();
-  const u = new window.SpeechSynthesisUtterance(speakable(text));
-  u.lang = langInfo(code).speech;
+  const me = ++run;
+  // Only stop what's playing if something is: on iPhones, stopping and then starting
+  // straight away silently drops the new speech.
+  if (synth.speaking || synth.pending) synth.cancel();
+  try { synth.resume(); } catch { /* */ }   // Chrome sometimes leaves speech paused
+  const pieces = speechChunks(speakable(text));
+  if (!pieces.length) { if (onEnd) onEnd({ ok: true }); return false; }
   const v = voiceFor(code);
-  if (v) u.voice = v;
-  u.rate = 0.95;
-  if (onEnd) { u.onend = onEnd; u.onerror = onEnd; }
-  synth.speak(u);
+  let done = false, started = false;
+  const finish = r => { if (done) return; done = true; if (me === run) speaking = []; if (onEnd) onEnd(r); };
+  speaking = pieces.map((piece, i) => {
+    const u = new window.SpeechSynthesisUtterance(piece);
+    u.lang = v ? v.lang : langInfo(code).speech;
+    if (v) u.voice = v;
+    u.rate = 0.95;
+    u.onstart = () => { if (!started) { started = true; if (onStart) onStart(); } };
+    u.onend = () => { if (i === pieces.length - 1) finish({ ok: true }); };
+    u.onerror = e => finish({ ok: false, error: (e && e.error) || "error" });
+    return u;
+  });
+  speaking.forEach(u => synth.speak(u));
   return true;
 }
-export function stopSpeaking() { if (canSpeak()) window.speechSynthesis.cancel(); }
+export function stopSpeaking() { if (canSpeak() && (window.speechSynthesis.speaking || window.speechSynthesis.pending)) { run++; window.speechSynthesis.cancel(); } }
 
 /** Voices arrive late on some browsers: re-render when they do. Returns true when a voice exists. */
 export function useVoice(code) {

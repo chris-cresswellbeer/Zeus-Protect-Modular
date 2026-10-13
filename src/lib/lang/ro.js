@@ -81,6 +81,7 @@ export default {
   "View Certificate": "Vedeți certificatul",
   "Continue": "Continuați",
   "Show in my language": "Afișați în limba mea",
+  "No sound? Turn the volume up, and on an iPhone switch off silent mode (the switch or Action button on the side).": "Nu se aude nimic? Dați volumul mai tare, iar pe iPhone dezactivați modul silențios (comutatorul sau butonul de acțiune din lateral).",
   "Read aloud": "Citiți cu voce tare",
   "Stop": "Opriți",
   "No {language} voice on this device yet": "Nu există încă o voce ({language}) pe acest dispozitiv",

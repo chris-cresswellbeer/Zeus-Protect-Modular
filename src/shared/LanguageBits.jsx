@@ -11,19 +11,28 @@ import { t, LANGUAGES, canSpeak, speak, stopSpeaking, useVoice, langInfo } from 
 /** 🔊 Read aloud / ■ Stop. Hidden where the browser can't speak at all. */
 export function ReadAloud({ text, lang = "en", Z, font, compact, style }) {
   const [on, setOn] = React.useState(false);
+  const [hint, setHint] = React.useState("");   // shown when nothing could be heard
   const hasVoice = useVoice(lang);
-  React.useEffect(() => () => { if (on) stopSpeaking(); }, [on]);
-  React.useEffect(() => { setOn(false); stopSpeaking(); }, [text, lang]);   // new slide: stop the old one
+  const timer = React.useRef(null);
+  React.useEffect(() => () => { clearTimeout(timer.current); stopSpeaking(); }, []);
+  React.useEffect(() => { setOn(false); setHint(""); clearTimeout(timer.current); }, [text, lang]);   // new slide
   if (!canSpeak() || !String(text || "").trim()) return null;
   const toggle = e => {
     if (e) e.stopPropagation();
+    clearTimeout(timer.current);
     if (on) { stopSpeaking(); setOn(false); return; }
-    setOn(true);
-    speak(text, lang, () => setOn(false));
+    setOn(true); setHint("");
+    let started = false;
+    speak(text, lang, r => {
+      clearTimeout(timer.current); setOn(false);
+      if (!r.ok && r.error !== "interrupted" && r.error !== "canceled") setHint("fail");
+    }, () => { started = true; setHint(""); });
+    // No sound after a few seconds: almost always the phone's silent switch or volume.
+    timer.current = setTimeout(() => { if (!started) setHint("quiet"); }, 3500);
   };
   const label = on ? t("Stop") : t("Read aloud");
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 8, ...(style || {}) }}>
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap", ...(style || {}) }}>
       <button type="button" onClick={toggle} data-testid="read-aloud" aria-pressed={on} aria-label={label} title={label}
         style={{
           background: on ? `${Z.accent}33` : Z.overlay, border: `1px solid ${on ? Z.accent : Z.borderMd}`, borderRadius: 99,
@@ -33,9 +42,14 @@ export function ReadAloud({ text, lang = "en", Z, font, compact, style }) {
         }}>
         {on ? "■" : "🔊"} {label}
       </button>
-      {!hasVoice && lang !== "en" && (
+      {!hasVoice && lang !== "en" && !hint && (
         <span data-testid="no-voice" style={{ fontSize: 11, color: Z.muted, fontWeight: 600, letterSpacing: 0, textTransform: "none" }}>
           {t("No {language} voice on this device yet", { language: langInfo(lang).native })}
+        </span>
+      )}
+      {hint && (
+        <span data-testid="voice-hint" role="status" style={{ fontSize: 11.5, color: Z.amber || "#f59e0b", fontWeight: 700, letterSpacing: 0, textTransform: "none", lineHeight: 1.4 }}>
+          {t("No sound? Turn the volume up, and on an iPhone switch off silent mode (the switch or Action button on the side).")}
         </span>
       )}
     </span>

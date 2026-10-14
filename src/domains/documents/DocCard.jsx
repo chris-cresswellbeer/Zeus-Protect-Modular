@@ -7,7 +7,7 @@ import { DocAssignPanel } from "./DocAssignPanel";
 import { NewVersionModal } from "../../shared/NewVersionModal";
 import { auditEvent } from "../../lib/audit";
 
-import { todayISO } from "../../lib/dates";
+import { todayISO, ukDate } from "../../lib/dates";
 /**
  * DocCard — one document in the admin Documents library.
  *
@@ -139,7 +139,7 @@ function DocCard({ tick, d, staff, assignedIds, assignedStaff, readCount, unread
             </div>
           )}
           <div style={{color:T.muted,fontSize:12,marginTop:2,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-            <span>{d.date} · {d.size}{d.fileName?` · ${d.fileName.split(".").pop().toUpperCase()}`:""}</span>
+            <span>{ukDate(d.date)} · {d.size}{d.fileName?` · ${d.fileName.split(".").pop().toUpperCase()}`:""}</span>
             {/* Review date display / edit */}
             {!editingReview ? (
               <span onClick={()=>{setReviewInput(d.reviewDate||"");setEditingReview(true);}}

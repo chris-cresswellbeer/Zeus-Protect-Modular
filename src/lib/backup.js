@@ -21,7 +21,7 @@ import { getBrand, fileProduct } from "./brandCore";
 export const BACKUP_TABLES = [
   "users", "user_profiles", "last_logins", "dashboard_layout",
   "training_assigns", "training_completions", "training_completion_history", "quiz_failures",
-  "custom_modules", "module_versions",
+  "custom_modules", "module_versions", "module_translations", "inspection_templates",
   "documents", "doc_bundles", "doc_assignments", "doc_acknowledgements", "doc_ack_history",
   "dse_reports", "dse_admin_responses", "ext_certs",
   "incidents", "investigations", "site_inspections", "equipment", "machine_completions", "custom_machine_types",

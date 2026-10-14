@@ -16,7 +16,7 @@ const LOGO_TYPES = "image/png,image/jpeg,image/svg+xml,image/webp";
 const LOGO_MAX = 2 * 1024 * 1024;
 const formOf = b => { const { saved, ...rest } = normaliseBrand(b); return { ...rest, logos: { ...rest.logos } }; }; // eslint-disable-line no-unused-vars
 
-export function BrandingCard({ Z, font }) {
+export function BrandingCard({ Z, font, embedded = false, onStatus }) {
   const live = useBrand();
   const [f, setF] = useState(() => formOf(live));
   const [busy, setBusy] = useState(false);
@@ -25,6 +25,9 @@ export function BrandingCard({ Z, font }) {
   useEffect(() => { const start = JSON.stringify(f); loadBrand().then(b => setF(cur => JSON.stringify(cur) === start ? formOf(b) : cur)); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const changed = JSON.stringify(f) !== JSON.stringify(formOf(live));
   const guard = useFormGuard({ key: "branding", label: "the branding", active: true, value: f, onRestore: v => setF(formOf(v)), changed });
+  // Site Settings: unsaved-changes dot and the line under the section's title
+  const statusLine = `${live.product}${live.company ? ` · ${live.company}` : ""} · certificates ${cleanPrefix(live.certPrefix) || NEUTRAL_BRAND.certPrefix}-…`;
+  useEffect(() => { if (onStatus) onStatus({ dirty: changed, summary: statusLine }); }, [changed, statusLine]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const set = k => e => setF(p => ({ ...p, [k]: e.target.value }));
   const setLogo = (k, v) => setF(p => ({ ...p, logos: { ...p.logos, [k]: v } }));
@@ -99,10 +102,10 @@ export function BrandingCard({ Z, font }) {
   const prefix = cleanPrefix(f.certPrefix) || NEUTRAL_BRAND.certPrefix;
 
   return (
-    <section data-testid="branding-card" style={card}>
+    <section data-testid="branding-card" style={embedded ? {} : card}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
         <div>
-          <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: Z.white }}>🎨 Branding <span style={{ fontSize: 10.5, fontWeight: 800, color: Z.gold, border: `1px solid ${Z.gold}55`, borderRadius: 99, padding: "2px 8px", marginLeft: 6, verticalAlign: 2 }}>SUPER ADMIN</span></h3>
+          {!embedded && <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: Z.white }}>🎨 Branding <span style={{ fontSize: 10.5, fontWeight: 800, color: Z.gold, border: `1px solid ${Z.gold}55`, borderRadius: 99, padding: "2px 8px", marginLeft: 6, verticalAlign: 2 }}>SUPER ADMIN</span></h3>}
           <p style={{ margin: "3px 0 0", fontSize: 12.5, color: Z.muted, lineHeight: 1.5, maxWidth: 640 }}>The names, logos and colours used everywhere in the portal: the sign-in screen, headers, certificates, reports, exports and emails. Only super admins see this card; every change is recorded in the Audit Trail.</p>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -117,7 +120,7 @@ export function BrandingCard({ Z, font }) {
         <div>
           {field("product", "Portal name", "Sign-in screen, page titles, the \"new version\" bar and emails.", { placeholder: NEUTRAL_BRAND.product })}
           {field("company", "Company name (in full)", "Certificates, compliance reports, the Accident Book and the monthly management report.")}
-          {field("short", "Short name", "Where space is tight, e.g. the seal on certificates.")}
+          {field("short", "Short name", "Where space is tight.")}
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
             <div style={{ flex: 1, minWidth: 140 }}>{field("certPrefix", "Certificate number prefix", `New certificates: ${prefix}-…  Existing ones keep their number.`, { fontFamily: "monospace", placeholder: NEUTRAL_BRAND.certPrefix })}</div>
             <div style={{ flex: 1, minWidth: 140 }}>{field("emailFrom", "Emails come from", "The sender's name. The address stays as set on Netlify.")}</div>

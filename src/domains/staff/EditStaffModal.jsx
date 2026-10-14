@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { LANGUAGES, languageOf } from "../../lib/i18n";
 import { useWindowWidth } from "../../shared/hooks";
 import { Avatar } from "../../shared/primitives";
 import { hashPassword } from "../../lib/supabase";
@@ -28,6 +29,8 @@ function EditStaffModal({ staffUser, allUsers, setAllUsers, passwords, onSetPass
   const [machineryAccess,   setMachineryAccess]  = useState(staffUser.machineryAccess===true);
   const [department,        setDepartment]       = useState(staffUser.department||"");
   const [status,            setStatus]           = useState(staffUser.status||"active");
+  // Language: starts as the one they see now (their own choice wins over an earlier admin setting)
+  const [language,          setLanguage]         = useState(() => languageOf(staffUser));
   const [resetPw,           setResetPw]          = useState(false);
   const [newPw,    setNewPw]    = useState("");
   const [showPw,   setShowPw]   = useState(false);
@@ -39,7 +42,7 @@ function EditStaffModal({ staffUser, allUsers, setAllUsers, passwords, onSetPass
     if (!email.trim() || !email.includes("@")) { setErr("Valid email is required."); return; }
     if (email !== staffUser.email && allUsers.find(u=>u.email===email.trim())) { setErr("That email is already in use."); return; }
     if (resetPw && newPw.length < minPw) { setErr(`New password must be at least ${minPw} characters.`); return; }
-    const updated = {...staffUser, name:name.trim(), email:email.trim(), jobTitle:jobTitle.trim(), manager:manager.trim(), role, isWarehouseWorker:isWarehouse, machineryAccess, department:department.trim(), status};
+    const updated = {...staffUser, name:name.trim(), email:email.trim(), jobTitle:jobTitle.trim(), manager:manager.trim(), role, isWarehouseWorker:isWarehouse, machineryAccess, department:department.trim(), status, language};
     setAllUsers(p=>p.map(u=>u.id===staffUser.id ? updated : u));
     if (onSaveProfile) onSaveProfile(updated);
     if (resetPw && newPw && onSetTempPassword) {
@@ -115,6 +118,14 @@ function EditStaffModal({ staffUser, allUsers, setAllUsers, passwords, onSetPass
               <option value="manager">Line manager</option>
               <option value="admin">Admin</option>
             </select>
+          </div>
+          <div>
+            <label style={labelStyle} htmlFor="zp-edit-language">LANGUAGE</label>
+            <select id="zp-edit-language" value={language} onChange={e=>{setLanguage(e.target.value);setSaved(false);}}
+              style={{...inputStyle,cursor:"pointer"}} data-testid="edit-language">
+              {LANGUAGES.map(l=><option key={l.code} value={l.code}>{l.code==="en"?"English":`${l.label} (${l.native})`}</option>)}
+            </select>
+            <div style={{fontSize:11,color:Z.muted,marginTop:4,lineHeight:1.4}}>Their training and phone app, where translated. They can change it themselves.</div>
           </div>
         </div>
 

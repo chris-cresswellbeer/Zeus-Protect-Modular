@@ -5,6 +5,9 @@ import { sanitizeHtml } from "../../lib/sanitizeHtml";
 import { isHtmlContent, ensureRteStyles } from "./slideTextUtils";
 import { SlideVideo } from "../../shared/SlideVideo";
 import { isPassed, scoreText, recordedText, passMarkOf } from "./completion";
+import { TranslationsPanel } from "./TranslationsPanel";
+import { langInfo } from "../../lib/i18n";
+import { ukDate } from "../../lib/dates";
 
 /**
  * ModulePreviewModal — admin read-only preview of a training module
@@ -18,7 +21,8 @@ import { isPassed, scoreText, recordedText, passMarkOf } from "./completion";
  * the fallbacks below handle both shapes.
  * "Pass Mark" is the module's own pass mark (passMarkOf: default 70%), used by both quiz players.
  */
-function ModulePreviewModal({ m, staff, assigns, comps, compHistory = [], moduleVersions = [], isMobile, setAtab, onClose, T, font }) {
+function ModulePreviewModal({ m, staff, assigns, comps, compHistory = [], moduleVersions = [], isMobile, setAtab, onClose, T, font,
+  allModules = [], translations, onSaveTranslation, onDeleteTranslation, user, langsInUse = [] }) {
   React.useEffect(() => { ensureRteStyles(); }, []);
   const [previewSlide, setPreviewSlide] = React.useState(0);
   const [previewTab, setPreviewTab] = React.useState("overview");
@@ -51,7 +55,7 @@ function ModulePreviewModal({ m, staff, assigns, comps, compHistory = [], module
           ))}
         </div>
         <div style={{display:"flex",borderBottom:`1px solid ${T.border}`,padding:"0 24px"}}>
-          {[["overview",E("📋 ","")+"Overview"],["slides",E("🖼 ","")+`Slides (${slides.length})`],["quiz",E("❓ ","")+`Quiz (${quiz.length})`],["versions",E("🕘 ","")+"Versions"]].map(([id,label])=>(
+          {[["overview",E("📋 ","")+"Overview"],["slides",E("🖼 ","")+`Slides (${slides.length})`],["quiz",E("❓ ","")+`Quiz (${quiz.length})`],["versions",E("🕘 ","")+"Versions"],...(onSaveTranslation?[["translations",E("🌐 ","")+"Translations"]]:[])].map(([id,label])=>(
             <button key={id} onClick={()=>{setPreviewTab(id);setPreviewSlide(0);}} style={{padding:"12px 16px",background:"none",border:"none",borderBottom:`2px solid ${previewTab===id?T.gold:"transparent"}`,color:previewTab===id?T.white:T.muted,fontWeight:previewTab===id?700:400,cursor:"pointer",fontFamily:font,fontSize:13}}>{label}</button>
           ))}
         </div>
@@ -114,6 +118,9 @@ function ModulePreviewModal({ m, staff, assigns, comps, compHistory = [], module
               </>}
             </div>
           )}
+          {previewTab==="translations" && onSaveTranslation && (
+            <TranslationsPanel m={m} allModules={allModules} translations={translations||{}} onSave={onSaveTranslation} onDelete={onDeleteTranslation} user={user} langsInUse={langsInUse} T={T} font={font}/>
+          )}
           {previewTab==="versions" && (() => {
             // Which version each person completed: current results (comps) plus every
             // earlier result from training_completion_history.
@@ -122,8 +129,8 @@ function ModulePreviewModal({ m, staff, assigns, comps, compHistory = [], module
             const hist = compHistory.filter(h=>String(h.module_id)===String(m.id));
             const nameOf = uid => (staff.find(u=>String(u.id)===String(uid))||{}).name || `User ${uid}`;
             const rows = [];
-            staff.forEach(u=>{ const c=(comps[u.id]||{})[m.id]; if(c) rows.push({uid:u.id,name:u.name,ver:c.moduleVersion||1,date:c.date,score:c.score,recorded:c.recorded,current:true}); });
-            hist.forEach(h=>{ if(!rows.some(r=>String(r.uid)===String(h.user_id)&&r.date===h.date&&r.ver===(h.module_version||1))) rows.push({uid:h.user_id,name:nameOf(h.user_id),ver:h.module_version||1,date:h.date,score:h.score,recorded:h.recorded,current:false}); });
+            staff.forEach(u=>{ const c=(comps[u.id]||{})[m.id]; if(c) rows.push({uid:u.id,name:u.name,ver:c.moduleVersion||1,date:c.date,score:c.score,recorded:c.recorded,lang:c.lang,current:true}); });
+            hist.forEach(h=>{ if(!rows.some(r=>String(r.uid)===String(h.user_id)&&r.date===h.date&&r.ver===(h.module_version||1))) rows.push({uid:h.user_id,name:nameOf(h.user_id),ver:h.module_version||1,date:h.date,score:h.score,recorded:h.recorded,lang:h.lang,current:false}); });
             rows.sort((a,b)=>String(b.date).localeCompare(String(a.date)));
             const cell = {padding:"7px 8px",borderBottom:`1px solid ${T.border}`,fontSize:12};
             return (
@@ -139,13 +146,14 @@ function ModulePreviewModal({ m, staff, assigns, comps, compHistory = [], module
                 <div style={{fontSize:11,fontWeight:700,color:T.muted,letterSpacing:.5,textTransform:"uppercase",marginBottom:8}}>Results by version</div>
                 {rows.length===0 ? <div style={{color:T.muted,fontSize:13}}>Nobody has completed this module yet.</div> : (
                   <table style={{width:"100%",borderCollapse:"collapse"}}>
-                    <thead><tr>{["Person","Version","Date","Score",""].map(h=><th key={h} style={{...cell,textAlign:"left",color:T.muted,fontWeight:700}}>{h}</th>)}</tr></thead>
+                    <thead><tr>{["Person","Version","Date","Score","Language",""].map(h=><th key={h} style={{...cell,textAlign:"left",color:T.muted,fontWeight:700}}>{h}</th>)}</tr></thead>
                     <tbody>{rows.map((r,i)=>(
                       <tr key={i}>
                         <td style={{...cell,color:T.white,fontWeight:600}}>{r.name}</td>
                         <td style={{...cell,color:r.ver===curVer?T.green:T.gold,fontWeight:700}}>v{r.ver}</td>
-                        <td style={{...cell,color:T.muted}}>{r.date}</td>
+                        <td style={{...cell,color:T.muted}}>{ukDate(r.date)}</td>
                         <td title={r.recorded?recordedText(r):undefined} style={{...cell,color:isPassed(r)?T.green:T.amber,fontWeight:700}}>{scoreText(r)}</td>
+                        <td style={{...cell,color:r.lang?T.white:T.muted}} data-testid="result-lang">{r.lang?langInfo(r.lang).label:"English"}</td>
                         <td style={{...cell,color:T.muted}}>{r.current?"Current":"Earlier"}</td>
                       </tr>))}</tbody>
                   </table>

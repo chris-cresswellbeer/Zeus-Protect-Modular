@@ -6,6 +6,7 @@ import { MAX_UPLOAD_MB } from "../lib/uploadLimits";
 import { notify, ask } from "./Feedback";
 import { auditEvent } from "../lib/audit";
 import { getBrand } from "../lib/brandCore";
+import { t, useLang } from "../lib/i18n";
 
 /**
  * WelcomeVideo — the video a person sees the very first time they sign in.
@@ -52,6 +53,7 @@ const FALLBACK = { navyMd: "#152370", navyDk: "#091548", borderMd: "rgba(255,255
 export function WelcomeHost() {
   const [, force] = React.useReducer(x => x + 1, 0);
   const [ended, setEnded] = React.useState(false);
+  useLang();   // staff see it in their own language
   React.useEffect(() => { subs.add(force); return () => subs.delete(force); }, []);
   const c = current;
   React.useEffect(() => { setEnded(false); }, [c]);
@@ -73,13 +75,13 @@ export function WelcomeHost() {
         <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 16 }}>
           <div style={{ flex: 1 }}>
             <h2 id="welcome-title" style={{ margin: 0, fontSize: phone ? 20 : 26, fontWeight: 900, letterSpacing: -0.3 }}>
-              {c.replay ? "Welcome video" : `Welcome to ${getBrand().product}${first ? `, ${first}` : ""}`}
+              {c.replay ? t("Welcome video") : first ? t("Welcome to {product}, {name}", { product: getBrand().product, name: first }) : t("Welcome to {product}", { product: getBrand().product })}
             </h2>
             <p style={{ margin: "6px 0 0", fontSize: 14, color: Z.muted, lineHeight: 1.5 }}>
-              {c.replay ? "A short tour of the portal." : `Here's a short tour of the portal before you start. You can watch it again any time from ${phone ? "the More tab" : "My Account"}.`}
+              {c.replay ? t("A short tour of the portal.") : phone ? t("Here's a short tour of the portal before you start. You can watch it again any time from the More tab.") : t("Here's a short tour of the portal before you start. You can watch it again any time from My Account.")}
             </p>
           </div>
-          <button onClick={hideWelcome} aria-label="Close the welcome video"
+          <button onClick={hideWelcome} aria-label={t("Close the welcome video")}
             style={{ background: Z.overlay, border: `1px solid ${Z.borderMd}`, color: Z.white, borderRadius: 10, width: 44, height: 44, fontSize: 18, cursor: "pointer", flexShrink: 0 }}>✕</button>
         </div>
         {isFile
@@ -91,7 +93,7 @@ export function WelcomeHost() {
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
           <button onClick={hideWelcome} data-testid="welcome-done"
             style={{ background: ended ? `linear-gradient(135deg,${Z.accent},${Z.blue})` : Z.overlay, color: ended ? "#fff" : Z.white, border: ended ? "none" : `1px solid ${Z.borderMd}`, borderRadius: 10, padding: "12px 22px", fontSize: 14, fontWeight: 800, cursor: "pointer", fontFamily: font, minHeight: 44 }}>
-            {ended ? "Get started →" : c.replay ? "Close" : "Skip for now"}
+            {ended ? t("Get started →") : c.replay ? t("Close") : t("Skip for now")}
           </button>
         </div>
       </div>
@@ -107,11 +109,11 @@ export function WelcomeReplay({ name, Z, font }) {
   return (
     <div style={{ marginTop: 20, background: Z.overlay, border: `1px solid ${Z.borderMd}`, borderRadius: 14, padding: "14px 18px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", fontFamily: font }}>
       <div style={{ flex: 1, minWidth: 200 }}>
-        <div style={{ fontWeight: 800, fontSize: 14, color: Z.white }}>Welcome video</div>
-        <div style={{ fontSize: 12, color: Z.muted, marginTop: 2 }}>The short tour of the portal shown when you first signed in.</div>
+        <div style={{ fontWeight: 800, fontSize: 14, color: Z.white }}>{t("Welcome video")}</div>
+        <div style={{ fontSize: 12, color: Z.muted, marginTop: 2 }}>{t("The short tour of the portal shown when you first signed in.")}</div>
       </div>
       <button onClick={() => showWelcome({ video, name, Z, font, replay: true })} data-testid="welcome-replay"
-        style={{ background: `linear-gradient(135deg,${Z.accent},${Z.blue})`, color: "#fff", border: "none", borderRadius: 10, padding: "10px 18px", fontWeight: 800, fontSize: 13, cursor: "pointer", fontFamily: font }}>▶ Watch it again</button>
+        style={{ background: `linear-gradient(135deg,${Z.accent},${Z.blue})`, color: "#fff", border: "none", borderRadius: 10, padding: "10px 18px", fontWeight: 800, fontSize: 13, cursor: "pointer", fontFamily: font }}>▶ {t("Watch it again")}</button>
     </div>
   );
 }

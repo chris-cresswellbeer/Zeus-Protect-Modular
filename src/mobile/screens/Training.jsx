@@ -3,6 +3,7 @@ import React from "react";
 import { getExpiryStatus } from "../../lib/dates";
 import { Screen, SectionLabel, Row, StatusChip } from "../ui";
 import { dueText } from "../../lib/dueDates";
+import { t } from "../../lib/i18n";
 
 // Status for one assigned module from its completion record + renewal period
 // (same rules as the desktop staff dashboard).
@@ -24,14 +25,14 @@ function Training({ myMods, myComps, onOpenModule, Z, font }) {
   return (
     <Screen Z={Z}>
       <div style={{ display: "flex", gap: 7, marginBottom: 16 }}>
-        <Tile value={todo.length} label="To do" color={todo.length ? "#f59e0b" : "#10b981"} Z={Z} />
-        <Tile value={valid.length} label="Valid" color="#10b981" Z={Z} />
-        <Tile value={myMods.length} label="Assigned" color={Z.accentLt} Z={Z} />
+        <Tile value={todo.length} label={t("To do")} color={todo.length ? "#f59e0b" : "#10b981"} Z={Z} />
+        <Tile value={valid.length} label={t("Valid")} color="#10b981" Z={Z} />
+        <Tile value={myMods.length} label={t("Assigned")} color={Z.accentLt} Z={Z} />
       </div>
 
       {todo.length > 0 && (
         <>
-          <SectionLabel Z={Z}>Needs doing</SectionLabel>
+          <SectionLabel Z={Z}>{t("Needs doing")}</SectionLabel>
           <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
             {todo.map(({ m, s }) => (
               <Row
@@ -39,9 +40,9 @@ function Training({ myMods, myComps, onOpenModule, Z, font }) {
                 tone={s.key === "expired" || (m.due && m.due.overdue) ? "danger" : "flat"}
                 icon={m.icon}
                 title={m.title}
-                sub={`${m.due ? dueText(m.due) + " · " : ""}${m.category} · ${m.duration}${s.key === "expired" ? " · renewal required" : ""}${m.progressSlide > 1 ? ` · carry on from slide ${m.progressSlide}` : ""}`}
+                sub={`${m.due ? t(dueText(m.due)) + " · " : ""}${t(m.category)} · ${t(m.duration)}${s.key === "expired" ? ` · ${t("renewal required")}` : ""}${m.progressSlide > 1 ? ` · ${t("carry on from slide {n}", { n: m.progressSlide })}` : ""}`}
                 onClick={() => onOpenModule(m)}
-                right={<StatusChip label={m.due && m.due.overdue ? "Overdue" : s.label} color={m.due && m.due.overdue ? "#ef4444" : s.color} />}
+                right={<StatusChip label={m.due && m.due.overdue ? t("Overdue") : t(s.label)} color={m.due && m.due.overdue ? "#ef4444" : s.color} />}
               />
             ))}
           </div>
@@ -50,12 +51,12 @@ function Training({ myMods, myComps, onOpenModule, Z, font }) {
 
       {valid.length > 0 && (
         <>
-          <SectionLabel Z={Z}>Certificates in date</SectionLabel>
+          <SectionLabel Z={Z}>{t("Certificates in date")}</SectionLabel>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {valid.map(({ m, s }) => (
               <Row
                 key={m.id} Z={Z} font={font} icon={m.icon} title={m.title}
-                sub={`${s.expiry ? s.expiry.label : "No renewal required"} · ${myComps[m.id].recorded ? (myComps[m.id].recorded.session ? "completed in a group session" : "completed before the portal") : `scored ${myComps[m.id].score}%`}`}
+                sub={`${s.expiry ? t(s.expiry.label) : t("No renewal required")} · ${myComps[m.id].recorded ? (myComps[m.id].recorded.session ? t("completed in a group session") : t("completed before the portal")) : t("scored {n}%", { n: myComps[m.id].score })}`}
                 onClick={() => onOpenModule(m)}
                 right={<span style={{ fontSize: 17 }}>🎓</span>}
               />
@@ -66,7 +67,7 @@ function Training({ myMods, myComps, onOpenModule, Z, font }) {
 
       {myMods.length === 0 && (
         <div style={{ textAlign: "center", padding: 48, color: Z.muted, fontSize: 14 }}>
-          No training modules assigned yet.
+          {t("No training modules assigned yet.")}
         </div>
       )}
     </Screen>

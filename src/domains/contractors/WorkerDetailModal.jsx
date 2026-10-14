@@ -6,7 +6,7 @@ import { sb } from "../../lib/supabase";
 import { ACCEPT_IMG_DOCS } from "../../lib/constants";
 import { INDUCTION_ITEMS, CONTRACTOR_CERT_TYPES } from "../../data/seedContractors";
 
-import { todayISO } from "../../lib/dates";
+import { todayISO, ukDate } from "../../lib/dates";
 /**
  * WorkerDetailModal — a single contractor worker: site-induction checklist (tick items;
  * records date and "Admin" as the person who signed it off) and certificate uploads
@@ -73,7 +73,7 @@ function WorkerDetailModal({ worker, companyId, contractorInductions, setContrac
                       {done && <span style={{color:"#fff",fontSize:11,fontWeight:900}}>✓</span>}
                     </div>
                     <span style={{flex:1,fontSize:13,color:done?T.white:T.muted,fontWeight:done?600:400}}>{item.label}</span>
-                    {done && ind[item.id].date && <span style={{fontSize:10,color:T.green}}>{ind[item.id].date}</span>}
+                    {done && ind[item.id].date && <span style={{fontSize:10,color:T.green}}>{ukDate(ind[item.id].date)}</span>}
                   </div>
                 );
               })}

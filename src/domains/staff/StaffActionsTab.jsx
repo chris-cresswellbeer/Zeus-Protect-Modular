@@ -1,5 +1,5 @@
 import React, { useState, useRef } from "react";
-import { getExpiryStatus, todayISO } from "../../lib/dates";
+import { getExpiryStatus, todayISO, ukDate } from "../../lib/dates";
 import { sameName } from "../../lib/openActions";
 import { isActionDone, actionDoneDate, completeAction } from "../../lib/actionStatus";
 import { ACCEPT_IMG_DOCS } from "../../lib/constants";
@@ -154,7 +154,7 @@ function StaffActionsTab({ user, onCompleteQuickReport, incidents, investigation
             <div style={{fontWeight:700,fontSize:14,color:Z.white,marginBottom:4,lineHeight:1.4}}>{a.description}</div>
             <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
               <span style={{fontSize:10,fontWeight:700,color:priColor(a.priority),background:`${priColor(a.priority)}18`,border:`1px solid ${priColor(a.priority)}33`,borderRadius:6,padding:"2px 8px"}}>{a.priority} priority</span>
-              {a.dueDate && <span style={{fontSize:11,color:isOverdue?"#f87171":Z.muted}}>{isOverdue?"🚨 Overdue: ":"📅 Due: "}{a.dueDate}</span>}
+              {a.dueDate && <span style={{fontSize:11,color:isOverdue?"#f87171":Z.muted}}>{isOverdue?"🚨 Overdue: ":"📅 Due: "}{ukDate(a.dueDate)}</span>}
               {isDone && <span style={{fontSize:11,color:"#10b981",fontWeight:700}}>✓ Completed{actionDoneDate(a)?" "+actionDoneDate(a):""}</span>}
               {attachments.length>0 && <span style={{fontSize:11,color:Z.muted}}>📎 {attachments.length} file{attachments.length!==1?"s":""}</span>}
             </div>
@@ -259,7 +259,7 @@ function StaffActionsTab({ user, onCompleteQuickReport, incidents, investigation
                   <span style={{fontSize:24,flexShrink:0}}>⚡</span>
                   <div style={{flex:1,minWidth:180}}>
                     <div style={{fontWeight:700,fontSize:13,color:Z.white,marginBottom:3}}>{inc.description}</div>
-                    <div style={{fontSize:11,color:Z.muted}}>📍 {inc.location} · reported {inc.date}</div>
+                    <div style={{fontSize:11,color:Z.muted}}>📍 {inc.location} · reported {ukDate(inc.date)}</div>
                   </div>
                   <span style={{fontSize:11,fontWeight:700,color:late?Z.red:Z.amber,background:`${late?Z.red:Z.amber}1a`,border:`1px solid ${late?Z.red:Z.amber}44`,borderRadius:8,padding:"4px 10px",whiteSpace:"nowrap"}}>{late?"⚠ ":"⏳ "}{quickReportDueLabel(inc)}</span>
                   <button onClick={()=>onCompleteQuickReport && onCompleteQuickReport(inc)} style={{background:late?Z.red:Z.amber,color:"#fff",border:"none",borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font,whiteSpace:"nowrap"}}>Complete →</button>

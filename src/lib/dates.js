@@ -88,4 +88,22 @@ const todayISO = () => localISO(new Date());
 /** "YYYY-MM-DDTHH:mm" in local time — the format of <input type="datetime-local">. */
 const localDateTime = (d = new Date()) => { const t = d instanceof Date ? d : new Date(d); return isNaN(t) ? "" : `${localISO(t)}T${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`; };
 
-export { addMonths, getExpiryStatus, EXPIRY_WARNING_DAYS, localISO, todayISO, localDateTime };
+/**
+ * A stored date for showing to people, the UK way: "2026-10-14" → "14/10/2026",
+ * "2026-10-14T09:30" → "14/10/2026 09:30". Anything that isn't a stored date (already
+ * formatted, empty, "TBD") comes back as it is, so it's safe to use on any value.
+ */
+function ukDate(v) {
+  if (v === null || v === undefined) return v;
+  const str = String(v);
+  // a moment in time (ends in Z or +01:00): shown in UK local time
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}.*(Z|[+-]\d{2}:?\d{2})$/.test(str)) {
+    const d = new Date(str);
+    if (!isNaN(d)) return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  }
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/.exec(str);
+  if (!m) return v;
+  return `${m[3]}/${m[2]}/${m[1]}${m[4] ? ` ${m[4]}:${m[5]}` : ""}`;
+}
+
+export { addMonths, getExpiryStatus, EXPIRY_WARNING_DAYS, localISO, todayISO, localDateTime, ukDate };

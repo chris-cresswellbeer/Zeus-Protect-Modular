@@ -8,7 +8,7 @@ import { generateRAHtml } from "./generateRAHtml";
 import { ask } from "../../shared/Feedback";
 import { useRemembered } from "../../lib/remembered";
 
-import { localISO, todayISO } from "../../lib/dates";
+import { localISO, todayISO, ukDate } from "../../lib/dates";
 /**
  * RiskAssessmentTab — admin risk assessments (Management of Health and Safety at Work
  * Regulations 1999, reg. 3).
@@ -223,7 +223,7 @@ function RiskAssessmentTab({ docs, setDocs, setAtab, ras, setRas, dbSaveRA, Z, f
                 <span style={{fontSize:26,flexShrink:0}}>📋</span>
                 <div style={{flex:1,minWidth:200}}>
                   <div style={{fontWeight:800,fontSize:15,color:Z.white}}>{ra.title}</div>
-                  <div style={{color:Z.muted,fontSize:12,marginTop:2}}>{ra.location}{ra.activity?` · ${ra.activity}`:""} · Created {ra.date}</div>
+                  <div style={{color:Z.muted,fontSize:12,marginTop:2}}>{ra.location}{ra.activity?` · ${ra.activity}`:""} · Created {ukDate(ra.date)}</div>
                   <div style={{display:"flex",gap:8,marginTop:6,flexWrap:"wrap"}}>
                     <span style={{fontSize:11,background:"rgba(37,99,235,0.15)",color:Z.accentLt,padding:"2px 8px",borderRadius:6,fontWeight:600}}>{ra.hazards.length} hazard{ra.hazards.length!==1?"s":""}</span>
                     <span style={{fontSize:11,background:"rgba(16,185,129,0.12)",color:"#10b981",padding:"2px 8px",borderRadius:6,fontWeight:600}}>{done}/{ra.hazards.length} actions complete</span>
@@ -233,7 +233,7 @@ function RiskAssessmentTab({ docs, setDocs, setAtab, ras, setRas, dbSaveRA, Z, f
                       const days = Math.ceil((new Date(ra.reviewDate)-new Date())/86400000);
                       if (days < 0) return <span style={{fontSize:11,background:"rgba(239,68,68,0.12)",color:"#f87171",padding:"2px 8px",borderRadius:6,fontWeight:700}}>⚠ Review overdue by {Math.abs(days)}d</span>;
                       if (days <= 30) return <span style={{fontSize:11,background:"rgba(245,158,11,0.12)",color:"#f59e0b",padding:"2px 8px",borderRadius:6,fontWeight:700}}>⏳ Review due in {days}d</span>;
-                      return <span style={{fontSize:11,background:"rgba(255,255,255,0.06)",color:Z.muted,padding:"2px 8px",borderRadius:6}}>📅 Review: {ra.reviewDate}</span>;
+                      return <span style={{fontSize:11,background:"rgba(255,255,255,0.06)",color:Z.muted,padding:"2px 8px",borderRadius:6}}>📅 Review: {ukDate(ra.reviewDate)}</span>;
                     })()}
                   </div>
                 </div>

@@ -7,6 +7,8 @@ import React from "react";
 import { Screen, SectionLabel, PrimaryButton } from "../ui";
 import { MyBundles } from "../../domains/documents/DocBundles";
 import { bundleNamesOf } from "../../domains/documents/bundles";
+import { t } from "../../lib/i18n";
+import { ukDate } from "../../lib/dates";
 
 // Same icon mapping as the desktop Documents tab.
 const EXT_ICONS = {
@@ -29,7 +31,7 @@ function Documents({ docs, required, acknowledgements, onAcknowledge, onPreview,
       {required.length > 0 && (
         <>
           <SectionLabel Z={Z} color={unread.length ? Z.gold : Z.green}>
-            Required reading{unread.length ? ` · ${unread.length} unread` : " · all read ✓"}
+            {t("Required reading")}{unread.length ? ` · ${t("{n} unread", { n: unread.length })}` : ` · ${t("all read")} ✓`}
           </SectionLabel>
           <div style={{ display: "flex", flexDirection: "column", gap: 11, marginBottom: 22 }}>
             {required.map((d) => {
@@ -49,11 +51,11 @@ function Documents({ docs, required, acknowledgements, onAcknowledge, onPreview,
                         <div style={{ fontSize: 11.5, color: "#60a5fa", fontWeight: 700, marginTop: 2 }}>📚 {bundleNamesOf(bundles, d.id).join(", ")}</div>
                       )}
                       <div style={{ fontSize: 11.5, color: Z.muted, marginTop: 2 }}>
-                        Updated {d.date} · {d.size}{ext ? ` · ${ext}` : ""}
+                        {t("Updated {date}", { date: d.date })} · {d.size}{ext ? ` · ${ext}` : ""}
                       </div>
                       {ack && (
                         <div style={{ fontSize: 11.5, color: Z.green, marginTop: 3, fontWeight: 600 }}>
-                          ✓ You confirmed reading this on {ack.date}
+                          ✓ {t("You confirmed reading this on {date}", { date: ack.date })}
                         </div>
                       )}
                     </div>
@@ -67,14 +69,14 @@ function Documents({ docs, required, acknowledgements, onAcknowledge, onPreview,
                         fontSize: 13, fontFamily: font, cursor: "pointer",
                       }}
                     >
-                      Read
+                      {t("Read")}
                     </button>
                     {!ack && (
                       <PrimaryButton
                         tone="green" onClick={() => onAcknowledge(d)} Z={Z} font={font}
                         style={{ flex: 1.5, minHeight: 48, padding: 13, fontSize: 13, borderRadius: 12 }}
                       >
-                        ✓ I&rsquo;ve read this
+                        ✓ {t("I\u2019ve read this")}
                       </PrimaryButton>
                     )}
                   </div>
@@ -87,7 +89,7 @@ function Documents({ docs, required, acknowledgements, onAcknowledge, onPreview,
 
       {others.length > 0 && (
         <>
-          <SectionLabel Z={Z}>Everything else</SectionLabel>
+          <SectionLabel Z={Z}>{t("Everything else")}</SectionLabel>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {others.map((d) => {
               const ext = (d.fileName ? d.fileName.split(".").pop() : d.ext || "").toUpperCase();
@@ -104,7 +106,7 @@ function Documents({ docs, required, acknowledgements, onAcknowledge, onPreview,
                   <span style={{ fontSize: 23 }}>{EXT_ICONS[ext] || "📄"}</span>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13.5, fontWeight: 700, color: Z.white }}>{d.title}</div>
-                    <div style={{ fontSize: 11, color: Z.muted, marginTop: 1 }}>{d.date} · {d.size}</div>
+                    <div style={{ fontSize: 11, color: Z.muted, marginTop: 1 }}>{ukDate(d.date)} · {d.size}</div>
                   </div>
                   <span style={{ color: Z.mutedDk }}>›</span>
                 </button>
@@ -116,7 +118,7 @@ function Documents({ docs, required, acknowledgements, onAcknowledge, onPreview,
 
       {docs.length === 0 && (
         <div style={{ textAlign: "center", padding: 48, color: Z.muted, fontSize: 14 }}>
-          No documents yet. Check back soon.
+          {t("No documents yet. Check back soon.")}
         </div>
       )}
     </Screen>

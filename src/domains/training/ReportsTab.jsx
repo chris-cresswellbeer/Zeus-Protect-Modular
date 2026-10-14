@@ -6,7 +6,7 @@ import { riskLevel } from "../../shared/RiskMatrix";
 import { E } from "../../lib/emoji";
 import { sb, dbWrite } from "../../lib/supabase";
 import { TRAINING_MODULES } from "../../data/seedTraining";
-import { EXPIRY_WARNING_DAYS, getExpiryStatus, localISO, todayISO } from "../../lib/dates";
+import { EXPIRY_WARNING_DAYS, getExpiryStatus, localISO, todayISO, ukDate } from "../../lib/dates";
 import { isWarehouseWorker, machineExpiryStatus, machineState, compsFor } from "../../data/seedMachinery";
 import { EXT_CERT_TYPES } from "../../data/seedExtCerts";
 import { ManagerRow } from "./ManagerRow";
@@ -515,7 +515,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
                                           <div style={{fontWeight:700,fontSize:13,color:Z.white}}>{m.title}</div>
                                           <div style={{fontSize:11,marginTop:2,display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
                                             <span title={recordedText(result)||undefined} style={{color:isPassed(result)?Z.green:Z.amber,fontWeight:700}}>{scoreText(result)}</span>
-                                            <span style={{color:Z.muted}}>{result.date}</span>
+                                            <span style={{color:Z.muted}}>{ukDate(result.date)}</span>
                                             {hasAnswers && <span style={{color:incorrectQs.length>0?"#f87171":Z.green}}>{incorrectQs.length>0?`${incorrectQs.length} wrong`:"All correct ✓"}</span>}
                                             {m.renewalMonths && (() => {
                                               const ex = getExpiryStatus(result.date, m.renewalMonths);
@@ -700,13 +700,13 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
                     <Avatar name={f.userName} size={28}/>
                     <div>
                       <div style={{fontWeight:700,fontSize:13,color:Z.white}}>{f.userName}</div>
-                      {isMobile && <div style={{fontSize:11,color:Z.muted,marginTop:2}}>{f.moduleTitle} · <span style={{color:"#f87171",fontWeight:700}}>{f.score}%</span> · {f.date}</div>}
+                      {isMobile && <div style={{fontSize:11,color:Z.muted,marginTop:2}}>{f.moduleTitle} · <span style={{color:"#f87171",fontWeight:700}}>{f.score}%</span> · {ukDate(f.date)}</div>}
                     </div>
                   </div>
                   {!isMobile && <>
                     <span style={{fontSize:13,color:Z.muted}}>{f.moduleTitle}</span>
                     <span style={{fontWeight:800,color:"#f87171",fontSize:15}}>{f.score}%</span>
-                    <span style={{fontSize:12,color:Z.muted}}>{f.date}</span>
+                    <span style={{fontSize:12,color:Z.muted}}>{ukDate(f.date)}</span>
                     <span>
                       {f.acknowledged
                         ? <Pill label="Reviewed" col="green"/>
@@ -1256,7 +1256,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
                         <span style={{fontSize:16,flexShrink:0}}>{m.icon}</span>
                         <div style={{flex:1,minWidth:0}}>
                           <div style={{fontSize:12,fontWeight:700,color:"#fff",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{m.title}</div>
-                          <div style={{fontSize:10,color:Z.muted,marginTop:1}}>Completed {c.date} · {m.renewalLabel} renewal</div>
+                          <div style={{fontSize:10,color:Z.muted,marginTop:1}}>Completed {ukDate(c.date)} · {m.renewalLabel} renewal</div>
                         </div>
                         <span style={{fontSize:10,fontWeight:800,color:ex.color,flexShrink:0,whiteSpace:"nowrap"}}>
                           {ex.status==="expired"?"⚠ Expired":ex.status==="expiring"?`⏳ ${ex.daysLeft}d left`:"✓ Valid"}
@@ -1425,7 +1425,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
                               <div style={{fontSize:13,fontWeight:700,color:"#fff",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{u.name}</div>
                               <div style={{fontSize:11,marginTop:1}}>
                                 {ack
-                                  ? <span style={{color:Z.green}}>✓ Read on {ack.date}</span>
+                                  ? <span style={{color:Z.green}}>✓ Read on {ukDate(ack.date)}</span>
                                   : <span style={{color:"#f87171"}}>⏳ Not yet confirmed</span>
                                 }
                               </div>

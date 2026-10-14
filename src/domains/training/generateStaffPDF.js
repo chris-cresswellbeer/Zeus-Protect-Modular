@@ -1,6 +1,7 @@
 import { staffTraining, PRINT_COLOR } from "./compliance";
 import { brandHtml } from "../../lib/brandCore";
 import { isPassed, scoreText } from "./completion";
+import { langInfo } from "../../lib/i18n";
 import { getExpiryStatus, todayISO } from "../../lib/dates";
 import { EXT_CERT_TYPES } from "../../data/seedExtCerts";
 import { MACHINERY_TYPES, machineState, compsFor } from "../../data/seedMachinery";
@@ -55,6 +56,8 @@ async function generateStaffPDF(u, allModules, assigns, comps, docs, docAssignme
     // recorded training says how it was done and whether evidence is on file (training/evidence.js)
     const ev = c && c.recorded && (c.recorded.evidence||[]).length;
     const statusTxt = !c?"Not started":c.recorded?`Completed (${c.recorded.session?"group session":"recorded"}${ev?`, ${c.recorded.session?"signed sign-in sheet":"evidence"} on file`:""})`:passed?"Passed":"Failed";
+    // done in French / Polish / Romanian (module_translations.sql): say so on the record
+    const inLang = c && c.lang ? ` · in ${langInfo(c.lang).label}${c.translation && c.translation.status === "checked" ? "" : " (machine translation)"}` : "";
     const score = c?scoreText(c):"—";
     const date = c?c.date:"—";
     const certId = c?.certId||"—";
@@ -67,7 +70,7 @@ async function generateStaffPDF(u, allModules, assigns, comps, docs, docAssignme
     const statusColor = !c?"#999":passed?"#15803d":"#b45309";
     return `<tr style="background:${rowColor}">
       <td>${m.icon||""} ${m.title}</td>
-      <td style="color:${statusColor};font-weight:600">${statusTxt}</td>
+      <td style="color:${statusColor};font-weight:600">${statusTxt}${inLang}</td>
       <td style="text-align:center">${score}</td>
       <td>${date}</td>
       <td>${expiry}</td>

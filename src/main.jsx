@@ -52,11 +52,24 @@ focusCss.textContent = `
   :focus-visible { outline: 3px solid #f59e0b !important; outline-offset: 2px !important; border-radius: 4px; }
   input:focus-visible, select:focus-visible, textarea:focus-visible, [contenteditable]:focus-visible { outline: 2px solid #60a5fa !important; outline-offset: 0 !important; }
   @media (forced-colors: active) { :focus-visible { outline-color: Highlight !important; } }
+  /* The page frame hides anything wider than the screen. "clip" does that without
+     stopping bars that stay at the top while scrolling (Site Settings tabs, bulk actions);
+     older browsers keep "hidden". */
+  @supports (overflow: clip) { .zp-shell { overflow-x: clip !important; } }
 `;
 document.head.appendChild(focusCss);
 
+// Certificate check (the QR code on a certificate): <portal>/?verify=ID shows only the
+// check page (shared/VerifyPage.jsx), with no sign-in and none of the portal.
+const VERIFY_ID = (() => { try { return new URLSearchParams(window.location.search).get("verify"); } catch { return null; } })();
+const VerifyPage = React.lazy(() => import("./shared/VerifyPage").then(m => ({ default: m.VerifyPage })));
+
 // React 18 root API. `document.getElementById("root")` must match the id in index.html.
-ReactDOM.createRoot(document.getElementById("root")).render(
+if (VERIFY_ID !== null) {
+  ReactDOM.createRoot(document.getElementById("root")).render(
+    <React.Suspense fallback={null}><VerifyPage initialId={VERIFY_ID}/></React.Suspense>
+  );
+} else ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <App />
     {/* on-page messages and confirmation windows (shared/Feedback.jsx) */}

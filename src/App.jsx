@@ -121,6 +121,10 @@ import { isPassed, scoreText, recordedText, passMarkOf, PASS_MARK } from "./doma
 import { personalCompliance, complianceBand, staffTraining } from "./domains/training/compliance";
 import { firstAidSummary } from "./domains/firstAid/firstAidLogic";
 import { DSE_RENEWAL_MONTHS, DSE_QUESTION_COUNT } from "./data/seedDse";
+// Staff in their own language (French / Polish / Romanian): portal wording + translated training
+import { t, tNodes, setLanguage, useLang, languageOf, normLang } from "./lib/i18n";
+import { localiseModule, mapTranslationRows, translationKey } from "./lib/moduleTranslate";
+import { ReadAloud, TranslationNote } from "./shared/LanguageBits";
 const LazyStaffDSETab = lazyFresh(() => import("./domains/dse/StaffDSETab").then(m => ({ default: m.StaffDSETab })));
 const LazyEquipmentTrackerTab = lazyFresh(() => import("./domains/equipment/EquipmentTrackerTab").then(m => ({ default: m.EquipmentTrackerTab })));
 const LazyFireSafetyTab = lazyFresh(() => import("./domains/fireSafety/FireSafetyTab").then(m => ({ default: m.FireSafetyTab })));
@@ -144,7 +148,7 @@ import { isHtmlContent, ensureRteStyles } from "./domains/training/slideTextUtil
 // ── Core libraries, shared UI and theme ──
 import { generateStaffPDF } from "./domains/training/generateStaffPDF";   // kept up front: it opens a window, which must happen straight from the click
 import { sanitizeHtml } from "./lib/sanitizeHtml";
-import { EXPIRY_WARNING_DAYS, getExpiryStatus, localISO, todayISO, localDateTime } from "./lib/dates";
+import { EXPIRY_WARNING_DAYS, getExpiryStatus, localISO, todayISO, localDateTime, ukDate } from "./lib/dates";
 import { EmojiCtx, E, syncEmojiMode } from "./lib/emoji";
 import { startPlainSymbols, stopPlainSymbols } from "./lib/plainSymbols";
 import { sb, hashPassword, DEFAULT_HASH, dbWrite, insertNew } from "./lib/supabase";
@@ -250,7 +254,8 @@ function mapCompRows(rows) {
     // failed attempt isn't a completion — those are listed under Quiz Failures.
     if (!r.recorded && !r.cert_id && r.score !== null && r.score !== undefined && Number(r.score) < PASS_MARK) return;
     const uid = String(r.user_id); map[uid] = map[uid] || {};
-    map[uid][String(r.module_id)] = { score: r.score, date: r.date, certId: r.cert_id, answers: r.answers, moduleVersion: r.module_version || 1, ...(r.recorded ? { recorded: r.recorded } : {}) };
+    map[uid][String(r.module_id)] = { score: r.score, date: r.date, certId: r.cert_id, answers: r.answers, moduleVersion: r.module_version || 1, ...(r.recorded ? { recorded: r.recorded } : {}),
+      ...(r.lang ? { lang: r.lang, translation: r.translation || null } : {}) };   // done in French / Polish / Romanian
   });
   return map;
 }
@@ -322,6 +327,20 @@ export default function App() {
   const [qans,    setQans]    = useState({});
   const [qsub,    setQsub]    = useState(false);
   const [hotspotComplete, setHotspotComplete] = useState({}); // { [step]: boolean } — gates "Next Slide" for hotspot activity slides
+  const [playEnglish, setPlayEnglish] = useState(false);       // "Show in English" in the module player (translated modules)
+  // ── Languages (lib/i18n.js, lib/moduleTranslate.js) ──
+  // moduleTrans = { "<moduleId>|<lang>": module_translations row }; userLang = the signed-in person's language.
+  const [moduleTrans, setModuleTrans] = useState({});
+  const [userLang, setUserLang] = useState("en");
+  const [profilesTick, setProfilesTick] = useState(0);   // bumped when user_profiles (which hold the language) change
+  useLang();   // re-render when the wording for a language has loaded
+  // The signed-in person's language (their own choice, else the one an admin set): load its wording.
+  // Signed out → English (the sign-in page is always English).
+  useEffect(() => {
+    const code = user ? languageOf(user) : "en";
+    setUserLang(code);
+    setLanguage(code);
+  }, [user?.id, user?.language, profilesTick]); // eslint-disable-line react-hooks/exhaustive-deps
   const [showCelebration, setShowCelebration] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState(null); // image URL to show in lightbox
   const [lightboxZoomed, setLightboxZoomed] = useState(false); // true = zoomed in past fit-to-screen
@@ -418,6 +437,10 @@ export default function App() {
     ...TRAINING_MODULES.map(m => customModules.find(c=>c.id===m.id&&c._override) || m),
     ...customModules.filter(c=>!c._override),
   ].map(withCompany);   // "{company}" in built-in training text → the company's name (branding)
+  // What the signed-in person sees in their own training: their language where an up-to-date
+  // translation exists, otherwise English (lib/moduleTranslate.js). Admin screens use allModules.
+  const myLangModules = userLang === "en" ? allModules
+    : allModules.map(m => localiseModule(m, userLang, moduleTrans[translationKey(m.id, userLang)]));
   // allMachineTypes: same override/merge pattern as allModules
   const allMachineTypes = [
     ...MACHINERY_TYPES.map(m => customMachineTypes.find(c=>c.id===m.id&&c._override) || m),
@@ -618,7 +641,7 @@ export default function App() {
           llRes, pwRes, usersRes, upRes, ecRes, qfRes, conRes, conIndRes,
           conCertRes, conVisitRes, permitRes, raRes, cmRes, mcRes, eqRes,
           siRes, msdsRes, ccRes, fwRes, fdRes, fatRes, fexRes, felRes,
-          ffrRes, faRes, cmtRes, dlRes, caRes, dahRes, chRes, mvRes, bdRes,
+          ffrRes, faRes, cmtRes, dlRes, caRes, dahRes, chRes, mvRes, bdRes, mtRes,
         ] = await Promise.allSettled([
           sb.from("training_assigns").select("*"),
           sb.from("training_completions").select("*"),
@@ -662,6 +685,7 @@ export default function App() {
           Promise.resolve({ data: null, error: null }),
           Promise.resolve({ data: null, error: null }),
           sb.from("doc_bundles").select("*"),
+          sb.from("module_translations").select("*"),   // module_translations.sql (none yet = everything in English)
         ]);
 
         // Small helper: allSettled wraps each result in {status, value} or
@@ -782,6 +806,11 @@ export default function App() {
         const upRows = rows(upRes);
         // Store profile rows for theme restoration at login
         window.__userProfiles = Array.isArray(upRows) ? upRows : [];
+        setProfilesTick(n => n + 1);   // their language may be in there
+
+        // Training translations (French / Polish / Romanian)
+        const mtRows = rows(mtRes);
+        if (mtRows) setModuleTrans(mapTranslationRows(mtRows));
 
         // External certificates
         const ecRows = rows(ecRes);
@@ -1303,7 +1332,7 @@ export default function App() {
   }, [equipment]); // eslint-disable-line
 
   useEffect(() => { if (!_ready.current || !writesAll()) return;
-    auditList("inspection", siteInspections, i => [i.date, (INSP_TYPES.find(t => t.id === i.type) || {}).label || i.type, i.location].filter(Boolean).join(" · "));
+    auditList("inspection", siteInspections, i => [i.date, (INSP_TYPES.find(t => t.id === i.type) || {}).label || i.typeLabel || i.type, i.location].filter(Boolean).join(" · "));
     saveKeyed(regRef.current.inspections, siteInspections, {
       write: x => dbWrite(sb.from("site_inspections").upsert({ id: x.id, data: x }, { onConflict: "id" }), "site inspection"),
       remove: id => dbWrite(sb.from("site_inspections").delete().eq("id", id), "site inspection delete"),
@@ -1448,12 +1477,17 @@ export default function App() {
     // A quiz result replacing a recorded completion clears the "recorded" mark.
     const wasRecorded = !!((comps[String(userId)] || {})[String(moduleId)] || {}).recorded;
     const rc = rec.recorded ? { recorded: rec.recorded } : wasRecorded ? { recorded: null } : {};
-    const hist = { user_id: String(userId), module_id: String(moduleId), module_version: moduleVersion, score: rec.score, date: rec.date, cert_id: rec.certId || null, at: new Date().toISOString(), ...(rec.recorded ? rc : {}) };
+    // The language it was done in (module_translations.sql). Like `recorded`, only sent when
+    // there is one — or to clear an earlier one — so English results never need the columns.
+    const hadLang = !!((comps[String(userId)] || {})[String(moduleId)] || {}).lang;
+    const lc = rec.lang && rec.lang !== "en" ? { lang: rec.lang, translation: rec.translation || null } : hadLang ? { lang: null, translation: null } : {};
+    const hist = { user_id: String(userId), module_id: String(moduleId), module_version: moduleVersion, score: rec.score, date: rec.date, cert_id: rec.certId || null, at: new Date().toISOString(), ...(rec.recorded ? rc : {}),
+      ...(rec.lang && rec.lang !== "en" ? { lang: rec.lang, translation: rec.translation || null } : {}) };
     setCompHistory(p => [...p, hist]);
     const ok = await dbWrite(sb.from("training_completions").upsert({
       user_id: userId, module_id: moduleId,
       score: rec.score, date: rec.date, cert_id: rec.certId, answers: rec.answers,
-      module_version: moduleVersion, ...rc,
+      module_version: moduleVersion, ...rc, ...lc,
     }, { onConflict: "user_id,module_id" }), "training completion", rec.recorded ? { alertOnError: true } : undefined);
     if (!ok) return false;   // not saved: the caller (e.g. the phone's offline queue) keeps it and tries again
     await dbWrite(sb.from("training_completion_history").insert(hist), "training completion history");
@@ -1897,6 +1931,38 @@ export default function App() {
     return dbWrite(sb.from("user_profiles").upsert({ user_id: sid, data: merged }, { onConflict: "user_id" }), "theme preference");
   }
 
+  // Same merge pattern, for the person's language ("en" | "fr" | "pl" | "ro").
+  async function dbSaveLanguage(userId, code) {
+    const sid = String(userId);
+    const lang = normLang(code);
+    const profiles = Array.isArray(window.__userProfiles) ? window.__userProfiles : [];
+    const existing = profiles.find(r => String(r.user_id) === sid);
+    const merged = { ...(existing?.data || {}), language: lang };
+    window.__userProfiles = profiles.map(r => String(r.user_id)===sid ? {...r, data:merged} : r);
+    if (!existing) window.__userProfiles.push({ user_id: sid, data: merged });
+    setProfilesTick(n => n + 1);
+    return dbWrite(sb.from("user_profiles").upsert({ user_id: sid, data: merged }, { onConflict: "user_id" }), "language preference");
+  }
+  // The signed-in person's own choice of language.
+  function chooseLanguage(code) { if (!user) return; dbSaveLanguage(user.id, code); }
+
+  // ── Training translations (admins: ModulePreviewModal → Translations) ─────────
+  // row = { module_id, lang, data, source_hash, status, translated_at, checked_by, checked_at }
+  async function dbSaveTranslation(row) {
+    const key = translationKey(row.module_id, row.lang);
+    const prev = moduleTrans[key];
+    setModuleTrans(p => ({ ...p, [key]: row }));
+    const ok = await dbWrite(sb.from("module_translations").upsert(row, { onConflict: "module_id,lang" }), "training translation", { alertOnError: true });
+    if (!ok) setModuleTrans(p => { const n = { ...p }; if (prev) n[key] = prev; else delete n[key]; return n; });
+    return ok;
+  }
+  async function dbDeleteTranslation(moduleId, lang) {
+    const key = translationKey(moduleId, lang);
+    const ok = await dbWrite(sb.from("module_translations").delete().match({ module_id: String(moduleId), lang }), "training translation delete", { alertOnError: true });
+    if (ok) setModuleTrans(p => { const n = { ...p }; delete n[key]; return n; });
+    return ok;
+  }
+
   // ── Mobile permits view model ───────────────────────────────────────────────
   // PermitsTab keeps permits in its own authoring shape; the phone wants the
   // job in front of it, with this user's own sign-on state. Sign-ons live on
@@ -1990,7 +2056,12 @@ export default function App() {
         ...nc,
         photos: await uploadPhotos(PHOTO_BUCKET, `insp_${record.id}_${i}`, nc.photos),
       })));
-      const next = { ...record, nonConformances: ncs };
+      // evidence photos on checklist questions too ({ sectionId: { questionId: [photo] } })
+      const qPhotos = {};
+      for (const [sid, qs] of Object.entries(record.photos || {})) {
+        for (const [qid, list] of Object.entries(qs || {})) (qPhotos[sid] = qPhotos[sid] || {})[qid] = await uploadPhotos(PHOTO_BUCKET, `inspq_${record.id}_${sid}_${qid}`, list);
+      }
+      const next = { ...record, nonConformances: ncs, ...(record.photos ? { photos: qPhotos } : {}) };
       const ok = await dbWrite(sb.from("site_inspections").upsert({ id: next.id, data: next }, { onConflict: "id" }), "site inspection");
       if (ok) markSaved(regRef.current.inspections, next);
       setSiteInspections(p => [next, ...p.filter(r => r.id !== next.id)]);
@@ -2119,6 +2190,7 @@ export default function App() {
     const merged = { ...(existing?.data || {}), ...user };
     window.__userProfiles = profiles.map(r => String(r.user_id)===sid ? {...r, data:merged} : r);
     if (!existing) window.__userProfiles.push({ user_id: sid, data: merged });
+    setProfilesTick(n => n + 1);   // an admin may have changed the language
     await dbWrite(sb.from("user_profiles").upsert({ user_id: sid, data: merged }, { onConflict: "user_id" }), "user profile");
   }
 
@@ -2575,7 +2647,7 @@ export default function App() {
   }
 
   // Opens a module in the player and resets all per-attempt state.
-  function startMod(m) { setMod(m); setStep(0); setQans({}); setQsub(false); setShowCelebration(false); setHotspotComplete({}); }
+  function startMod(m) { setPlayEnglish(false); setMod(m); setStep(0); setQans({}); setQsub(false); setShowCelebration(false); setHotspotComplete({}); }
 
   // ── Quick search (🔍 in the header, Ctrl+K / ⌘K) ── shared/QuickSearch.jsx
   // Builds the list of things a person can jump to. Only runs while the search is open.
@@ -2715,7 +2787,8 @@ export default function App() {
     if (pct>=mark) {
       clearProgress(user.id, mod);   // passed: no place to carry on from (lib/moduleProgress.js)
       setShowCelebration(true);
-      const rec = {score:pct, date:todayISO(), answers:{...qans}, certId, moduleVersion: mod.version||1};
+      const rec = {score:pct, date:todayISO(), answers:{...qans}, certId, moduleVersion: mod.version||1,
+        ...(pmod && pmod._trans ? { lang: pmod._trans.lang, translation: { hash: pmod._trans.hash, status: pmod._trans.status } } : {})};
       setComps(p=>({...p,[user.id]:{...p[user.id],[mod.id]:rec}}));
       dbSaveCompletion(user.id, mod.id, rec);
     }
@@ -2738,6 +2811,9 @@ export default function App() {
   }
 
   const totalSlides = mod ? mod.content.length : 0;
+  // The module as shown in the player: in the person's language unless they chose "Show in English".
+  // Marking always uses the English module's answers (same order in every language).
+  const pmod = mod && !playEnglish ? localiseModule(mod, userLang, moduleTrans[translationKey(mod.id, userLang)]) : mod;
   const quizStep = totalSlides+1;
 
   // Style factory for the top-nav tab buttons (active tab gets a coloured underline).
@@ -2828,7 +2904,9 @@ export default function App() {
         onSignOut={logout}
         onSwitchToDesktop={() => setForceDesktop(true)}
         onCompleteQuickReport={(inc) => { setForceDesktop(true); setStab("incidents"); setQuickEditId(inc.id); }}
-        allModules={allModules}
+        allModules={myLangModules}
+        language={userLang}
+        onChangeLanguage={chooseLanguage}
         assigns={assigns}
         comps={comps}
         docs={docs}
@@ -2882,7 +2960,9 @@ export default function App() {
   if (mod && view==="staff") {
     const isIntro = step===0;
     const isQuiz  = step===quizStep;
-    const slide   = (!isIntro && !isQuiz) ? mod.content[step-1] : null;
+    const slide   = (!isIntro && !isQuiz) ? pmod.content[step-1] : null;
+    const translated = !!(pmod && pmod._trans);                       // shown in French / Polish / Romanian
+    const hasTranslation = translated || (playEnglish && !!localiseModule(mod, userLang, moduleTrans[translationKey(mod.id, userLang)])._trans);
     // A slide imported from PowerPoint (images[0].deck, see slideImport.js) is shown large:
     // wider column, less padding, a small heading (the title is in the picture) and the
     // picture sized to fit the screen height. Hotspot slides keep the normal layout.
@@ -2900,7 +2980,7 @@ export default function App() {
       {/* Certificate from "View Certificate" after a pass — this screen must render it
           itself, because the staff views (which also show it) aren't on screen here. */}
       {cert && <CertificateModal cert={cert} user={user} onClose={() => setCert(null)} T={T} font={font}/>}
-      <div style={{minHeight:"100vh",background:T.bg,fontFamily:font,color:T.white,overflowX:"hidden"}}>
+      <div className="zp-shell" style={{minHeight:"100vh",background:T.bg,fontFamily:font,color:T.white,overflowX:"hidden"}}>
 
         {/* Celebration Overlay */}
         {showCelebration && (
@@ -2979,24 +3059,24 @@ export default function App() {
                 })}
 
                 <div style={{fontSize:56,marginBottom:8,animation:"sealPulse 1.5s ease-in-out infinite"}}>{mod?.icon||"🏅"}</div>
-                <div style={{fontSize:11,fontWeight:700,letterSpacing:3,color:"rgba(245,158,11,0.8)",textTransform:"uppercase",marginBottom:4}}>Certificate of Completion</div>
+                <div style={{fontSize:11,fontWeight:700,letterSpacing:3,color:"rgba(245,158,11,0.8)",textTransform:"uppercase",marginBottom:4}}>{t("Certificate of Completion")}</div>
                 <div style={{fontSize:26,fontWeight:900,color:"#fff",marginBottom:4,letterSpacing:-.5}}>{user?.name}</div>
-                <div style={{fontSize:13,color:"rgba(255,255,255,0.5)",marginBottom:16}}>has successfully completed</div>
+                <div style={{fontSize:13,color:"rgba(255,255,255,0.5)",marginBottom:16}}>{t("has successfully completed")}</div>
                 <div style={{background:"rgba(245,158,11,0.1)",border:"1px solid rgba(245,158,11,0.3)",borderRadius:10,padding:"12px 20px",marginBottom:20}}>
-                  <div style={{fontSize:18,fontWeight:800,color:"#f59e0b"}}>{mod?.title}</div>
-                  <div style={{fontSize:13,color:"rgba(255,255,255,0.5)",marginTop:4}}>Score: <span style={{color:"#10b981",fontWeight:700}}>{qPct}%</span></div>
+                  <div style={{fontSize:18,fontWeight:800,color:"#f59e0b"}}>{pmod?.title}</div>
+                  <div style={{fontSize:13,color:"rgba(255,255,255,0.5)",marginTop:4}}>{tNodes("Score: {pct}", { pct: <span style={{color:"#10b981",fontWeight:700}}>{qPct}%</span> })}</div>
                 </div>
 
                 <div style={{display:"flex",gap:10,justifyContent:"center"}}>
                   <button onClick={()=>{
                     setShowCelebration(false);
-                    setCert({module:mod,score:qPct,date:(comps[user.id]||{})[mod.id]?.date||todayISO(),certId:(comps[user.id]||{})[mod.id]?.certId||null});
+                    setCert({module:mod,score:qPct,date:(comps[user.id]||{})[mod.id]?.date||todayISO(),certId:(comps[user.id]||{})[mod.id]?.certId||null,moduleVersion:(comps[user.id]||{})[mod.id]?.moduleVersion||mod.version||1});
                   }} style={{background:"linear-gradient(135deg,#f59e0b,#d97706)",color:"#0d1f5c",border:"none",borderRadius:10,padding:"10px 22px",fontWeight:800,cursor:"pointer",fontFamily:font,fontSize:13}}>
-                    🎓 View Certificate
+                    🎓 {t("View Certificate")}
                   </button>
                   <button onClick={()=>setShowCelebration(false)}
                     style={{background:"rgba(255,255,255,0.1)",color:"rgba(255,255,255,0.7)",border:"1px solid rgba(255,255,255,0.2)",borderRadius:10,padding:"10px 18px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:13}}>
-                    Continue
+                    {t("Continue")}
                   </button>
                 </div>
               </div>
@@ -3008,10 +3088,16 @@ export default function App() {
         <div style={{background:`linear-gradient(90deg,${T.navyDk},${T.navyMd})`,borderBottom:`1px solid ${T.border}`,padding:"12px 24px",display:"flex",alignItems:"center",gap:16}}>
           <BrandLogo darkMode={darkMode}/>
           <div style={{width:1,height:28,background:T.headerBgMd,margin:"0 8px"}}/>
-          <button onClick={()=>setMod(null)} style={{background:T.headerBgMd,border:`1px solid ${T.borderMd}`,borderRadius:8,padding:"6px 14px",color:T.muted,cursor:"pointer",fontWeight:700,fontFamily:font,fontSize:12}}>← Back</button>
+          <button onClick={()=>setMod(null)} style={{background:T.headerBgMd,border:`1px solid ${T.borderMd}`,borderRadius:8,padding:"6px 14px",color:T.muted,cursor:"pointer",fontWeight:700,fontFamily:font,fontSize:12}}>← {t("Back")}</button>
           <span style={{fontSize:18}}>{mod.icon}</span>
-          <h2 style={{margin:0,fontSize:15,fontWeight:700}}>{mod.title}</h2>
-          <div style={{marginLeft:"auto",color:T.muted,fontSize:12,letterSpacing:.5}}>STEP {step} / {quizStep}</div>
+          <h2 style={{margin:0,fontSize:15,fontWeight:700}}>{pmod.title}</h2>
+          {hasTranslation && (
+            <button onClick={()=>setPlayEnglish(v=>!v)} data-testid="show-english"
+              style={{marginLeft:"auto",background:T.headerBgMd,border:`1px solid ${T.borderMd}`,borderRadius:8,padding:"6px 12px",color:T.muted,cursor:"pointer",fontWeight:700,fontFamily:font,fontSize:12}}>
+              {playEnglish ? t("Show in my language") : "Show in English"}
+            </button>
+          )}
+          <div style={{marginLeft:hasTranslation?12:"auto",color:T.muted,fontSize:12,letterSpacing:.5}}>{t("STEP {n} / {of}", { n: step, of: quizStep })}</div>
         </div>
         {/* Progress strip */}
         <div style={{height:3,background:T.headerBgMd}}>
@@ -3023,25 +3109,26 @@ export default function App() {
           {isIntro && (
             <div style={{textAlign:"center"}}>
               <div style={{fontSize:72,marginBottom:16}}>{mod.icon}</div>
-              <h1 style={{fontSize:32,fontWeight:900,letterSpacing:-1,marginBottom:6}}>{mod.title}</h1>
-              <p style={{color:T.muted,fontSize:15,marginBottom:28}}>{mod.category} · {mod.duration} · <span style={{color:mod.level==="Mandatory"?"#f87171":T.accentLt}}>{mod.level}</span> · {totalSlides} slides · {mod.quiz.length} quiz questions</p>
+              <h1 style={{fontSize:32,fontWeight:900,letterSpacing:-1,marginBottom:6}}>{pmod.title}</h1>
+              <p style={{color:T.muted,fontSize:15,marginBottom:28}}>{t(mod.category)} · {t(mod.duration)} · <span style={{color:mod.level==="Mandatory"?"#f87171":T.accentLt}}>{t(mod.level)}</span> · {t("{n} slides", { n: totalSlides })} · {t("{n} quiz questions", { n: mod.quiz.length })}</p>
+              {translated && <TranslationNote status={pmod._trans.status} Z={T} font={font} style={{marginBottom:16,textAlign:"left"}}/>}
               <div style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:16,padding:28,textAlign:"left",border:`1px solid ${T.border}`}}>
-                <p style={{margin:0,color:T.slate,lineHeight:1.8,fontSize:15}}>Read through each slide carefully, then complete the knowledge check. A score of <strong style={{color:T.green}}>{passMarkOf(mod)}% or above</strong> is required to pass and receive your certificate.</p>
+                <p style={{margin:0,color:T.slate,lineHeight:1.8,fontSize:15}}>{tNodes("Read through each slide carefully, then complete the knowledge check. A score of {pct} is required to pass and receive your certificate.", { pct: <strong style={{color:T.green}}>{t("{n}% or above", { n: passMarkOf(mod) })}</strong> })}</p>
               </div>
               {(()=>{ const p = getProgress(user.id, mod); if (!p) return null; return (
                 <div style={{marginTop:28,display:"flex",gap:12,justifyContent:"center",flexWrap:"wrap",alignItems:"center"}} data-testid="resume">
                   <button onClick={()=>{setStep(p.step);window.scrollTo({top:0,behavior:"smooth"});}} data-testid="resume-btn"
                     style={{background:`linear-gradient(135deg,${T.accent},${T.blue})`,color:T.white,border:"none",borderRadius:12,padding:"14px 36px",fontWeight:800,fontSize:16,cursor:"pointer",fontFamily:font,boxShadow:`0 6px 24px ${T.accent}55`}}>
-                    {resumeLabel(p)} →
+                    {t(resumeLabel(p))} →
                   </button>
                   <button onClick={()=>{clearProgress(user.id, mod);setStep(1);window.scrollTo({top:0,behavior:"smooth"});}} data-testid="restart-btn"
                     style={{background:"transparent",color:T.muted,border:`1px solid ${T.borderMd}`,borderRadius:12,padding:"13px 24px",fontWeight:700,fontSize:14,cursor:"pointer",fontFamily:font}}>
-                    Start from the beginning
+                    {t("Start from the beginning")}
                   </button>
-                  <div style={{width:"100%",fontSize:12,color:T.muted}}>You got to {p.quiz?"the quiz":`slide ${p.step} of ${p.of}`} last time ({new Date(p.at).toLocaleDateString("en-GB",{day:"numeric",month:"short"})}).</div>
+                  <div style={{width:"100%",fontSize:12,color:T.muted}}>{p.quiz ? t("You got to the quiz last time ({date}).", { date: new Date(p.at).toLocaleDateString("en-GB",{day:"numeric",month:"short"}) }) : t("You got to slide {n} of {of} last time ({date}).", { n: p.step, of: p.of, date: new Date(p.at).toLocaleDateString("en-GB",{day:"numeric",month:"short"}) })}</div>
                 </div>); })()}
               {!getProgress(user.id, mod) && <button onClick={()=>{setStep(1);window.scrollTo({top:0,behavior:"smooth"});}} style={{marginTop:32,background:`linear-gradient(135deg,${T.accent},${T.blue})`,color:T.white,border:"none",borderRadius:12,padding:"14px 44px",fontWeight:800,fontSize:16,cursor:"pointer",fontFamily:font,boxShadow:`0 6px 24px ${T.accent}55`,letterSpacing:.5}}>
-                Begin Module →
+                {t("Begin Module →")}
               </button>}
             </div>
           )}
@@ -3050,7 +3137,8 @@ export default function App() {
             <div>
               <div data-testid="slide-card" data-deck={isDeck?"1":undefined} style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:20,padding:isDeck?"16px 20px 20px":40,border:`1px solid ${T.border}`,boxShadow:"0 8px 40px rgba(0,0,0,.4)"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:isDeck?10:20}}>
-                  <div style={{color:T.muted,fontSize:11,fontWeight:800,letterSpacing:2}}>SLIDE {step} OF {totalSlides}</div>
+                  <div style={{color:T.muted,fontSize:11,fontWeight:800,letterSpacing:2,display:"flex",alignItems:"center",gap:10}}>{t("SLIDE {n} OF {of}", { n: step, of: totalSlides })}
+                    <ReadAloud text={[slide.heading, slide.text].filter(Boolean).join(". \n")} lang={translated ? userLang : "en"} Z={T} font={font} compact/></div>
                   <div style={{display:"flex",gap:4}}>
                     {Array.from({length:totalSlides}).map((_,i)=>(
                       <div key={i} style={{width:i===step-1?20:6,height:6,borderRadius:99,background:i===step-1?T.accentLt:T.borderMd,transition:"width .3s"}}/>
@@ -3107,7 +3195,7 @@ export default function App() {
                 {slide.hotspots && slide.hotspots.length>0 && (
                   <HotspotActivity
                     imageUrl={(slide.images&&slide.images[0]&&(slide.images[0].url||slide.images[0].data))||slide.image?.url||slide.image?.data}
-                    instructions={slide.hotspotInstructions||"Click every hazard you can find in the image above."}
+                    instructions={slide.hotspotInstructions||t("Click every hazard you can find in the image above.")}
                     hotspots={slide.hotspots}
                     passThreshold={1}
                     onStatusChange={complete=>setHotspotComplete(prev=>prev[step]===complete?prev:{...prev,[step]:complete})}
@@ -3117,11 +3205,11 @@ export default function App() {
               </div>
               <div style={{display:"flex",justifyContent:"space-between",marginTop:24,gap:12}}>
                 <button onClick={()=>{setStep(s=>s-1);window.scrollTo({top:0,behavior:"smooth"});}} disabled={step===1}
-                  style={{background:T.headerBgMd,border:`1px solid ${T.borderMd}`,borderRadius:10,padding:"10px 28px",color:T.muted,cursor:"pointer",fontWeight:700,fontFamily:font,opacity:step===1?.4:1}}>← Previous</button>
+                  style={{background:T.headerBgMd,border:`1px solid ${T.borderMd}`,borderRadius:10,padding:"10px 28px",color:T.muted,cursor:"pointer",fontWeight:700,fontFamily:font,opacity:step===1?.4:1}}>← {t("Previous")}</button>
                 <button onClick={()=>{setStep(s=>s+1);window.scrollTo({top:0,behavior:"smooth"});}}
                   disabled={slide.hotspots&&slide.hotspots.length>0&&!hotspotComplete[step]}
                   style={{background:`linear-gradient(135deg,${T.accent},${T.blue})`,border:"none",borderRadius:10,padding:"10px 28px",color:T.white,cursor:"pointer",fontWeight:800,fontFamily:font,boxShadow:`0 4px 16px ${T.accent}44`,opacity:(slide.hotspots&&slide.hotspots.length>0&&!hotspotComplete[step])?.4:1}}>
-                  {step===totalSlides?"Take Quiz →":"Next Slide →"}
+                  {step===totalSlides?t("Take Quiz →"):t("Next Slide →")}
                 </button>
               </div>
             </div>
@@ -3129,11 +3217,14 @@ export default function App() {
 
           {isQuiz && !qsub && (
             <div>
-              <h2 style={{fontSize:24,fontWeight:900,marginBottom:4,letterSpacing:-.5}}>Knowledge Check</h2>
-              <p style={{color:T.muted,marginBottom:28,fontSize:14}}>{mod.quiz.length} questions · {passMarkOf(mod)}% needed to pass</p>
-              {mod.quiz.map((q,qi)=>(
+              <h2 style={{fontSize:24,fontWeight:900,marginBottom:4,letterSpacing:-.5}}>{t("Knowledge Check")}</h2>
+              <p style={{color:T.muted,marginBottom:28,fontSize:14}}>{t("{n} questions · {pct}% needed to pass", { n: pmod.quiz.length, pct: passMarkOf(mod) })}</p>
+              {pmod.quiz.map((q,qi)=>(
                 <div key={qi} style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:16,padding:24,marginBottom:14,border:`1px solid ${T.border}`}}>
-                  <p style={{fontWeight:700,marginBottom:16,fontSize:15}}><span style={{color:T.accentLt}}>Q{qi+1}.</span> {q.q}</p>
+                  <div style={{display:"flex",gap:10,alignItems:"flex-start",justifyContent:"space-between",marginBottom:16}}>
+                    <p style={{fontWeight:700,margin:0,fontSize:15}}><span style={{color:T.accentLt}}>Q{qi+1}.</span> {q.q}</p>
+                    <ReadAloud text={[q.q, ...q.options.map((o,oi)=>`${"ABCDEF"[oi]}. ${o}`)].join(". \n")} lang={translated ? userLang : "en"} Z={T} font={font} compact/>
+                  </div>
                   {q.options.map((opt,oi)=>(
                     <div key={oi} onClick={()=>setQans(a=>({...a,[qi]:oi}))}
                       style={{padding:"11px 16px",borderRadius:10,marginBottom:8,cursor:"pointer",border:`2px solid ${qans[qi]===oi?T.accent:T.border}`,background:qans[qi]===oi?`rgba(37,99,235,0.2)`:"transparent",transition:"all .2s",fontWeight:qans[qi]===oi?700:400,fontSize:14}}>
@@ -3144,7 +3235,7 @@ export default function App() {
               ))}
               <button onClick={submitQuiz} disabled={Object.keys(qans).length<mod.quiz.length}
                 style={{width:"100%",marginTop:8,background:`linear-gradient(135deg,${T.accent},${T.blue})`,color:T.white,border:"none",borderRadius:12,padding:"14px",fontWeight:800,fontSize:16,cursor:"pointer",fontFamily:font,opacity:Object.keys(qans).length<mod.quiz.length?.45:1,boxShadow:`0 4px 20px ${T.accent}44`}}>
-                Submit Quiz
+                {t("Submit Quiz")}
               </button>
             </div>
           )}
@@ -3153,32 +3244,32 @@ export default function App() {
             <div>
               <div style={{textAlign:"center",marginBottom:32}}>
                 <div style={{fontSize:72,marginBottom:16}}>{passed?"🏆":"📖"}</div>
-                <h2 style={{fontSize:36,fontWeight:900,color:passed?T.green:T.amber,letterSpacing:-1}}>{passed?"Passed!":"Not Quite"}</h2>
+                <h2 style={{fontSize:36,fontWeight:900,color:passed?T.green:T.amber,letterSpacing:-1}}>{passed?t("Passed!"):t("Not Quite")}</h2>
                 <div style={{fontSize:60,fontWeight:900,color:T.white,margin:"8px 0",fontFamily:"'Barlow Condensed',sans-serif"}}>{qPct}%</div>
-                <p style={{color:T.muted}}>{qScore} of {mod.quiz.length} correct</p>
-                {!passed && <p style={{color:T.amber,marginTop:6}}>You need {passMarkOf(mod)}% to pass. Review the slides and try again.</p>}
+                <p style={{color:T.muted}}>{t("{n} of {of} correct", { n: qScore, of: mod.quiz.length })}</p>
+                {!passed && <p style={{color:T.amber,marginTop:6}}>{t("You need {pct}% to pass. Review the slides and try again.", { pct: passMarkOf(mod) })}</p>}
                 <div style={{display:"flex",gap:12,justifyContent:"center",marginTop:28,flexWrap:"wrap"}}>
                   {passed && (
-                    <button onClick={()=>setCert({module:mod,score:qPct,date:(comps[user.id]||{})[mod.id]?.date||todayISO(),certId:(comps[user.id]||{})[mod.id]?.certId||null})}
+                    <button onClick={()=>setCert({module:mod,score:qPct,date:(comps[user.id]||{})[mod.id]?.date||todayISO(),certId:(comps[user.id]||{})[mod.id]?.certId||null,moduleVersion:(comps[user.id]||{})[mod.id]?.moduleVersion||mod.version||1})}
                       style={{background:`linear-gradient(135deg,${T.gold},#d97706)`,color:T.navyDk,border:"none",borderRadius:12,padding:"12px 28px",fontWeight:800,cursor:"pointer",fontFamily:font}}>
-                      🎓 View Certificate
+                      🎓 {t("View Certificate")}
                     </button>
                   )}
                   {!passed && (
                     <button onClick={()=>{setStep(1);setQans({});setQsub(false);window.scrollTo({top:0,behavior:"smooth"});}}
                       style={{background:`linear-gradient(135deg,${T.accent},${T.blue})`,color:T.white,border:"none",borderRadius:12,padding:"12px 28px",fontWeight:800,cursor:"pointer",fontFamily:font}}>
-                      Retake Module
+                      {t("Retake Module")}
                     </button>
                   )}
                   <button onClick={()=>setMod(null)} style={{background:T.headerBgMd,color:T.muted,border:`1px solid ${T.borderMd}`,borderRadius:12,padding:"12px 28px",fontWeight:700,cursor:"pointer",fontFamily:font}}>
-                    Back to Dashboard
+                    {t("Back to Dashboard")}
                   </button>
                 </div>
               </div>
               {/* Answer review */}
               <div>
-                <h3 style={{fontSize:14,fontWeight:800,letterSpacing:.5,color:T.muted,textTransform:"uppercase",marginBottom:16}}>Answer Review</h3>
-                {mod.quiz.map((q,qi)=>{
+                <h3 style={{fontSize:14,fontWeight:800,letterSpacing:.5,color:T.muted,textTransform:"uppercase",marginBottom:16}}>{t("Answer Review")}</h3>
+                {pmod.quiz.map((q,qi)=>{
                   const chosen = qans[qi];
                   const correct = q.answer;
                   const isRight = chosen === correct;
@@ -3199,14 +3290,14 @@ export default function App() {
                             <div key={oi} style={{padding:"9px 14px",borderRadius:10,background:bg,border:`1px solid ${border}`,fontSize:13,color:col,fontWeight:isCorrect||isChosen?700:400,display:"flex",alignItems:"center",gap:8}}>
                               {isCorrect && <span>✓</span>}{isChosen&&!isCorrect && <span>✗</span>}
                               {opt}
-                              {isCorrect && <span style={{marginLeft:"auto",fontSize:11,color:T.green,fontWeight:700}}>Correct answer</span>}
+                              {isCorrect && <span style={{marginLeft:"auto",fontSize:11,color:T.green,fontWeight:700}}>{t("Correct answer")}</span>}
                             </div>
                           );
                         })}
                       </div>
                       {!isRight && (
                         <div style={{padding:"10px 14px",background:"rgba(37,99,235,0.1)",borderRadius:10,border:"1px solid rgba(37,99,235,0.25)",fontSize:12,color:T.accentLt,lineHeight:1.6}}>
-                          💡 <strong>Explanation:</strong> The correct answer is <em>"{q.options[correct]}"</em>. Review the relevant slide for more detail.
+                          💡 {tNodes("{label} The correct answer is {answer}. Review the relevant slide for more detail.", { label: <strong>{t("Explanation:")}</strong>, answer: <em>"{q.options[correct]}"</em> })}
                         </div>
                       )}
                     </div>
@@ -3232,7 +3323,7 @@ export default function App() {
           >✕</button>
           {!lightboxZoomed && (
             <div style={{position:"fixed",bottom:22,left:0,right:0,textAlign:"center",color:"rgba(255,255,255,0.55)",fontSize:12,fontWeight:600,pointerEvents:"none"}}>
-              Click image to zoom in
+              {t("Click image to zoom in")}
             </div>
           )}
           <img
@@ -3318,8 +3409,10 @@ export default function App() {
     // the first name goes, the labels drop "My" and the tabs tighten up. At 1024px and
     // below the ☰ menu takes over (CSS below).
     const sTight = winW < 1700, sTiny = winW < 1400;
-    const STAFF_TAB_LABEL = {dashboard:"Dashboard",training:"My Training",history:"History",documents:"Documents",incidents:"Report Incident",dse:"My DSE",machinery:"My Machinery",mequip:"Machinery & Equipment",actions:"My Actions",team:"My Team"};
-    const STAFF_TAB_SHORT = {dashboard:"Dashboard",training:"Training",history:"History",documents:"Documents",incidents:"Report",dse:"DSE",machinery:"Machinery",mequip:"Equipment",actions:"Actions",team:"Team"};
+    // Menu names in the person's language (lib/i18n.js); the pages behind them are English for now.
+    const inLang = o => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, t(v)]));
+    const STAFF_TAB_LABEL = inLang({dashboard:"Dashboard",training:"My Training",history:"History",documents:"Documents",incidents:"Report Incident",dse:"My DSE",machinery:"My Machinery",mequip:"Machinery & Equipment",actions:"My Actions",team:"My Team"});
+    const STAFF_TAB_SHORT = inLang({dashboard:"Dashboard",training:"Training",history:"History",documents:"Documents",incidents:"Report",dse:"DSE",machinery:"Machinery",mequip:"Equipment",actions:"Actions",team:"Team"});
     return (
       <EmojiCtx.Provider value={emojiMode}>
       <div style={{minHeight:"100vh",background:T.bg,fontFamily:font,color:T.white}}>
@@ -3425,7 +3518,7 @@ export default function App() {
               <Avatar name={user.name} size={32}/>
               {!sTiny && <span style={{fontSize:13,color:stab==="account"?T.white:T.muted,fontWeight:600}}>{user.name.split(" ")[0]}</span>}
             </div>
-            <button onClick={logout} style={{background:"none",border:"none",color:T.muted,cursor:"pointer",fontSize:11,fontFamily:font,whiteSpace:"nowrap"}}>Sign Out</button>
+            <button onClick={logout} style={{background:"none",border:"none",color:T.muted,cursor:"pointer",fontSize:11,fontFamily:font,whiteSpace:"nowrap"}}>{t("Sign Out")}</button>
           </div>
         </div>
 
@@ -3436,7 +3529,7 @@ export default function App() {
             {["dashboard","training","history","documents","incidents","dse",...(isWarehouseWorker(user)?["machinery"]:[]),"actions",...(user.role==="manager"?["team"]:[]),...(user.role!=="admin"&&hasMachineryAccess(user)?["mequip"]:[])].map(t=>(
               <button key={t} onClick={()=>{setStab(t);setMobileMenuOpen(false);}}
                 style={{display:"block",width:"100%",textAlign:"left",padding:"12px 24px",background:stab===t?"rgba(37,99,235,0.15)":"transparent",border:"none",borderBottom:`1px solid rgba(255,255,255,0.05)`,color:stab===t?T.white:T.muted,fontWeight:stab===t?700:400,fontSize:14,cursor:"pointer",fontFamily:font}}>
-                {{dashboard:E("🏠 ","")+"Dashboard",training:E("📚 ","")+"My Training",history:E("📋 ","")+"History",documents:E("📄 ","")+"Documents",incidents:E("🚨 ","")+"Report Incident",dse:"🖥️ My DSE",machinery:"⚙️ My Machinery",mequip:"🛠 Machinery & Equipment",actions:"✅ My Actions",team:E("👥 ","")+"My Team"}[t]}
+                {{dashboard:E("🏠 ",""),training:E("📚 ",""),history:E("📋 ",""),documents:E("📄 ",""),incidents:E("🚨 ",""),dse:"🖥️ ",machinery:"⚙️ ",mequip:"🛠 ",actions:"✅ ",team:E("👥 ","")}[t]}{STAFF_TAB_LABEL[t]}
               </button>
             ))}
           </div>
@@ -3515,7 +3608,7 @@ export default function App() {
                         <span style={{fontSize:20}}>⚡</span>
                         <div style={{flex:1}}>
                           <div style={{fontSize:13,fontWeight:700,color:T.white}}>Finish your hazard report — {inc.location}</div>
-                          <div style={{fontSize:11,color:qc}}>Quick report from {inc.date} needs full details · {quickReportDueLabel(inc)}</div>
+                          <div style={{fontSize:11,color:qc}}>Quick report from {ukDate(inc.date)} needs full details · {quickReportDueLabel(inc)}</div>
                         </div>
                         <button style={{background:qc,border:"none",borderRadius:8,padding:"5px 14px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font}}>Complete →</button>
                       </div>
@@ -3535,7 +3628,7 @@ export default function App() {
                         <span style={{fontSize:20}}>🖥️</span>
                         <div style={{flex:1}}>
                           <div style={{fontSize:13,fontWeight:700,color:T.white}}>DSE Workstation Self-Assessment</div>
-                          <div style={{fontSize:11,color:"#f87171"}}>Annual re-assessment due — last completed {lastDseReport.date}{dseDraft?` · in progress, ${Object.keys(dseDraft.answers||{}).length} of ${DSE_QUESTION_COUNT} answered`:""}</div>
+                          <div style={{fontSize:11,color:"#f87171"}}>Annual re-assessment due — last completed {ukDate(lastDseReport.date)}{dseDraft?` · in progress, ${Object.keys(dseDraft.answers||{}).length} of ${DSE_QUESTION_COUNT} answered`:""}</div>
                         </div>
                         <button style={{background:"linear-gradient(135deg,#ef4444,#dc2626)",border:"none",borderRadius:8,padding:"5px 14px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,whiteSpace:"nowrap"}}>{dseDraft?"Continue →":"Retake →"}</button>
                       </div>
@@ -3647,7 +3740,7 @@ export default function App() {
                         <div style={{fontSize:11,color:T.muted}}>Display Screen Equipment · DSE Regulations 1992 · Annual</div>
                       </div>
                       {dseCompleted && dseIssueCount>0 && <span style={{fontSize:11,color:T.muted}}>{dseResolvedCount}/{dseIssueCount} issues</span>}
-                      {dseCompleted && <span style={{fontSize:11,color:T.muted}}>{lastDseReport.date}</span>}
+                      {dseCompleted && <span style={{fontSize:11,color:T.muted}}>{ukDate(lastDseReport.date)}</span>}
                       <span style={{fontSize:11,fontWeight:700,color:dseStatusColor,background:`${dseStatusColor}18`,border:`1px solid ${dseStatusColor}33`,borderRadius:6,padding:"2px 8px",whiteSpace:"nowrap",flexShrink:0}}>{dseStatusLabel}</span>
                     </div>
                   );
@@ -3701,7 +3794,7 @@ export default function App() {
                             <Bar pct={myC[m.id].recorded?100:myC[m.id].score} color={isPassed(myC[m.id])?T.green:T.amber}/>
                             <span style={{color:isPassed(myC[m.id])?T.green:T.amber,fontWeight:700,fontSize:13}}>{scoreText(myC[m.id])}</span>
                           </div>
-                          <p style={{color:T.muted,fontSize:11,margin:"0 0 6px"}}>Completed {myC[m.id].date}{myC[m.id].recorded?(myC[m.id].recorded.session?" · in a group session":" · from your earlier training records"):""}</p>
+                          <p style={{color:T.muted,fontSize:11,margin:"0 0 6px"}}>Completed {ukDate(myC[m.id].date)}{myC[m.id].recorded?(myC[m.id].recorded.session?" · in a group session":" · from your earlier training records"):""}</p>
                           {m.renewalMonths && (() => {
                             const ex = getExpiryStatus(myC[m.id].date, m.renewalMonths);
                             if (!ex) return null;
@@ -3733,7 +3826,8 @@ export default function App() {
                           {isDone?(()=>{const ex=m.renewalMonths?getExpiryStatus(myC[m.id].date,m.renewalMonths):null; return ex&&ex.status==="expired"?"Renew Now →":ex&&ex.status==="expiring"?"Renew Soon →":"Review Module"})():prog?`${resumeLabel(prog)} →`:"Start →"}
                         </button>
                         {isDone && !myC[m.id].recorded && (
-                          <button onClick={()=>setCert({module:m,score:myC[m.id].score,date:myC[m.id].date,certId:myC[m.id].certId||null})}
+                          <button onClick={()=>setCert({module:m,score:myC[m.id].score,date:myC[m.id].date,certId:myC[m.id].certId||null,moduleVersion:myC[m.id].moduleVersion||null})}
+                            aria-label={`Certificate: ${m.title}`} title="Certificate"
                             style={{background:"rgba(245,158,11,0.12)",color:T.gold,border:`1px solid rgba(245,158,11,0.3)`,borderRadius:10,padding:"10px 14px",fontWeight:700,cursor:"pointer",fontSize:12,fontFamily:font}}>
                             🏅
                           </button>
@@ -3768,7 +3862,7 @@ export default function App() {
                           ) : (
                             <p style={{color:T.green,fontSize:12,fontWeight:700,margin:"0 0 2px"}}>No issues found ✓</p>
                           )}
-                          <p style={{color:T.muted,fontSize:11,margin:0}}>Last completed: {lastReport.date}</p>
+                          <p style={{color:T.muted,fontSize:11,margin:0}}>Last completed: {ukDate(lastReport.date)}</p>
                         </div>
                       )}
                       <button onClick={openDse}
@@ -3800,7 +3894,7 @@ export default function App() {
                           <MobileCardRow label="Score" value={<span style={{color:isPassed(myC[m.id])?T.green:T.amber,fontWeight:800}}>{scoreText(myC[m.id])}</span>}/>
                           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:4}}>
                             <Pill label={myC[m.id].recorded?"Completed":isPassed(myC[m.id])?"Passed":"Failed"} col={isPassed(myC[m.id])?"green":"red"}/>
-                            {isPassed(myC[m.id]) && !myC[m.id].recorded && <button onClick={()=>setCert({module:m,score:myC[m.id].score,date:myC[m.id].date,certId:myC[m.id].certId||null})} style={{background:"rgba(245,158,11,0.1)",border:`1px solid rgba(245,158,11,0.3)`,color:T.gold,borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font}}>🏅 Certificate</button>}
+                            {isPassed(myC[m.id]) && !myC[m.id].recorded && <button onClick={()=>setCert({module:m,score:myC[m.id].score,date:myC[m.id].date,certId:myC[m.id].certId||null,moduleVersion:myC[m.id].moduleVersion||null})} style={{background:"rgba(245,158,11,0.1)",border:`1px solid rgba(245,158,11,0.3)`,color:T.gold,borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font}}>🏅 Certificate</button>}
                           </div>
                         </MobileCard>
                       ))}
@@ -3813,11 +3907,11 @@ export default function App() {
                     {allModules.filter(m=>myC[m.id]).map((m,i)=>(
                       <div key={m.id} style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",padding:"16px 20px",borderTop:i>0?`1px solid ${T.border}`:"none",alignItems:"center"}}>
                         <div style={{display:"flex",alignItems:"center",gap:10}}><span>{m.icon}</span><span style={{fontSize:14,fontWeight:700}}>{m.title}</span></div>
-                        <span style={{color:T.muted,fontSize:13}}>{myC[m.id].date}</span>
+                        <span style={{color:T.muted,fontSize:13}}>{ukDate(myC[m.id].date)}</span>
                         <span title={myC[m.id].recorded?"Recorded from your earlier training records":undefined} style={{color:isPassed(myC[m.id])?T.green:T.amber,fontWeight:800,fontSize:15}}>{scoreText(myC[m.id])}</span>
                         <div style={{display:"flex",gap:8,alignItems:"center"}}>
                           <Pill label={myC[m.id].recorded?"Completed":isPassed(myC[m.id])?"Passed":"Failed"} col={isPassed(myC[m.id])?"green":"red"}/>
-                          {isPassed(myC[m.id])&&!myC[m.id].recorded&&<button onClick={()=>setCert({module:m,score:myC[m.id].score,date:myC[m.id].date,certId:myC[m.id].certId||null})} style={{background:"rgba(245,158,11,0.1)",border:`1px solid rgba(245,158,11,0.3)`,color:T.gold,borderRadius:8,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font}}>🏅 Cert</button>}
+                          {isPassed(myC[m.id])&&!myC[m.id].recorded&&<button onClick={()=>setCert({module:m,score:myC[m.id].score,date:myC[m.id].date,certId:myC[m.id].certId||null,moduleVersion:myC[m.id].moduleVersion||null})} style={{background:"rgba(245,158,11,0.1)",border:`1px solid rgba(245,158,11,0.3)`,color:T.gold,borderRadius:8,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font}}>🏅 Cert</button>}
                         </div>
                       </div>
                     ))}
@@ -3839,9 +3933,9 @@ export default function App() {
                       {earlier.map((h,i)=>{ const m=allModules.find(x=>String(x.id)===String(h.module_id)); return (
                         <div key={i} style={{display:"grid",gridTemplateColumns:isMobile?"1fr auto":"2fr 1fr 1fr 1fr",gap:8,padding:"12px 20px",borderTop:i>0?`1px solid ${T.border}`:"none",alignItems:"center"}}>
                           <div style={{display:"flex",alignItems:"center",gap:10}}><span>{m.icon}</span><span style={{fontSize:13,fontWeight:700}}>{m.title} <span style={{color:T.muted,fontWeight:600}}>· v{h.module_version||1}</span></span></div>
-                          {!isMobile && <span style={{color:T.muted,fontSize:13}}>{h.date}</span>}
+                          {!isMobile && <span style={{color:T.muted,fontSize:13}}>{ukDate(h.date)}</span>}
                           {!isMobile && <span style={{color:T.green,fontWeight:800,fontSize:14}}>{h.score}%</span>}
-                          <button onClick={()=>setCert({module:m,score:h.score,date:h.date,certId:h.cert_id||null})} style={{justifySelf:"start",background:`${T.gold}1A`,border:`1px solid ${T.gold}4D`,color:T.gold,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font}}>{E("🏅 ","")}Certificate</button>
+                          <button onClick={()=>setCert({module:m,score:h.score,date:h.date,certId:h.cert_id||null,moduleVersion:h.module_version||null})} style={{justifySelf:"start",background:`${T.gold}1A`,border:`1px solid ${T.gold}4D`,color:T.gold,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font}}>{E("🏅 ","")}Certificate</button>
                         </div>
                       );})}
                     </div>
@@ -3890,8 +3984,8 @@ export default function App() {
                                       {!ack && <Pill label="Required Reading" col="amber"/>}
                                       {bundleNamesOf(myBundles, d.id).map(n=><span key={n} style={{fontSize:11,fontWeight:600,color:"#60a5fa",background:"rgba(96,165,250,0.1)",border:"1px solid rgba(96,165,250,0.3)",borderRadius:20,padding:"1px 8px"}}>{E("📚 ","")}{n}</span>)}
                                     </div>
-                                    <div style={{color:T.muted,fontSize:12}}>Updated: {d.date} · {d.size}{d.fileName?` · ${d.fileName.split(".").pop().toUpperCase()}`:""}</div>
-                                    {ack && <div style={{color:T.green,fontSize:12,marginTop:3,fontWeight:600}}>✓ You confirmed reading this on {ack.date}</div>}
+                                    <div style={{color:T.muted,fontSize:12}}>Updated: {ukDate(d.date)} · {d.size}{d.fileName?` · ${d.fileName.split(".").pop().toUpperCase()}`:""}</div>
+                                    {ack && <div style={{color:T.green,fontSize:12,marginTop:3,fontWeight:600}}>✓ You confirmed reading this on {ukDate(ack.date)}</div>}
                                   </div>
                                   <div style={{display:"flex",gap:8,flexShrink:0,flexWrap:"wrap",alignItems:"center"}}>
                                     {d.fileData && (
@@ -3937,7 +4031,7 @@ export default function App() {
                                 <span style={{fontSize:26,flexShrink:0}}>{icon}</span>
                                 <div style={{flex:1,minWidth:0}}>
                                   <div style={{fontWeight:700,fontSize:14,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{d.title}</div>
-                                  <div style={{color:T.muted,fontSize:12,marginTop:2}}>Updated: {d.date} · {d.size}{d.fileName?` · ${d.fileName.split(".").pop().toUpperCase()}`:""}</div>
+                                  <div style={{color:T.muted,fontSize:12,marginTop:2}}>Updated: {ukDate(d.date)} · {d.size}{d.fileName?` · ${d.fileName.split(".").pop().toUpperCase()}`:""}</div>
                                 </div>
                                 <Pill label={d.type} col="navy"/>
                                 {d.fileData && (
@@ -3968,7 +4062,7 @@ export default function App() {
             </div>
           )}
 
-          {stab==="account" && <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}><LazyAccountTab user={user} passwords={passwords} onSetPassword={savePasswordFor} authMode={AUTH_MODE} onChangeOwnPassword={async (oldPw,newPw)=>{ if (!(await authCheckPassword(user.email, oldPw))) return { ok:false, error:"Current password is incorrect." }; return changeOwnPassword(newPw); }} darkMode={darkMode} setDarkMode={setDarkMode} theme={theme} setTheme={setTheme} onSaveTheme={k=>dbSaveTheme(user.id,k)} emojiMode={emojiMode} onSaveEmojiMode={v=>{setEmojiMode(v);dbSaveEmojiMode(user.id,v);}} Z={T} font={font}/></React.Suspense>}
+          {stab==="account" && <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}><LazyAccountTab user={user} passwords={passwords} onSetPassword={savePasswordFor} authMode={AUTH_MODE} onChangeOwnPassword={async (oldPw,newPw)=>{ if (!(await authCheckPassword(user.email, oldPw))) return { ok:false, error:"Current password is incorrect." }; return changeOwnPassword(newPw); }} darkMode={darkMode} setDarkMode={setDarkMode} theme={theme} setTheme={setTheme} onSaveTheme={k=>dbSaveTheme(user.id,k)} emojiMode={emojiMode} onSaveEmojiMode={v=>{setEmojiMode(v);dbSaveEmojiMode(user.id,v);}} language={userLang} onChangeLanguage={chooseLanguage} Z={T} font={font}/></React.Suspense>}
           {stab==="account" && <WelcomeReplay name={user.name} Z={T} font={font}/>}
 
           {/* Floating hazard report button — mobile only */}
@@ -4344,7 +4438,7 @@ export default function App() {
 
     return (
       <EmojiCtx.Provider value={emojiMode}>
-      <div style={{minHeight:"100vh",background:T.bg,fontFamily:font,color:T.white,overflowX:"hidden"}}>
+      <div className="zp-shell" style={{minHeight:"100vh",background:T.bg,fontFamily:font,color:T.white,overflowX:"hidden"}}>
         <PreviewModal doc={previewDoc} onClose={()=>setPreviewDoc(null)} Z={T} font={font}/>
         {/* ▲/▼ top-of-page / bottom-of-page buttons on long screens (shared/ScrollNav.jsx) */}
         <ScrollNav bottom={24} Z={T} font={font}/>
@@ -4535,7 +4629,9 @@ export default function App() {
 
         {/* Module Preview Modal */}
         {previewModule && (
-          <ModulePreviewModal m={previewModule} staff={staff} assigns={assigns} comps={comps} compHistory={compHistory} moduleVersions={moduleVersions} isMobile={isMobile} setAtab={setAtab} onClose={()=>setPreviewModule(null)} T={T} font={font}/>
+          <ModulePreviewModal m={previewModule} staff={staff} assigns={assigns} comps={comps} compHistory={compHistory} moduleVersions={moduleVersions} isMobile={isMobile} setAtab={setAtab} onClose={()=>setPreviewModule(null)} T={T} font={font}
+            allModules={allModules} translations={moduleTrans} onSaveTranslation={dbSaveTranslation} onDeleteTranslation={dbDeleteTranslation} user={user}
+            langsInUse={[...new Set(allUsers.filter(u => (u.status || "active") !== "leaver").map(u => languageOf(u)).filter(l => l !== "en"))]}/>
         )}
 
         {/* Mobile nav drawer */}
@@ -4777,7 +4873,7 @@ export default function App() {
                         <span style={{fontSize:18,flexShrink:0}}>{{accident:"🚑",near_miss:"⚠️",unsafe_condition:"🏗",unsafe_act:"🚫"}[inc.type]||"📋"}</span>
                         <div style={{flex:1,minWidth:0}}>
                           <div style={{fontSize:13,fontWeight:700,color:T.white,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{inc.description?.slice(0,60)}{inc.description?.length>60?"…":""}</div>
-                          <div style={{fontSize:11,color:T.muted}}>{inc.date} · {inc.location}</div>
+                          <div style={{fontSize:11,color:T.muted}}>{ukDate(inc.date)} · {inc.location}</div>
                         </div>
                         {inc.riddor&&!inc.riddorReported&&<span style={{fontSize:10,fontWeight:700,color:"#f87171",background:"rgba(239,68,68,0.1)",padding:"2px 7px",borderRadius:6,border:"1px solid rgba(239,68,68,0.25)",flexShrink:0}}>RIDDOR ⚠</span>}
                         <button onClick={()=>{setFocusIncidentId(inc.id);setAtab("incidents");}} style={{background:"rgba(239,68,68,0.1)",color:"#f87171",border:"1px solid rgba(239,68,68,0.2)",borderRadius:7,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font,flexShrink:0}}>View →</button>
@@ -4808,7 +4904,7 @@ export default function App() {
                         <span style={{fontSize:18,flexShrink:0}}>{item.certType.icon}</span>
                         <div style={{flex:1,minWidth:0}}>
                           <div style={{fontSize:13,fontWeight:700,color:T.white,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{item.user.name}</div>
-                          <div style={{fontSize:11,color:"#f87171"}}>{item.certType.label} expired {item.cert.expiryDate}</div>
+                          <div style={{fontSize:11,color:"#f87171"}}>{item.certType.label} expired {ukDate(item.cert.expiryDate)}</div>
                         </div>
                         <button onClick={()=>setAtab("assign")} style={{background:"rgba(239,68,68,0.1)",color:"#f87171",border:"1px solid rgba(239,68,68,0.2)",borderRadius:7,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font,flexShrink:0}}>Update →</button>
                       </>
@@ -4823,7 +4919,7 @@ export default function App() {
                       <span style={{fontSize:16,flexShrink:0}}>{{accident:"🚑",near_miss:"⚠️",unsafe_condition:"🏗",unsafe_act:"🚫"}[inc.type]||"📋"}</span>
                       <div style={{flex:1,minWidth:0}}>
                         <div style={{fontSize:13,fontWeight:600,color:T.white,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{inc.description?.slice(0,70)}{inc.description?.length>70?"…":""}</div>
-                        <div style={{fontSize:11,color:T.muted}}>{inc.date} · {inc.location} · {inc.closed?"Closed":"Open"}</div>
+                        <div style={{fontSize:11,color:T.muted}}>{ukDate(inc.date)} · {inc.location} · {inc.closed?"Closed":"Open"}</div>
                       </div>
                     </>
                   ),()=>setAtab("incidents"))
@@ -5945,7 +6041,7 @@ export default function App() {
 
           {atab==="settings" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
-            <LazySiteSettingsTab Z={T} font={font} superAdmin={isSuperAdmin(user)}/>
+            <LazySiteSettingsTab Z={T} font={font} superAdmin={isSuperAdmin(user)} user={user}/>
             </React.Suspense>
           )}
 
@@ -6044,7 +6140,7 @@ export default function App() {
           )}
           {atab==="account" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
-            <LazyAccountTab user={user} passwords={passwords} onSetPassword={savePasswordFor} authMode={AUTH_MODE} onChangeOwnPassword={async (oldPw,newPw)=>{ if (!(await authCheckPassword(user.email, oldPw))) return { ok:false, error:"Current password is incorrect." }; return changeOwnPassword(newPw); }} darkMode={darkMode} setDarkMode={setDarkMode} theme={theme} setTheme={setTheme} onSaveTheme={k=>dbSaveTheme(user.id,k)} emojiMode={emojiMode} onSaveEmojiMode={v=>{setEmojiMode(v);dbSaveEmojiMode(user.id,v);}} Z={T} font={font}/>
+            <LazyAccountTab user={user} passwords={passwords} onSetPassword={savePasswordFor} authMode={AUTH_MODE} onChangeOwnPassword={async (oldPw,newPw)=>{ if (!(await authCheckPassword(user.email, oldPw))) return { ok:false, error:"Current password is incorrect." }; return changeOwnPassword(newPw); }} darkMode={darkMode} setDarkMode={setDarkMode} theme={theme} setTheme={setTheme} onSaveTheme={k=>dbSaveTheme(user.id,k)} emojiMode={emojiMode} onSaveEmojiMode={v=>{setEmojiMode(v);dbSaveEmojiMode(user.id,v);}} language={userLang} onChangeLanguage={chooseLanguage} Z={T} font={font}/>
             </React.Suspense>
           )}
           {atab==="account" && <WelcomeReplay name={user.name} Z={T} font={font}/>}

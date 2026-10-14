@@ -1,7 +1,7 @@
 import { isActionDone } from "../../lib/actionStatus";
 import { E } from "../../lib/emoji";
 
-import { todayISO } from "../../lib/dates";
+import { todayISO, ukDate } from "../../lib/dates";
 /**
  * InvestigationDashboard — summary panel at the top of the Investigations tab:
  *   • overdue corrective actions (not complete, due date in the past)
@@ -71,7 +71,7 @@ function InvestigationDashboard({ incidents, investigations, onOpen, Z, font }) 
               <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"9px 12px",background:"rgba(239,68,68,0.06)",borderRadius:10,border:"1px solid rgba(239,68,68,0.15)",flexWrap:"wrap"}}>
                 <div style={{flex:1,minWidth:160}}>
                   <div style={{fontSize:13,fontWeight:700,color:"#fca5a5"}}>{a.description}</div>
-                  <div style={{fontSize:11,color:Z.muted,marginTop:2}}>📍 {a.incLocation} · Owner: {a.owner||"Unassigned"} · Due: {a.dueDate}</div>
+                  <div style={{fontSize:11,color:Z.muted,marginTop:2}}>📍 {a.incLocation} · Owner: {a.owner||"Unassigned"} · Due: {ukDate(a.dueDate)}</div>
                 </div>
                 <button onClick={()=>onOpen(a.incId)}
                   style={{background:"rgba(239,68,68,0.15)",color:"#f87171",border:"1px solid rgba(239,68,68,0.3)",borderRadius:8,padding:"5px 14px",cursor:"pointer",fontFamily:font,fontSize:11,fontWeight:700,whiteSpace:"nowrap"}}>
@@ -92,7 +92,7 @@ function InvestigationDashboard({ incidents, investigations, onOpen, Z, font }) 
               <div key={inc.id} style={{display:"flex",alignItems:"center",gap:12,padding:"9px 12px",background:"rgba(251,146,60,0.06)",borderRadius:10,border:"1px solid rgba(251,146,60,0.15)",flexWrap:"wrap"}}>
                 <div style={{flex:1,minWidth:160}}>
                   <div style={{fontSize:13,fontWeight:700,color:"#fdba74"}}>{inc.description.slice(0,80)}{inc.description.length>80?"…":""}</div>
-                  <div style={{fontSize:11,color:Z.muted,marginTop:2}}>📍 {inc.location} · {inc.date}{inc.riddor?<span style={{color:"#f87171",fontWeight:700}}> · RIDDOR</span>:""}</div>
+                  <div style={{fontSize:11,color:Z.muted,marginTop:2}}>📍 {inc.location} · {ukDate(inc.date)}{inc.riddor?<span style={{color:"#f87171",fontWeight:700}}> · RIDDOR</span>:""}</div>
                 </div>
                 <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
                   {investigations[inc.id] ? <span style={{fontSize:10,color:"#a78bfa",fontWeight:700,background:"rgba(139,92,246,0.12)",padding:"3px 8px",borderRadius:6}}>🔍 Under Investigation</span> : <span style={{fontSize:10,color:Z.muted,fontWeight:700,background:Z.overlay,padding:"3px 8px",borderRadius:6}}>No investigation</span>}
@@ -122,7 +122,7 @@ function InvestigationDashboard({ incidents, investigations, onOpen, Z, font }) 
                   {arr.slice(0,4).map(i=>(
                     <button key={i.id} onClick={()=>onOpen(i.id)}
                       style={{fontSize:10,background:Z.overlay,color:Z.muted,border:`1px solid ${Z.border}`,borderRadius:6,padding:"3px 9px",cursor:"pointer",fontFamily:font,fontWeight:600}}>
-                      {i.date}
+                      {ukDate(i.date)}
                     </button>
                   ))}
                   {arr.length>4 && <span style={{fontSize:10,color:Z.muted,padding:"3px 0"}}>+{arr.length-4} more</span>}

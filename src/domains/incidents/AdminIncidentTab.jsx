@@ -38,7 +38,7 @@ import { sb } from "../../lib/supabase";
 import { openFile } from "../../lib/fileAccess";
 import { checkMachineFiles } from "../machinery/machineEvidence";
 
-import { localISO, todayISO } from "../../lib/dates";
+import { localISO, todayISO, ukDate } from "../../lib/dates";
 import { brandHtml, fileShort } from "../../lib/brandCore";
 // The HSE's RIDDOR notification for an incident (PDF or photo) goes in the private
 // "incident-photos" bucket as riddor_<incident id>_… — a name only admins can open
@@ -534,7 +534,7 @@ function AdminIncidentTab({ user, incidents, setIncidents, dbDeleteIncident, sta
                       return (
                         <tr key={inc.id} style={{borderBottom:`1px solid ${Z.border}`,background:idx%2===0?"transparent":Z.overlay}}>
                           <td style={{padding:"8px 10px",fontWeight:700,color:Z.muted,whiteSpace:"nowrap"}}>{String(idx+1).padStart(3,"0")}</td>
-                          <td style={{padding:"8px 10px",color:Z.white,whiteSpace:"nowrap",fontWeight:600}}>{inc.date}{inc.time?` ${inc.time}`:""}</td>
+                          <td style={{padding:"8px 10px",color:Z.white,whiteSpace:"nowrap",fontWeight:600}}>{ukDate(inc.date)}{inc.time?` ${inc.time}`:""}</td>
                           <td style={{padding:"8px 10px",color:Z.white,fontWeight:600,whiteSpace:"nowrap"}}>{inc.personName||reporter?.name||<span style={{color:Z.muted}}>Not recorded</span>}</td>
                           <td style={{padding:"8px 10px",color:Z.muted,fontSize:11,whiteSpace:"nowrap"}}>{reporter?.jobTitle||reporter?.name||"—"}</td>
                           <td style={{padding:"8px 10px",whiteSpace:"nowrap"}}>
@@ -655,7 +655,7 @@ function AdminIncidentTab({ user, incidents, setIncidents, dbDeleteIncident, sta
                     <p style={{margin:0,fontSize:13,color:Z.slate,lineHeight:1.4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:isOpen?"normal":"nowrap"}}>{inc.description}</p>
                   </div>
                   <div style={{display:"flex",gap:8,alignItems:"center",flexShrink:0,flexWrap:"wrap"}}>
-                    <span style={{fontSize:11,color:Z.muted,whiteSpace:"nowrap"}}>{inc.date}</span>
+                    <span style={{fontSize:11,color:Z.muted,whiteSpace:"nowrap"}}>{ukDate(inc.date)}</span>
                     {inc.closed
                       ? <Pill label="✓ Closed" col="green"/>
                       : <Pill label="⏳ Open" col="amber"/>
@@ -701,7 +701,7 @@ function AdminIncidentTab({ user, incidents, setIncidents, dbDeleteIncident, sta
                       </div>
                       <div>
                         <div style={{fontSize:10,fontWeight:700,letterSpacing:.5,color:Z.muted,marginBottom:4,textTransform:"uppercase"}}>Date & Time</div>
-                        <div style={{fontSize:13,color:Z.white,fontWeight:600}}>{inc.date}{inc.time?` at ${inc.time}`:""}</div>
+                        <div style={{fontSize:13,color:Z.white,fontWeight:600}}>{ukDate(inc.date)}{inc.time?` at ${inc.time}`:""}</div>
                       </div>
                       <div>
                         <div style={{fontSize:10,fontWeight:700,letterSpacing:.5,color:Z.muted,marginBottom:4,textTransform:"uppercase"}}>Accident Code</div>

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { t } from "../../lib/i18n";
 
 /**
  * HotspotActivity — staff-facing runtime for click-to-find training slides
@@ -58,7 +59,7 @@ function HotspotActivity({ imageUrl, instructions, hotspots, passThreshold = 1, 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
         <div style={{ fontSize: 13, color: Z.slate, fontWeight: 600 }}>🎯 {instructions}</div>
         <div style={{ fontSize: 12, color: Z.muted, fontWeight: 700, flexShrink: 0, marginLeft: 12 }}>
-          {correctFound} / {correctTotal} found
+          {t("{n} / {of} found", { n: correctFound, of: correctTotal })}
         </div>
       </div>
 
@@ -103,15 +104,15 @@ function HotspotActivity({ imageUrl, instructions, hotspots, passThreshold = 1, 
 
       {complete ? (
         <div style={{ marginTop: 10, fontSize: 13, fontWeight: 700, color: Z.green }}>
-          ✓ All hazards found — you can move on to the next slide.
+          ✓ {t("All hazards found — you can move on to the next slide.")}
         </div>
       ) : (
         <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ fontSize: 11, color: Z.muted }}>Incorrect clicks: {wrongCount}</span>
+          <span style={{ fontSize: 11, color: Z.muted }}>{t("Incorrect clicks: {n}", { n: wrongCount })}</span>
           <button onClick={reset} style={{
             background: Z.overlay, border: `1px solid ${Z.borderMd}`, borderRadius: 8,
             padding: "5px 12px", color: Z.muted, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: font,
-          }}>Start Over</button>
+          }}>{t("Start Over")}</button>
         </div>
       )}
     </div>

@@ -3,7 +3,7 @@ import { isPassed, scoreText } from "../training/completion";
 import { EvidenceLinks } from "../training/TrainingEvidence";
 import { evidenceLabel } from "../training/evidence";
 import { HelpTip } from "../../shared/HelpTip";
-import { getExpiryStatus, todayISO } from "../../lib/dates";
+import { getExpiryStatus, todayISO, ukDate } from "../../lib/dates";
 import { teamOf, normName } from "./team";
 import { E } from "../../lib/emoji";
 import { dueInfo, dueText } from "../../lib/dueDates";
@@ -151,7 +151,7 @@ function MemberDetail({ u, s, allModules, assigned, onAssign, onSignOffDse, onSi
       <div style={h}>DSE assessment</div>
       {!s.last ? <div style={{ fontSize: 12, color: Z.red }}>Not completed yet</div> : (
         <>
-          <div style={{ fontSize: 12, color: Z.muted, marginBottom: 6 }}>Last completed {s.last.date}{s.dseExp ? ` · ${s.dseExp.status === "expired" ? "overdue for annual review" : `next due ${s.dseExp.expiryDate}`}` : ""}</div>
+          <div style={{ fontSize: 12, color: Z.muted, marginBottom: 6 }}>Last completed {ukDate(s.last.date)}{s.dseExp ? ` · ${s.dseExp.status === "expired" ? "overdue for annual review" : `next due ${s.dseExp.expiryDate}`}` : ""}</div>
           {s.dseIssues.length === 0 && <div style={{ fontSize: 12, color: Z.green }}>✓ No issues raised</div>}
           {s.dseIssues.map(({ iss, ii, ri, r }) => (
             <div key={ii} style={row}>

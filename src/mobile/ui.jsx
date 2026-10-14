@@ -8,6 +8,7 @@
 // not a preference. Do not shrink them.
 
 import React from "react";
+import { t } from "../lib/i18n";
 
 const TOUCH = 44;
 
@@ -162,7 +163,7 @@ function MobileHeader({ kicker, title, onBack, right, Z, font }) {
       {onBack && (
         <button
           onClick={onBack}
-          aria-label="Back"
+          aria-label={t("Back")}
           style={{
             width: 34, height: 34, flexShrink: 0, borderRadius: 11,
             background: Z.overlay, border: `1px solid ${Z.borderMd}`,
@@ -196,9 +197,9 @@ function MobileHeader({ kicker, title, onBack, right, Z, font }) {
 // Shown while offline, or while saves are waiting to be sent / couldn't be sent.
 function OfflineBanner({ online = false, queueCount = 0, stuckCount = 0, Z }) {
   const stuck = stuckCount > 0;
-  const text = !online ? "Offline — you can carry on, we\u2019ll send it when you\u2019re back online"
-    : queueCount > 0 ? `Waiting to send ${queueCount} — trying again every minute`
-    : `${stuckCount} couldn\u2019t be sent — see More`;
+  const text = !online ? t("Offline — you can carry on, we\u2019ll send it when you\u2019re back online")
+    : queueCount > 0 ? t("Waiting to send {n} — trying again every minute", { n: queueCount })
+    : t("{n} couldn\u2019t be sent — see More", { n: stuckCount });
   const col = stuck && online && !queueCount ? Z.red : Z.gold;
   return (
     <div role="status" data-testid="offline-banner" style={{
@@ -213,7 +214,7 @@ function OfflineBanner({ online = false, queueCount = 0, stuckCount = 0, Z }) {
           fontSize: 10.5, fontWeight: 800, color: Z.gold,
           background: `${Z.gold}26`, borderRadius: 6, padding: "2px 7px",
         }}>
-          {queueCount} queued
+          {t("{n} queued", { n: queueCount })}
         </span>
       )}
     </div>

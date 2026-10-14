@@ -21,11 +21,19 @@ import { PASS_MARK, passMarkOf } from "../../domains/training/completion";
 
 import { todayISO } from "../../lib/dates";
 import { certNumber } from "../../lib/brandCore";
+import { t, tNodes } from "../../lib/i18n";
+import { ReadAloud, TranslationNote } from "../../shared/LanguageBits";
 function ModulePlayer({
-  mod, user, initialSlide = 0, offline,
+  mod: shownMod, user, initialSlide = 0, offline, language = "en",
   onExit, onProgress, onComplete,
   Z, font,
 }) {
+  // A translated module (lib/moduleTranslate.js) carries the English as _en: "Show in English"
+  // swaps to it. Slides, answers and marking are the same in both.
+  const [showEnglish, setShowEnglish] = React.useState(false);
+  const translated = !!(shownMod._trans && !showEnglish);
+  const mod = showEnglish && shownMod._en ? shownMod._en : shownMod;
+  const speechLang = translated ? language : "en";
   const slides = mod.content || [];
   const quiz = mod.quiz || [];
   const passMark = passMarkOf(mod);   // this module's pass mark (default 70%)
@@ -69,6 +77,8 @@ function ModulePlayer({
         passed,
         date: todayISO(),
         certId: passed ? makeCertId(user.id, mod.id) : null,
+        // the language it was done in (shown on the person's training record)
+        ...(translated ? { lang: shownMod._trans.lang, translation: { hash: shownMod._trans.hash, status: shownMod._trans.status } } : {}),
       };
       setResult(record);
       setStage("result");
@@ -94,18 +104,23 @@ function ModulePlayer({
               {mod.title}
             </h1>
             <p style={{ color: Z.muted, fontSize: 13, margin: "0 0 20px" }}>
-              {mod.category} · {mod.duration} ·{" "}
-              <span style={{ color: mod.level === "Mandatory" ? "#f87171" : Z.accentLt }}>{mod.level}</span>
-              {" "}· {slides.length} slides · {quiz.length} questions
+              {t(mod.category)} · {t(mod.duration)} ·{" "}
+              <span style={{ color: mod.level === "Mandatory" ? "#f87171" : Z.accentLt }}>{t(mod.level)}</span>
+              {" "}· {t("{n} slides", { n: slides.length })} · {t("{n} questions", { n: quiz.length })}
             </p>
+            {shownMod._trans && (
+              <div style={{ marginBottom: 14, textAlign: "left" }}>
+                {translated && <TranslationNote status={shownMod._trans.status} Z={Z} font={font} style={{ marginBottom: 8 }} />}
+                <EnglishToggle showEnglish={showEnglish} onToggle={() => setShowEnglish((v) => !v)} Z={Z} font={font} />
+              </div>
+            )}
             <div style={{
               background: `linear-gradient(135deg,${Z.navyMd},${Z.navy})`, borderRadius: 16,
               padding: 18, textAlign: "left", border: `1px solid ${Z.border}`, marginBottom: 14,
             }}>
               <p style={{ margin: 0, color: Z.slate, lineHeight: 1.7, fontSize: 13.5 }}>
-                Take your time — each slide saves as you go. You need{" "}
-                <strong style={{ color: Z.green }}>{passMark}% or above</strong> on the knowledge
-                check to earn your certificate, and you can retake it as many times as you need.
+                {tNodes("Take your time — each slide saves as you go. You need {pct} on the knowledge check to earn your certificate, and you can retake it as many times as you need.", {
+                  pct: <strong style={{ color: Z.green }}>{t("{n}% or above", { n: passMark })}</strong> })}
               </p>
             </div>
             {offline && (
@@ -116,15 +131,15 @@ function ModulePlayer({
               }}>
                 <span style={{ fontSize: 21 }}>↓</span>
                 <div>
-                  <div style={{ fontSize: 12.5, fontWeight: 700, color: Z.green }}>Downloaded to this phone</div>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: Z.green }}>{t("Downloaded to this phone")}</div>
                   <div style={{ fontSize: 11.5, color: Z.muted, marginTop: 1 }}>
-                    All {slides.length} slides and the quiz work with no signal.
+                    {t("All {n} slides and the quiz work with no signal.", { n: slides.length })}
                   </div>
                 </div>
               </div>
             )}
             <PrimaryButton onClick={() => setStage("slide")} Z={Z} font={font}>
-              {initialSlide > 1 ? `Continue from slide ${initialSlide} →` : "Begin module →"}
+              {initialSlide > 1 ? t("Continue from slide {n} →", { n: initialSlide }) : t("Begin module →")}
             </PrimaryButton>
           </div>
         </Screen>
@@ -140,10 +155,16 @@ function ModulePlayer({
           </div>
           <div style={{ padding: "18px 18px 0", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <div style={{ color: Z.muted, fontSize: 10.5, fontWeight: 800, letterSpacing: 1.8 }}>
-              SLIDE {slide} OF {slides.length}
+              {t("SLIDE {n} OF {of}", { n: slide, of: slides.length })}
             </div>
-            <div style={{ fontSize: 11, color: Z.green, fontWeight: 700 }}>↓ saved</div>
+            <div style={{ fontSize: 11, color: Z.green, fontWeight: 700 }}>↓ {t("saved")}</div>
           </div>
+          {slides[slide - 1] && (slides[slide - 1].heading || slides[slide - 1].text) && (
+            <div style={{ padding: "10px 18px 0", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+              <ReadAloud text={[slides[slide - 1].heading, slides[slide - 1].text].filter(Boolean).join(". \n")} lang={speechLang} Z={Z} font={font} />
+              {shownMod._trans && <EnglishToggle showEnglish={showEnglish} onToggle={() => setShowEnglish((v) => !v)} Z={Z} font={font} compact />}
+            </div>
+          )}
           <div style={{ padding: "14px 18px 0" }}>
             <SlideCard
               slide={slides[slide - 1]} Z={Z} font={font}
@@ -164,7 +185,7 @@ function ModulePlayer({
               onClick={() => (slide === slides.length ? setStage("quiz") : setSlide(slide + 1))}
               style={{ flex: 1, minHeight: 50, padding: 15, fontSize: 15, borderRadius: 14 }}
             >
-              {slide === slides.length ? "Take the quiz →" : "Next slide →"}
+              {slide === slides.length ? t("Take the quiz →") : t("Next slide →")}
             </PrimaryButton>
           </div>
         </div>
@@ -180,7 +201,10 @@ function ModulePlayer({
           </div>
           <div style={{ padding: "20px 18px 0" }}>
             <div style={{ color: Z.gold, fontSize: 10.5, fontWeight: 800, letterSpacing: 1.8, marginBottom: 6 }}>
-              KNOWLEDGE CHECK · {qIdx + 1} OF {quiz.length}
+              {t("KNOWLEDGE CHECK · {n} OF {of}", { n: qIdx + 1, of: quiz.length })}
+            </div>
+            <div style={{ marginBottom: 10 }}>
+              <ReadAloud text={[quiz[qIdx].q, ...quiz[qIdx].options.map((o, i) => `${"ABCDEF"[i]}. ${o}`)].join(". \n")} lang={speechLang} Z={Z} font={font} />
             </div>
             <h2 style={{ fontSize: 20, fontWeight: 800, color: Z.white, margin: "0 0 18px", lineHeight: 1.35, letterSpacing: -0.2 }}>
               {quiz[qIdx].q}
@@ -219,8 +243,8 @@ function ModulePlayer({
             <div style={{ marginTop: 18 }}>
               <PrimaryButton onClick={submitAnswer} disabled={picked === null} Z={Z} font={font}>
                 {picked === null
-                  ? "Pick an answer"
-                  : qIdx === quiz.length - 1 ? "Finish quiz" : "Next question →"}
+                  ? t("Pick an answer")
+                  : qIdx === quiz.length - 1 ? t("Finish quiz") : t("Next question →")}
               </PrimaryButton>
             </div>
           </div>
@@ -235,7 +259,7 @@ function ModulePlayer({
               fontSize: 28, fontWeight: 900, letterSpacing: -0.8, margin: 0,
               color: result.passed ? Z.green : Z.amber,
             }}>
-              {result.passed ? `Nicely done, ${(user.name || "").split(" ")[0]}` : "Not quite yet"}
+              {result.passed ? t("Nicely done, {name}", { name: (user.name || "").split(" ")[0] }) : t("Not quite yet")}
             </h2>
             <div style={{
               fontSize: 56, fontWeight: 900, color: Z.white, margin: "2px 0",
@@ -244,10 +268,10 @@ function ModulePlayer({
               {result.score}%
             </div>
             <p style={{ color: Z.muted, margin: "0 0 20px", fontSize: 13.5 }}>
-              {result.correct} of {result.total} correct
+              {t("{n} of {of} correct", { n: result.correct, of: result.total })}
               {result.passed
-                ? ` — comfortably above the ${passMark}% pass mark.`
-                : ` — you need ${passMark}% to pass. Have another go whenever you're ready.`}
+                ? ` — ${t("comfortably above the {pct}% pass mark.", { pct: passMark })}`
+                : ` — ${t("you need {pct}% to pass. Have another go whenever you're ready.", { pct: passMark })}`}
             </p>
 
             {result.passed && (
@@ -262,22 +286,21 @@ function ModulePlayer({
               }}>
                 <span style={{ fontSize: 20 }}>⏳</span>
                 <div style={{ fontSize: 12, color: Z.slate, lineHeight: 1.45 }}>
-                  Saved on your phone. It&rsquo;ll appear on your manager&rsquo;s dashboard the
-                  moment you&rsquo;re back in signal.
+                  {t("Saved on your phone. It\u2019ll appear on your manager\u2019s dashboard the moment you\u2019re back in signal.")}
                 </div>
               </div>
             )}
 
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {!result.passed && (
-                <PrimaryButton onClick={retake} Z={Z} font={font}>Review the slides and retake</PrimaryButton>
+                <PrimaryButton onClick={retake} Z={Z} font={font}>{t("Review the slides and retake")}</PrimaryButton>
               )}
               <PrimaryButton
                 onClick={onExit} Z={Z} font={font}
                 tone={result.passed ? "accent" : "gold"}
                 style={result.passed ? undefined : { background: Z.overlay, color: Z.slate, boxShadow: "none" }}
               >
-                Back to home
+                {t("Back to home")}
               </PrimaryButton>
             </div>
 
@@ -286,6 +309,19 @@ function ModulePlayer({
         </Screen>
       )}
     </div>
+  );
+}
+
+// "Show in English" / back to the person's language, on a translated module.
+function EnglishToggle({ showEnglish, onToggle, Z, font, compact }) {
+  return (
+    <button type="button" onClick={onToggle} data-testid="show-english"
+      style={{
+        background: Z.overlay, border: `1px solid ${Z.borderMd}`, borderRadius: 10, color: Z.slate, cursor: "pointer",
+        fontFamily: font, fontWeight: 700, fontSize: compact ? 12 : 13, padding: compact ? "6px 10px" : "9px 14px", minHeight: compact ? 32 : 40,
+      }}>
+      {showEnglish ? t("Show in my language") : "Show in English"}
+    </button>
   );
 }
 
@@ -368,12 +404,12 @@ function MediaFallback({ kind, src, Z }) {
       padding: 16, borderRadius: 14, lineHeight: 1.45, textAlign: "left",
       background: Z.overlay, border: `1px dashed ${Z.borderMd}`, color: Z.muted, fontSize: 13,
     }}>
-      This {kind} couldn't be shown on this phone.
+      {kind === "video" ? t("This video couldn't be shown on this phone.") : t("This image couldn't be shown on this phone.")}
       {canOpen && (
         <a href={src} target="_blank" rel="noopener noreferrer"
           onClick={(e) => e.stopPropagation()}
           style={{ display: "block", marginTop: 6, color: "#93c5fd", fontWeight: 700 }}>
-          Open {kind} in browser
+          {kind === "video" ? t("Open video in browser") : t("Open image in browser")}
         </a>
       )}
     </div>
@@ -414,7 +450,7 @@ function SlideCard({ slide, Z, font, onHotspotStatus }) {
             <button
               key={i}
               onClick={() => setZoom(src)}
-              aria-label="View full size"
+              aria-label={t("View full size")}
               style={{
                 padding: 0, border: `1px solid ${Z.borderMd}`, borderRadius: 14,
                 overflow: "hidden", background: Z.overlay, cursor: "zoom-in", lineHeight: 0,
@@ -424,7 +460,7 @@ function SlideCard({ slide, Z, font, onHotspotStatus }) {
             </button>
           ))}
           <div data-testid="deck-hint" style={{ fontSize: 11.5, color: Z.muted, textAlign: "center", marginTop: -2 }}>
-            Tap the slide to enlarge it, or turn your phone sideways.
+            {t("Tap the slide to enlarge it, or turn your phone sideways.")}
           </div>
         </div>
       )}
@@ -442,7 +478,7 @@ function SlideCard({ slide, Z, font, onHotspotStatus }) {
             <button
               key={i}
               onClick={() => setZoom(src)}
-              aria-label="View full size"
+              aria-label={t("View full size")}
               style={{
                 padding: 0, border: `1px solid ${Z.borderMd}`, borderRadius: 14,
                 overflow: "hidden", background: Z.overlay, cursor: "zoom-in", lineHeight: 0,
@@ -459,7 +495,7 @@ function SlideCard({ slide, Z, font, onHotspotStatus }) {
         <MobileHotspot
           imageUrl={images[0]}
           hotspots={slide.hotspots}
-          instructions={slide.hotspotInstructions || "Tap every hazard you can find in the image."}
+          instructions={slide.hotspotInstructions || t("Tap every hazard you can find in the image.")}
           onStatusChange={onHotspotStatus}
           Z={Z} font={font}
         />
@@ -556,10 +592,10 @@ function MobileHotspot({ imageUrl, hotspots, instructions, onStatusChange, Z, fo
         gap: 10, marginTop: 10, flexWrap: "wrap",
       }}>
         <div style={{ fontSize: 12, fontWeight: 800, color: complete ? Z.green : Z.slate }}>
-          {complete ? `✓ All ${correctTotal} found` : `${correctFound} of ${correctTotal} found`}
+          {complete ? `✓ ${t("All {n} found", { n: correctTotal })}` : t("{n} of {of} found", { n: correctFound, of: correctTotal })}
         </div>
         {misses > 0 && !complete && (
-          <div style={{ fontSize: 11.5, color: Z.muted }}>{misses} miss{misses === 1 ? "" : "es"}</div>
+          <div style={{ fontSize: 11.5, color: Z.muted }}>{misses === 1 ? t("1 miss") : t("{n} misses", { n: misses })}</div>
         )}
       </div>
 
@@ -574,7 +610,7 @@ function MobileHotspot({ imageUrl, hotspots, instructions, onStatusChange, Z, fo
 
       {!complete && (
         <div style={{ marginTop: 8, fontSize: 11.5, color: Z.muted, fontStyle: "italic" }}>
-          Find them all to continue.
+          {t("Find them all to continue.")}
         </div>
       )}
     </div>
@@ -642,11 +678,11 @@ function Certificate({ mod, user, result, Z }) {
         fontSize: 10, fontWeight: 700, letterSpacing: 2.6, textTransform: "uppercase",
         color: "rgba(245,158,11,0.85)", marginBottom: 4,
       }}>
-        Certificate of Completion
+        {t("Certificate of Completion")}
       </div>
       <div style={{ fontSize: 22, fontWeight: 900, color: "#fff", letterSpacing: -0.4 }}>{user.name}</div>
       <div style={{ fontSize: 12.5, color: "rgba(255,255,255,0.55)", marginBottom: 13 }}>
-        has successfully completed
+        {t("has successfully completed")}
       </div>
       <div style={{
         background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.3)",
@@ -654,7 +690,7 @@ function Certificate({ mod, user, result, Z }) {
       }}>
         <div style={{ fontSize: 15, fontWeight: 800, color: "#f59e0b" }}>{mod.title}</div>
         <div style={{ fontSize: 11.5, color: "rgba(255,255,255,0.5)", marginTop: 3 }}>
-          {result.certId} · scored {result.score}%
+          {result.certId} · {t("scored {n}%", { n: result.score })}
         </div>
       </div>
     </div>
@@ -668,7 +704,7 @@ function AnswerReview({ quiz, answers, Z }) {
         fontSize: 10.5, fontWeight: 800, letterSpacing: 1.4, textTransform: "uppercase",
         color: Z.muted, marginBottom: 12,
       }}>
-        Answer review
+        {t("Answer review")}
       </div>
       {quiz.map((q, qi) => {
         const right = answers[qi] === q.answer;
@@ -694,7 +730,7 @@ function AnswerReview({ quiz, answers, Z }) {
                 padding: "10px 12px", background: "rgba(37,99,235,0.1)", borderRadius: 10,
                 border: "1px solid rgba(37,99,235,0.25)", fontSize: 12, color: Z.accentLt, lineHeight: 1.6,
               }}>
-                The correct answer is <em>&ldquo;{q.options[q.answer]}&rdquo;</em>.
+                {tNodes("The correct answer is {answer}.", { answer: <em>&ldquo;{q.options[q.answer]}&rdquo;</em> })}
               </div>
             )}
           </div>

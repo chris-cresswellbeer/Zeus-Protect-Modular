@@ -8,7 +8,7 @@ import { InvestigationDashboard } from "./InvestigationDashboard";
 import { mergeInvestigation, changedSince } from "./investigationMerge";
 import { useFormGuard, DraftBanner } from "../../lib/unsaved";
 
-import { todayISO } from "../../lib/dates";
+import { todayISO, ukDate } from "../../lib/dates";
 import { brandHtml } from "../../lib/brandCore";
 import { photosFromFiles, toStoredPhotos } from "../../lib/photos";
 import { embedFiles } from "../../lib/fileAccess";
@@ -357,7 +357,7 @@ function InvestigationTab({ userName = "", incidents, setIncidents, staff, inves
                     <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:4,flexWrap:"wrap"}}>
                       <span style={{fontSize:11,fontWeight:800,color:ti.col}}>{inc.type.replace("_"," ").toUpperCase()}</span>
                       <span style={{fontSize:11,color:Z.muted}}>📍 {inc.location}</span>
-                      <span style={{fontSize:11,color:Z.muted}}>{inc.date}</span>
+                      <span style={{fontSize:11,color:Z.muted}}>{ukDate(inc.date)}</span>
                       {inc.quickReport && (
                         <span style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:6,color:"#f59e0b",background:"rgba(245,158,11,0.1)",border:"1px solid rgba(245,158,11,0.25)"}}>⚡ Quick Report</span>
                       )}
@@ -419,7 +419,7 @@ function InvestigationTab({ userName = "", incidents, setIncidents, staff, inves
                 <div style={{fontSize:14,fontWeight:700,color:Z.white,marginBottom:4}}>{inc.description.slice(0,120)}{inc.description.length>120?"…":""}</div>
                 <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                   <span style={{fontSize:11,color:Z.muted}}>📍 {inc.location}</span>
-                  <span style={{fontSize:11,color:Z.muted}}>📅 {inc.date}</span>
+                  <span style={{fontSize:11,color:Z.muted}}>📅 {ukDate(inc.date)}</span>
                   {inc.riddor && <span style={{fontSize:11,color:"#f87171",fontWeight:700}}>RIDDOR</span>}
                   {inc.closed ? <span style={{fontSize:11,color:"#10b981",fontWeight:700}}>✓ Incident Closed</span> : <span style={{fontSize:11,color:"#f59e0b",fontWeight:700}}>⏳ Incident Open</span>}
                 </div>
@@ -580,9 +580,9 @@ function InvestigationTab({ userName = "", incidents, setIncidents, staff, inves
                           <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
                             <span style={{fontSize:10,background:`${priCol(a.priority)}22`,color:priCol(a.priority),padding:"1px 8px",borderRadius:99,fontWeight:700,border:`1px solid ${priCol(a.priority)}44`}}>{a.priority}</span>
                             {a.owner && <span style={{fontSize:10,color:Z.muted}}>👤 {a.owner}</span>}
-                            {a.dueDate && <span style={{fontSize:10,color:overdue?"#f87171":Z.muted}}>{overdue?"🚨 Overdue: ":"📅 "}{a.dueDate}</span>}
+                            {a.dueDate && <span style={{fontSize:10,color:overdue?"#f87171":Z.muted}}>{overdue?"🚨 Overdue: ":"📅 "}{ukDate(a.dueDate)}</span>}
                             {done && <span style={{fontSize:10,color:"#10b981",fontWeight:700}}>✓ Complete{a.completedBy?` — ${a.completedBy}`:""}{actionDoneDate(a)?` · ${actionDoneDate(a)}`:""}</span>}
-                            {a.managerSignOff && <span style={{fontSize:10,color:Z.gold,fontWeight:700}}>✓ Signed off by {a.managerSignOff.by} {a.managerSignOff.date}{a.managerSignOff.note?` — ${a.managerSignOff.note}`:""}</span>}
+                            {a.managerSignOff && <span style={{fontSize:10,color:Z.gold,fontWeight:700}}>✓ Signed off by {a.managerSignOff.by} {ukDate(a.managerSignOff.date)}{a.managerSignOff.note?` — ${a.managerSignOff.note}`:""}</span>}
                             {attachments.length>0 && <span style={{fontSize:10,color:Z.muted}}>📎 {attachments.length} file{attachments.length!==1?"s":""}</span>}
                           </div>
                         </div>

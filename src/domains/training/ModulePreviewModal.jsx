@@ -21,7 +21,7 @@ import { langInfo } from "../../lib/i18n";
  * "Pass Mark" is the module's own pass mark (passMarkOf: default 70%), used by both quiz players.
  */
 function ModulePreviewModal({ m, staff, assigns, comps, compHistory = [], moduleVersions = [], isMobile, setAtab, onClose, T, font,
-  allModules = [], translations, onSaveTranslation, onDeleteTranslation, user }) {
+  allModules = [], translations, onSaveTranslation, onDeleteTranslation, user, langsInUse = [] }) {
   React.useEffect(() => { ensureRteStyles(); }, []);
   const [previewSlide, setPreviewSlide] = React.useState(0);
   const [previewTab, setPreviewTab] = React.useState("overview");
@@ -118,7 +118,7 @@ function ModulePreviewModal({ m, staff, assigns, comps, compHistory = [], module
             </div>
           )}
           {previewTab==="translations" && onSaveTranslation && (
-            <TranslationsPanel m={m} allModules={allModules} translations={translations||{}} onSave={onSaveTranslation} onDelete={onDeleteTranslation} user={user} T={T} font={font}/>
+            <TranslationsPanel m={m} allModules={allModules} translations={translations||{}} onSave={onSaveTranslation} onDelete={onDeleteTranslation} user={user} langsInUse={langsInUse} T={T} font={font}/>
           )}
           {previewTab==="versions" && (() => {
             // Which version each person completed: current results (comps) plus every

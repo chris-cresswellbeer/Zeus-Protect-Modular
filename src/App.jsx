@@ -4624,7 +4624,8 @@ export default function App() {
         {/* Module Preview Modal */}
         {previewModule && (
           <ModulePreviewModal m={previewModule} staff={staff} assigns={assigns} comps={comps} compHistory={compHistory} moduleVersions={moduleVersions} isMobile={isMobile} setAtab={setAtab} onClose={()=>setPreviewModule(null)} T={T} font={font}
-            allModules={allModules} translations={moduleTrans} onSaveTranslation={dbSaveTranslation} onDeleteTranslation={dbDeleteTranslation} user={user}/>
+            allModules={allModules} translations={moduleTrans} onSaveTranslation={dbSaveTranslation} onDeleteTranslation={dbDeleteTranslation} user={user}
+            langsInUse={[...new Set(allUsers.filter(u => (u.status || "active") !== "leaver").map(u => languageOf(u)).filter(l => l !== "en"))]}/>
         )}
 
         {/* Mobile nav drawer */}

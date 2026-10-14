@@ -4,7 +4,7 @@
  * WHO SEES WHAT
  *   Staff-facing screens (the phone app, the training module player on a computer,
  *   choosing a password) are shown in the language picked for the person:
- *   English, French, Polish or Romanian. Admin screens, certificates and reports
+ *   English or one of the twelve in LANGUAGES below. Admin screens, certificates and reports
  *   stay in English, which is always the official version.
  *
  * HOW IT WORKS
@@ -25,19 +25,37 @@
 import React from "react";
 
 export const LANGUAGES = [
-  { code: "en", label: "English",  native: "English",  speech: "en-GB" },
-  { code: "fr", label: "French",   native: "Français", speech: "fr-FR" },
-  { code: "pl", label: "Polish",   native: "Polski",   speech: "pl-PL" },
-  { code: "ro", label: "Romanian", native: "Română",   speech: "ro-RO" },
+  { code: "en", label: "English",    native: "English",    speech: "en-GB", deepl: null },
+  { code: "bg", label: "Bulgarian",  native: "Български",  speech: "bg-BG", deepl: "BG" },
+  { code: "cs", label: "Czech",      native: "Čeština",    speech: "cs-CZ", deepl: "CS" },
+  { code: "fr", label: "French",     native: "Français",   speech: "fr-FR", deepl: "FR" },
+  { code: "hu", label: "Hungarian",  native: "Magyar",     speech: "hu-HU", deepl: "HU" },
+  { code: "it", label: "Italian",    native: "Italiano",   speech: "it-IT", deepl: "IT" },
+  { code: "lv", label: "Latvian",    native: "Latviešu",   speech: "lv-LV", deepl: "LV" },
+  { code: "lt", label: "Lithuanian", native: "Lietuvių",   speech: "lt-LT", deepl: "LT" },
+  { code: "pl", label: "Polish",     native: "Polski",     speech: "pl-PL", deepl: "PL" },
+  { code: "pt", label: "Portuguese", native: "Português",  speech: "pt-PT", deepl: "PT-PT" },
+  { code: "ro", label: "Romanian",   native: "Română",     speech: "ro-RO", deepl: "RO" },
+  { code: "sk", label: "Slovak",     native: "Slovenčina", speech: "sk-SK", deepl: "SK" },
+  { code: "uk", label: "Ukrainian",  native: "Українська", speech: "uk-UA", deepl: "UK" },
 ];
 export const LANG_CODES = LANGUAGES.map(l => l.code);
 export const langInfo = code => LANGUAGES.find(l => l.code === code) || LANGUAGES[0];
 export const normLang = code => (LANG_CODES.includes(code) ? code : "en");
 
 const LOADERS = {
+  bg: () => import("./lang/bg.js"),
+  cs: () => import("./lang/cs.js"),
   fr: () => import("./lang/fr.js"),
+  hu: () => import("./lang/hu.js"),
+  it: () => import("./lang/it.js"),
+  lv: () => import("./lang/lv.js"),
+  lt: () => import("./lang/lt.js"),
   pl: () => import("./lang/pl.js"),
+  pt: () => import("./lang/pt.js"),
   ro: () => import("./lang/ro.js"),
+  sk: () => import("./lang/sk.js"),
+  uk: () => import("./lang/uk.js"),
 };
 
 let state = { lang: "en", dict: null, templates: [] };

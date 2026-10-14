@@ -18,7 +18,7 @@
  * ACTIONS (POST JSON { action, ... }), administrators only:
  *   status                                → { ok, configured, plan, used, limit }
  *   translate { target, items:[{text, html}] } → { ok, translations:[string] }
- *       target: "fr" | "pl" | "ro". html items keep their formatting (bold, lists…).
+ *       target: a language code from TARGETS below. html items keep their formatting.
  */
 
 const BASE = String(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "").replace(/\/+$/, "");
@@ -26,7 +26,8 @@ const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const DEEPL_KEY = String(process.env.DEEPL_API_KEY || "").trim();
 const DEEPL_BASE = DEEPL_KEY.endsWith(":fx") ? "https://api-free.deepl.com" : "https://api.deepl.com";
 
-const TARGETS = { fr: "FR", pl: "PL", ro: "RO" };
+// portal language code → DeepL's (must match src/lib/i18n.js LANGUAGES)
+const TARGETS = { bg: "BG", cs: "CS", fr: "FR", hu: "HU", it: "IT", lv: "LV", lt: "LT", pl: "PL", pt: "PT-PT", ro: "RO", sk: "SK", uk: "UK" };
 const MAX_CHARS = 250000;      // one request: far more than the longest module
 const BATCH_ITEMS = 40;        // DeepL accepts up to 50 texts per call
 const BATCH_CHARS = 60000;     // and up to 128 KB per call
@@ -111,7 +112,7 @@ export const handler = async (event) => {
     }
     if (body.action !== "translate") return fail(400, "Unknown action.");
     if (!DEEPL_KEY) return fail(400, "Translation isn't set up yet: add DEEPL_API_KEY in Netlify's environment variables, then redeploy.");
-    if (!TARGETS[body.target]) return fail(400, "Choose French, Polish or Romanian.");
+    if (!TARGETS[body.target]) return fail(400, "That language isn't available for translation.");
     const items = Array.isArray(body.items) ? body.items.map(it => ({ text: String((it && it.text) || ""), html: !!(it && it.html) })) : [];
     if (!items.length) return reply(200, { ok: true, translations: [] });
     const chars = items.reduce((n, it) => n + it.text.length, 0);

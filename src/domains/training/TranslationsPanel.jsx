@@ -1,7 +1,7 @@
 /**
  * domains/training/TranslationsPanel.jsx — Training → module Preview → Translations (admins)
  *
- * For each language (French, Polish, Romanian) shows whether the module has been
+ * For each language (lib/i18n.js LANGUAGES) shows whether the module has been
  * translated, and lets an admin:
  *   • Translate (or translate again) — the English is sent to DeepL by the
  *     zp-translate Netlify function; the result is saved as "Machine translated".
@@ -47,12 +47,13 @@ export async function translateModule(mod, lang) {
   };
 }
 
-export function TranslationsPanel({ m: given, allModules = [], translations = {}, onSave, onDelete, user, T, font }) {
+export function TranslationsPanel({ m: given, allModules = [], translations = {}, onSave, onDelete, user, langsInUse = [], T, font }) {
   // Use the module exactly as staff get it (company name filled in), so the fingerprint matches.
   const m = allModules.find(x => String(x.id) === String(given.id)) || given;
   const [busy, setBusy] = React.useState("");          // "fr" | "all" | "" …
   const [status, setStatus] = React.useState(null);    // translation service status
   const [compare, setCompare] = React.useState(null);  // lang being compared
+  const [showAll, setShowAll] = React.useState(false); // languages nobody uses, folded away
   const supa = AUTH_MODE === "supabase";
 
   React.useEffect(() => {
@@ -77,8 +78,13 @@ export function TranslationsPanel({ m: given, allModules = [], translations = {}
     }
   }
 
+  // Languages someone on the staff list uses, or that this module already has, come first;
+  // "Translate all" only does the languages people use (saves the DeepL allowance).
+  const inUse = new Set(langsInUse);
+  const shown = TARGETS.filter(l => inUse.has(l.code) || rowOf(l.code));
+  const folded = TARGETS.filter(l => !shown.includes(l));
   async function runAll() {
-    const todo = TARGETS.filter(l => stateOf(l.code) === "none" || stateOf(l.code) === "stale").map(l => l.code);
+    const todo = TARGETS.filter(l => inUse.has(l.code) && (stateOf(l.code) === "none" || stateOf(l.code) === "stale")).map(l => l.code);
     for (const code of todo) { await run(code); }
   }
 
@@ -104,11 +110,11 @@ export function TranslationsPanel({ m: given, allModules = [], translations = {}
   if (compare) return <CompareView m={m} row={rowOf(compare)} lang={compare} onBack={() => setCompare(null)}
     onMarkChecked={() => markChecked(compare)} T={T} font={font} btn={btn} />;
 
-  const needAll = TARGETS.filter(l => stateOf(l.code) === "none" || stateOf(l.code) === "stale").length;
+  const needAll = TARGETS.filter(l => inUse.has(l.code) && (stateOf(l.code) === "none" || stateOf(l.code) === "stale")).length;
   return (
     <div data-testid="translations-panel">
       <p style={{ color: T.muted, fontSize: 13, lineHeight: 1.6, margin: "0 0 14px" }}>
-        Staff who have chosen French, Polish or Romanian see this module in their language once it's translated here.
+        Staff who have chosen another language see this module in it once it's translated here.
         The English stays the official version. Machine translations should be read by a bilingual member of staff
         and marked as checked — safety wording matters.
       </p>
@@ -122,13 +128,15 @@ export function TranslationsPanel({ m: given, allModules = [], translations = {}
           DeepL ({status.plan}): {Number(status.used).toLocaleString("en-GB")} of {Number(status.limit).toLocaleString("en-GB")} characters used this month.
         </div>
       )}
+      {!shown.length && <div style={{ fontSize: 12.5, color: T.muted, marginBottom: 10 }} data-testid="no-langs-in-use">Nobody's language is set to anything but English yet (Staff → Edit → Language). You can still translate into any language below.</div>}
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {TARGETS.map(l => {
+        {[...shown, ...(showAll || !shown.length ? folded : [])].map(l => {
           const st = stateOf(l.code); const row = rowOf(l.code); const s = STATE[st];
           return (
             <div key={l.code} data-testid={`trans-${l.code}`} style={{ background: T.overlay, border: `1px solid ${T.border}`, borderRadius: 12, padding: "12px 14px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
               <div style={{ flex: 1, minWidth: 180 }}>
-                <div style={{ fontWeight: 800, fontSize: 14, color: T.white }}>{l.label} <span style={{ color: T.muted, fontWeight: 600 }}>· {l.native}</span></div>
+                <div style={{ fontWeight: 800, fontSize: 14, color: T.white }}>{l.label} <span style={{ color: T.muted, fontWeight: 600 }}>· {l.native}</span>
+                  {inUse.has(l.code) && <span style={{ marginLeft: 8, fontSize: 10.5, fontWeight: 800, color: T.accentLt, border: `1px solid ${T.borderMd}`, borderRadius: 6, padding: "1px 6px" }}>in use</span>}</div>
                 <div style={{ fontSize: 12, fontWeight: 700, color: s.col, marginTop: 2 }} data-testid={`trans-state-${l.code}`}>{s.label}</div>
                 {row && (
                   <div style={{ fontSize: 11, color: T.muted, marginTop: 2 }}>
@@ -148,12 +156,18 @@ export function TranslationsPanel({ m: given, allModules = [], translations = {}
           );
         })}
       </div>
-      {needAll > 1 && supa && (
-        <button style={{ ...btn(true), marginTop: 12 }} disabled={!!busy} onClick={runAll} data-testid="translate-all">
-          Translate into all {needAll} languages that need it
+      {shown.length > 0 && folded.length > 0 && (
+        <button type="button" onClick={() => setShowAll(v => !v)} data-testid="more-langs"
+          style={{ background: "none", border: "none", color: T.accentLt, cursor: "pointer", fontFamily: font, fontWeight: 700, fontSize: 12.5, marginTop: 10, padding: 0 }}>
+          {showAll ? "▾ Hide languages nobody uses" : `▸ ${folded.length} more languages nobody uses yet`}
         </button>
       )}
-      <BulkTranslate allModules={allModules} translations={translations} onSave={onSave} supa={supa} T={T} font={font} btn={btn} />
+      {needAll > 1 && supa && (
+        <button style={{ ...btn(true), marginTop: 12 }} disabled={!!busy} onClick={runAll} data-testid="translate-all">
+          Translate into all {needAll} languages in use that need it
+        </button>
+      )}
+      <BulkTranslate allModules={allModules} translations={translations} onSave={onSave} supa={supa} inUse={inUse} T={T} font={font} btn={btn} />
     </div>
   );
 }
@@ -164,12 +178,12 @@ function Note({ T, col, children }) {
   return <div style={{ background: `${col}14`, border: `1px solid ${col}55`, borderRadius: 10, padding: "9px 12px", fontSize: 12.5, color: T.slate || T.white, lineHeight: 1.5, marginBottom: 12 }}>{children}</div>;
 }
 
-/** Every module at once: translate whatever is missing or out of date, in all three languages. */
-function BulkTranslate({ allModules, translations, onSave, supa, T, font, btn }) {
+/** Every module at once: translate whatever is missing or out of date, in every language staff use. */
+function BulkTranslate({ allModules, translations, onSave, supa, inUse, T, font, btn }) {
   const [prog, setProg] = React.useState(null);   // { done, total, failed }
   const visible = allModules.filter(x => !x._hidden);
   const jobs = [];
-  visible.forEach(mod => TARGETS.forEach(l => {
+  visible.forEach(mod => TARGETS.filter(l => inUse.has(l.code)).forEach(l => {   // only languages people use
     const st = translationState(mod, translations[translationKey(mod.id, l.code)]);
     if (st === "none" || st === "stale") jobs.push({ mod, lang: l.code });
   }));

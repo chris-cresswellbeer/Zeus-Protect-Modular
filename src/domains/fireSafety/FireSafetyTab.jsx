@@ -10,7 +10,7 @@ import { useRemembered } from "../../lib/remembered";
 import { checkMachineFiles, MACHINE_EVIDENCE_ACCEPT } from "../machinery/machineEvidence";
 import { fireSummary, expiryState, plusMonths, todayLocal, WARDEN_CERT } from "./fireLogic";
 
-import { todayISO } from "../../lib/dates";
+import { todayISO, ukDate } from "../../lib/dates";
 /**
  * FireSafetyTab — admin fire safety log book (Regulatory Reform (Fire Safety) Order 2005).
  *
@@ -481,7 +481,7 @@ function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDel
                 <div key={row.key} data-testid="drill-row" style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:12,padding:"14px 16px",display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
                   <div style={{fontSize:22}}>{E("🔔","")}</div>
                   <div style={{flex:1,minWidth:140}}>
-                    <div style={{fontWeight:700,fontSize:14,color:Z.white}}>{ins.date}</div>
+                    <div style={{fontWeight:700,fontSize:14,color:Z.white}}>{ukDate(ins.date)}</div>
                     <div style={{fontSize:12,color:Z.muted,marginTop:1}}>{[ins.location, ins.inspector && `Checked by ${ins.inspector}`, "Fire Drill checklist (Inspections)"].filter(Boolean).join(" · ")}</div>
                   </div>
                   {insLink}
@@ -492,7 +492,7 @@ function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDel
                 <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",marginBottom:d.issues?10:0}}>
                   <div style={{fontSize:22}}>🚨</div>
                   <div style={{flex:1,minWidth:100}}>
-                    <div style={{fontWeight:700,fontSize:14,color:Z.white}}>{d.date}{d.time?` at ${d.time}`:""}</div>
+                    <div style={{fontWeight:700,fontSize:14,color:Z.white}}>{ukDate(d.date)}{d.time?` at ${d.time}`:""}</div>
                     <div style={{fontSize:12,color:Z.muted,marginTop:1}}>{[d.zone, d.conductedBy && `Conducted by ${d.conductedBy}`, d.weather].filter(Boolean).join(" · ")}</div>
                   </div>
                   {d.evacuTime && <div style={{textAlign:"center",padding:"6px 14px",background:"rgba(37,99,235,0.1)",borderRadius:8,border:"1px solid rgba(37,99,235,0.2)"}}>
@@ -536,7 +536,7 @@ function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDel
               <tbody>
                 {alarmTests.slice().sort((a,b)=>b.date.localeCompare(a.date)).map((t,i)=>(
                   <tr key={t.id} style={{borderBottom:`1px solid ${Z.border}`,background:i%2===0?"transparent":Z.overlay}}>
-                    <td style={{padding:"9px 12px",color:Z.white,fontWeight:600,whiteSpace:"nowrap"}}>{t.date}</td>
+                    <td style={{padding:"9px 12px",color:Z.white,fontWeight:600,whiteSpace:"nowrap"}}>{ukDate(t.date)}</td>
                     <td style={{padding:"9px 12px",color:Z.white}}>{t.callPoint}</td>
                     <td style={{padding:"9px 12px",color:Z.muted}}>{t.testedBy}</td>
                     <td style={{padding:"9px 12px"}}>
@@ -794,7 +794,7 @@ function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDel
               <tbody>
                 {emergLighting.slice().sort((a,b)=>b.date.localeCompare(a.date)).map((t,i)=>(
                   <tr key={t.id} style={{borderBottom:`1px solid ${Z.border}`,background:i%2===0?"transparent":Z.overlay}}>
-                    <td style={{padding:"9px 12px",color:Z.white,fontWeight:600,whiteSpace:"nowrap"}}>{t.date}</td>
+                    <td style={{padding:"9px 12px",color:Z.white,fontWeight:600,whiteSpace:"nowrap"}}>{ukDate(t.date)}</td>
                     <td style={{padding:"9px 12px"}}>
                       <Badge label={t.testType==="annual"?"Annual 3hr":"Monthly"} color={t.testType==="annual"?"#8b5cf6":"#3b82f6"} bg={t.testType==="annual"?"rgba(139,92,246,0.12)":"rgba(59,130,246,0.12)"}/>
                     </td>
@@ -851,7 +851,7 @@ function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDel
                 <div key={row.key} data-testid="fra-row" style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:12,padding:"16px",display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
                   <div style={{width:38,height:38,borderRadius:"50%",background:"rgba(239,68,68,0.15)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{E("🔥","")}</div>
                   <div style={{flex:1,minWidth:160}}>
-                    <div style={{fontWeight:700,fontSize:14,color:Z.white}}>{ins.date}{ins.inspector?` — ${ins.inspector}`:""}</div>
+                    <div style={{fontWeight:700,fontSize:14,color:Z.white}}>{ukDate(ins.date)}{ins.inspector?` — ${ins.inspector}`:""}</div>
                     <div style={{fontSize:12,color:Z.muted,marginTop:2}}>{[ins.location, "Fire Risk Assessment checklist (Inspections)"].filter(Boolean).join(" · ")}</div>
                   </div>
                   {due}
@@ -863,7 +863,7 @@ function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDel
                   <div style={{width:38,height:38,borderRadius:"50%",background:r.reviewType==="external"?"rgba(139,92,246,0.15)":"rgba(239,68,68,0.15)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{r.reviewType==="external"?"🏢":"📋"}</div>
                   <div style={{flex:1,minWidth:160}}>
                     <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:2}}>
-                      <div style={{fontWeight:700,fontSize:14,color:Z.white}}>{r.date}{r.reviewedBy?` — ${r.reviewedBy}`:""}</div>
+                      <div style={{fontWeight:700,fontSize:14,color:Z.white}}>{ukDate(r.date)}{r.reviewedBy?` — ${r.reviewedBy}`:""}</div>
                       {r.reviewType==="external" && <span style={{fontSize:11,fontWeight:700,color:"#a78bfa",background:"rgba(139,92,246,0.15)",border:"1px solid rgba(139,92,246,0.3)",borderRadius:6,padding:"1px 8px"}}>External</span>}
                     </div>
                     {r.reviewType==="external" && r.externalCompany && (

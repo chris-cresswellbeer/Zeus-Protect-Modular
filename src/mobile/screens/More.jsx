@@ -10,7 +10,7 @@ import { Screen, SectionLabel, Row, StatusChip, PrimaryButton } from "../ui";
 import { promptInstall, isStandalone } from "../registerSW";
 import { WelcomeReplay } from "../../shared/WelcomeVideo";
 
-import { todayISO } from "../../lib/dates";
+import { todayISO, ukDate } from "../../lib/dates";
 import { getBrand } from "../../lib/brandCore";
 import { t, tNodes, langInfo } from "../../lib/i18n";
 const tr = t;   // in Appearance, `t` is the theme being drawn
@@ -336,7 +336,7 @@ function TrainingHistory({ entries, stats, Z, font }) {
                   borderRadius: "50%", border: `2px solid ${Z.bg}`,
                   background: e.lapsed ? "#f59e0b" : "#10b981",
                 }} />
-                <div style={{ fontSize: 11, color: Z.muted, fontWeight: 700, marginBottom: 2 }}>{e.date}</div>
+                <div style={{ fontSize: 11, color: Z.muted, fontWeight: 700, marginBottom: 2 }}>{ukDate(e.date)}</div>
                 <div style={{ fontSize: 13.5, fontWeight: 700, color: Z.white }}>{e.title}</div>
                 <div style={{ fontSize: 11.5, color: e.lapsed ? "#f59e0b" : "#10b981", marginTop: 1 }}>
                   {t(e.outcome)}

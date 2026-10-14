@@ -5,7 +5,7 @@ import { INDUCTION_ITEMS } from "../../data/seedContractors";
 import { WorkerDetailModal } from "./WorkerDetailModal";
 import { CompanyForm } from "./CompanyForm";
 
-import { localISO, todayISO } from "../../lib/dates";
+import { localISO, todayISO, ukDate } from "../../lib/dates";
 /**
  * ContractorDetail — one contractor company: tabs for visits (sign-in log and
  * scheduled visits), workers (with induction % and certificate status), and company
@@ -236,7 +236,7 @@ function ContractorDetail({ selCon, contractorInductions, setContractorInduction
                     <div key={v.id||vi} style={{background:"rgba(245,158,11,0.06)",borderRadius:12,padding:"14px 18px",border:"1px solid rgba(245,158,11,0.2)",display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12}}>
                       <div style={{flex:1}}>
                         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:5,flexWrap:"wrap"}}>
-                          <span style={{fontSize:13,fontWeight:800,color:"#f59e0b"}}>{v.date}</span>
+                          <span style={{fontSize:13,fontWeight:800,color:"#f59e0b"}}>{ukDate(v.date)}</span>
                           <span style={{fontSize:11,color:T.muted}}>in {daysUntil} day{daysUntil!==1?"s":""}</span>
                           {v.timeIn && <span style={{fontSize:11,color:T.muted}}>{v.timeIn}{v.timeOut?` – ${v.timeOut}`:""}</span>}
                           {v.permitRequired && <span style={{fontSize:10,fontWeight:700,color:"#f59e0b",background:"rgba(245,158,11,0.12)",padding:"1px 7px",borderRadius:20,border:"1px solid rgba(245,158,11,0.3)"}}>⚠ Permit</span>}
@@ -329,7 +329,7 @@ function ContractorDetail({ selCon, contractorInductions, setContractorInduction
                   <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12}}>
                     <div style={{flex:1}}>
                       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,flexWrap:"wrap"}}>
-                        <span style={{fontSize:14,fontWeight:800,color:T.white}}>{v.date}</span>
+                        <span style={{fontSize:14,fontWeight:800,color:T.white}}>{ukDate(v.date)}</span>
                         {v.timeIn && <span style={{fontSize:12,color:T.muted}}>{v.timeIn}{v.timeOut?` – ${v.timeOut}`:""}</span>}
                         {v.permitRequired && <span style={{fontSize:10,fontWeight:700,color:"#f59e0b",background:"rgba(245,158,11,0.12)",padding:"1px 7px",borderRadius:20,border:"1px solid rgba(245,158,11,0.3)"}}>⚠ Permit</span>}
                         {v.date===today && <span style={{fontSize:10,fontWeight:700,color:"#10b981",background:"rgba(16,185,129,0.12)",padding:"1px 7px",borderRadius:20,border:"1px solid rgba(16,185,129,0.3)"}}>TODAY</span>}

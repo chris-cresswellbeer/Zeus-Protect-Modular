@@ -8,6 +8,7 @@ import { Screen, SectionLabel, PrimaryButton } from "../ui";
 import { MyBundles } from "../../domains/documents/DocBundles";
 import { bundleNamesOf } from "../../domains/documents/bundles";
 import { t } from "../../lib/i18n";
+import { ukDate } from "../../lib/dates";
 
 // Same icon mapping as the desktop Documents tab.
 const EXT_ICONS = {
@@ -105,7 +106,7 @@ function Documents({ docs, required, acknowledgements, onAcknowledge, onPreview,
                   <span style={{ fontSize: 23 }}>{EXT_ICONS[ext] || "📄"}</span>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13.5, fontWeight: 700, color: Z.white }}>{d.title}</div>
-                    <div style={{ fontSize: 11, color: Z.muted, marginTop: 1 }}>{d.date} · {d.size}</div>
+                    <div style={{ fontSize: 11, color: Z.muted, marginTop: 1 }}>{ukDate(d.date)} · {d.size}</div>
                   </div>
                   <span style={{ color: Z.mutedDk }}>›</span>
                 </button>

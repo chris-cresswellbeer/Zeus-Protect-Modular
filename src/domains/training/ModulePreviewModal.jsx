@@ -7,6 +7,7 @@ import { SlideVideo } from "../../shared/SlideVideo";
 import { isPassed, scoreText, recordedText, passMarkOf } from "./completion";
 import { TranslationsPanel } from "./TranslationsPanel";
 import { langInfo } from "../../lib/i18n";
+import { ukDate } from "../../lib/dates";
 
 /**
  * ModulePreviewModal — admin read-only preview of a training module
@@ -150,7 +151,7 @@ function ModulePreviewModal({ m, staff, assigns, comps, compHistory = [], module
                       <tr key={i}>
                         <td style={{...cell,color:T.white,fontWeight:600}}>{r.name}</td>
                         <td style={{...cell,color:r.ver===curVer?T.green:T.gold,fontWeight:700}}>v{r.ver}</td>
-                        <td style={{...cell,color:T.muted}}>{r.date}</td>
+                        <td style={{...cell,color:T.muted}}>{ukDate(r.date)}</td>
                         <td title={r.recorded?recordedText(r):undefined} style={{...cell,color:isPassed(r)?T.green:T.amber,fontWeight:700}}>{scoreText(r)}</td>
                         <td style={{...cell,color:r.lang?T.white:T.muted}} data-testid="result-lang">{r.lang?langInfo(r.lang).label:"English"}</td>
                         <td style={{...cell,color:T.muted}}>{r.current?"Current":"Earlier"}</td>

@@ -6,12 +6,14 @@ import { useWindowWidth } from "../../shared/hooks";
 import { HelpTip } from "../../shared/HelpTip";
 import { E } from "../../lib/emoji";
 import { ACCEPT_IMAGES } from "../../lib/constants";
+import { compressToDataUrl, uploadPhotos, PHOTO_BUCKET } from "../../lib/photos";
 import { useInspTemplates, inspTypes, inspType, inspSections } from "../../lib/inspTemplates";
+import { ChecklistManager } from "./ChecklistManager";
 import { embedFiles } from "../../lib/fileAccess";
 import { useRemembered } from "../../lib/remembered";
 import { latestByKey, supersededBy, overdueInspections } from "./inspectionDue";
 
-import { todayISO, addMonths, localISO } from "../../lib/dates";
+import { todayISO, addMonths, localISO, ukDate } from "../../lib/dates";
 import { brandHtml } from "../../lib/brandCore";
 /**
  * SiteInspectionsTab — admin workplace inspections (checklists + non-conformances).
@@ -64,9 +66,10 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
   const [editNcIdx, setEditNcIdx] = useState(null);
   const [ncReturnSection, setNcReturnSection] = useState(null); // section index to jump back to after saving/cancelling an NC flagged from a checklist question
   const [editingInspId, setEditingInspId] = useState(null);
+  const [continueId, setContinueId] = useState(null);   // a saved inspection reopened to carry on / correct its answers
   const [editInspForm, setEditInspForm] = useState(null);
   // unsaved-changes warning + draft on this device for a new inspection (lib/unsaved.jsx)
-  const inspGuard = useFormGuard({ key: "inspection.new", label: "your new inspection", active: view === "new", value: form, onRestore: v => setForm(v) });
+  const inspGuard = useFormGuard({ key: continueId ? `inspection.edit.${continueId}` : "inspection.new", label: continueId ? "your changes to this inspection" : "your new inspection", active: view === "new", value: form, onRestore: v => setForm(v) });
 
   const today = (()=>{ const t=new Date(); return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,"0")}-${String(t.getDate()).padStart(2,"0")}`; })();   // local date
   const selInsp = inspections.find(i=>i.id===activeId);
@@ -97,6 +100,29 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
     setForm(p=>({ ...p, comments:{ ...(p.comments||{}), [secId]:{ ...((p.comments||{})[secId]||{}), [qId]:text } } }));
   }
   const [openComments, setOpenComments] = useState({});   // "secId/qId" → comment box shown
+  // Evidence photos for one question: made smaller, then uploaded straight away (the record
+  // keeps links, not the pictures themselves). If the upload fails the picture stays in the
+  // record and is uploaded again on the next try.
+  const [qPhotoBusy, setQPhotoBusy] = useState("");
+  async function addQuestionPhotos(secId, qId, files) {
+    const key = `${secId}/${qId}`; setQPhotoBusy(key); setPhotoError("");
+    try {
+      const urls = (await Promise.all(Array.from(files||[]).map(f=>compressToDataUrl(f)))).filter(Boolean);
+      const up = await uploadPhotos(PHOTO_BUCKET, `inspq_${form.id||form.draftId||Date.now()}_${secId}_${qId}`, urls);
+      setForm(p=>({ ...p, photos:{ ...(p.photos||{}), [secId]:{ ...((p.photos||{})[secId]||{}), [qId]:[...(((p.photos||{})[secId]||{})[qId]||[]), ...up] } } }));
+    } catch (e) { setPhotoError(`The photo couldn't be added. ${e.message||e}`); }
+    setQPhotoBusy("");
+  }
+  const removeQuestionPhoto = (secId, qId, i) => setForm(p=>({ ...p, photos:{ ...(p.photos||{}), [secId]:{ ...((p.photos||{})[secId]||{}), [qId]:(((p.photos||{})[secId]||{})[qId]||[]).filter((_,x)=>x!==i) } } }));
+  const photoSrc = ph => typeof ph==="string" ? ph : (ph && (ph.data||ph.url)) || "";
+  // Continue / correct a saved inspection: the checklist opens with its answers
+  function continueInspection(ins) {
+    const secs = inspSections(ins.type);
+    const firstOpen = Math.max(0, secs.findIndex(sc=>sc.questions.some(q=>((ins.sections||{})[sc.id]||{})[q.id]===undefined)));
+    setForm({ type:ins.type, date:ins.date, inspector:ins.inspector||"", location:ins.location||"", summary:ins.summary||"", sections:JSON.parse(JSON.stringify(ins.sections||{})),
+      comments:JSON.parse(JSON.stringify(ins.comments||{})), photos:JSON.parse(JSON.stringify(ins.photos||{})), nonConformances:(ins.nonConformances||[]).map(n=>({...n})), nextDue:ins.nextDue||"", id:ins.id });
+    setContinueId(ins.id); setFormSection(secs.length ? firstOpen : 0); setNcForm(null); setEditNcIdx(null); setNcReturnSection(null); setView("new"); window.scrollTo({top:0});
+  }
 
   // NC photos are read as base64 data URLs (max 5 MB each). ncIdx given → add to an existing
   // NC on the active inspection; otherwise add to the NC currently being drafted.
@@ -160,9 +186,18 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
       overallScore: earned,
       maxScore: possible,
     };
-    setInspections(p=>[newInsp,...p]);
+    if (continueId) {
+      // carrying on with / correcting a saved inspection: same record, same id
+      const { id: _drop, draftId: _d, ...rest } = newInsp;
+      setInspections(p=>p.map(x=>x.id===continueId ? { ...x, ...rest, id:continueId, editedAt:new Date().toISOString(), editedBy:userName||"" } : x));
+      inspGuard.done(); setActiveId(continueId); setContinueId(null);
+      setForm(BLANK_FORM); setView("detail"); window.scrollTo({top:0});
+      return;
+    }
+    const { draftId: _d2, ...clean } = newInsp;
+    setInspections(p=>[clean,...p]);
     inspGuard.done();
-    setView("detail"); setActiveId(newInsp.id);
+    setView("detail"); setActiveId(clean.id);
   }
 
   // Photos may be {name,data} objects (added here) or URL strings (added on a phone and
@@ -174,7 +209,7 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
     const openNCs = ins.nonConformances.filter(n=>n.actionStatus!=="complete");
     const closedNCs = ins.nonConformances.filter(n=>n.actionStatus==="complete");
     // Build printable HTML
-    const html = `<!DOCTYPE html><html><head><title>Inspection Report — ${ins.date}</title>
+    const html = `<!DOCTYPE html><html><head><title>Inspection Report — ${ukDate(ins.date)}</title>
     <style>
       body{font-family:Arial,sans-serif;color:#1e293b;max-width:800px;margin:0 auto;padding:40px 32px;font-size:14px;line-height:1.6}
       h1{font-size:26px;font-weight:900;margin:0 0 4px;color:#0d1f5c}
@@ -207,7 +242,7 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
       .footer{margin-top:40px;padding-top:16px;border-top:1px solid #e2e8f0;font-size:12px;color:#94a3b8;display:flex;justify-content:space-between}
     </style></head><body>
     <h1>${ti.icon} ${ti.label} — Action Report</h1>
-    <p class="subtitle">${ins.location} &nbsp;·&nbsp; Inspected: ${ins.date} &nbsp;·&nbsp; Inspector: ${ins.inspector}</p>
+    <p class="subtitle">${esc(ins.location)} &nbsp;·&nbsp; Inspected: ${ukDate(ins.date)} &nbsp;·&nbsp; Inspector: ${esc(ins.inspector)}</p>
     <div class="meta">
       <div class="meta-item"><div class="meta-label">Inspection Type</div><div class="meta-value">${ti.label}</div></div>
       <div class="meta-item"><div class="meta-label">Status</div><div class="meta-value">${ins.status==="open"?"⚠ Open — Actions Required":"✓ Closed"}</div></div>
@@ -233,7 +268,7 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
           <span>Section: ${nc.section}</span>
           <span class="badge ${nc.actionStatus}">${nc.actionStatus==="complete"?"✓ Complete":"⏳ Open"}</span>
         </div>
-        ${nc.actionOwner?`<div class="nc-row">Owner: ${nc.actionOwner} · Due: ${nc.actionDue||"TBD"}</div>`:""}
+        ${nc.actionOwner?`<div class="nc-row">Owner: ${nc.actionOwner} · Due: ${nc.actionDue?ukDate(nc.actionDue):"TBD"}</div>`:""}
         ${nc.actionNote?`<div class="nc-row">Resolution: ${nc.actionNote}</div>`:""}
         ${nc.photos&&nc.photos.length>0?`<div class="photo-grid">${nc.photos.map((p,j)=>typeof p==="string"?`<img src="${p}" alt="Photo ${j+1}"/>`:`<img src="${p.data||p.url}" alt="${p.name||""}"/>`).join("")}</div>`:""}
       </div>`).join("")}
@@ -241,10 +276,10 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
     ${(()=>{ const secs = inspSections(ins.type); if(!secs.length) return "";
       return `<h2>Checklist results</h2>${secs.map(sc=>`<h3 style="font-size:13.5px;margin:18px 0 6px;color:#0d1f5c">${esc(sc.label)}</h3>
       <table style="width:100%;border-collapse:collapse;font-size:12px"><tr style="background:#f1f5f9"><th style="text-align:left;padding:5px 8px;width:62px">Ref</th><th style="text-align:left;padding:5px 8px">Requirement</th><th style="text-align:left;padding:5px 8px;width:96px">Result</th><th style="text-align:left;padding:5px 8px;width:30%">Comments</th></tr>
-      ${sc.questions.map(q=>{ const a=ansOf(ins,sc.id,q.id); const L=ANS[a]; return `<tr style="border-top:1px solid #e2e8f0;vertical-align:top"><td style="padding:5px 8px;font-weight:700">${esc(q.ref||"")}${q.tag?`<br><span style="font-weight:400;color:#64748b">${esc(q.tag)}</span>`:""}</td><td style="padding:5px 8px;white-space:pre-line">${esc(q.text)}</td><td style="padding:5px 8px;font-weight:700;color:${L?L[2]:"#94a3b8"}">${L?L[0]:"Not answered"}</td><td style="padding:5px 8px;white-space:pre-line">${esc(commentOf(ins,sc.id,q.id))}</td></tr>`; }).join("")}</table>`).join("")}`; })()}
+      ${sc.questions.map(q=>{ const a=ansOf(ins,sc.id,q.id); const L=ANS[a]; return `<tr style="border-top:1px solid #e2e8f0;vertical-align:top"><td style="padding:5px 8px;font-weight:700">${esc(q.ref||"")}${q.tag?`<br><span style="font-weight:400;color:#64748b">${esc(q.tag)}</span>`:""}</td><td style="padding:5px 8px;white-space:pre-line">${esc(q.text)}</td><td style="padding:5px 8px;font-weight:700;color:${L?L[2]:"#94a3b8"}">${L?L[0]:"Not answered"}</td><td style="padding:5px 8px;white-space:pre-line">${esc(commentOf(ins,sc.id,q.id))}${((((ins.photos||{})[sc.id]||{})[q.id])||[]).map(ph=>`<br><img src="${esc(photoSrc(ph))}" style="width:110px;height:82px;object-fit:cover;border-radius:4px;margin-top:4px">`).join("")}</td></tr>`; }).join("")}</table>`).join("")}`; })()}
     <div class="footer">
       <span>${brandHtml().foot} — Site Inspection Report</span>
-      <span>Generated: ${today}</span>
+      <span>Generated: ${ukDate(today)}</span>
     </div>
     </body></html>`;
     // Photos are saved as storage links (strings). With the new sign-in those files are
@@ -271,8 +306,13 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
           <button onClick={()=>{setView("list");window.scrollTo({top:0,behavior:"smooth"});}} style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:8,padding:"7px 14px",color:Z.muted,cursor:"pointer",fontFamily:font,fontSize:12,fontWeight:700}}>← All Inspections</button>
           <div style={{flex:1}}>
             <h2 style={{margin:0,fontSize:20,fontWeight:900,color:Z.white}}>{ti.icon} {ti.label}</h2>
-            <p style={{margin:0,color:Z.muted,fontSize:13}}>📍 {selInsp.location} · {selInsp.date} · Inspector: {selInsp.inspector}</p>
+            <p style={{margin:0,color:Z.muted,fontSize:13}}>📍 {selInsp.location} · {ukDate(selInsp.date)} · Inspector: {selInsp.inspector}</p>
           </div>
+          {inspSections(selInsp.type).length>0 && (()=>{ const secs=inspSections(selInsp.type); const left=secs.reduce((n,sc)=>n+sc.questions.filter(q=>((selInsp.sections||{})[sc.id]||{})[q.id]===undefined).length,0); return (
+            <button type="button" data-testid="insp-continue" onClick={()=>continueInspection(selInsp)}
+              style={{background:left?`linear-gradient(135deg,${Z.accent},${Z.blue})`:Z.overlay,color:left?"#fff":Z.white,border:left?"none":`1px solid ${Z.borderMd}`,borderRadius:10,padding:"9px 18px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:13}}>
+              {left?`▶ Continue (${left} not answered)`:"✏ Edit answers"}
+            </button>); })()}
           <button onClick={()=>generateReport(selInsp)}
             style={{background:`linear-gradient(135deg,#6366f1,#4f46e5)`,color:"#fff",border:"none",borderRadius:10,padding:"9px 20px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:13,boxShadow:"0 4px 14px rgba(99,102,241,0.35)"}}>
             📄 Download Action Report
@@ -341,7 +381,8 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
                       {sc.questions.map(q=>{ const a=ansOf(selInsp,sc.id,q.id); const L=ANS[a]; const cm=commentOf(selInsp,sc.id,q.id); return (
                         <div key={q.id} style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",gap:10,padding:"8px 10px",background:Z.overlay,borderRadius:8,fontSize:12.5,lineHeight:1.5}}>
                           <div style={{color:Z.white,whiteSpace:"pre-line"}}>{q.ref && <b style={{marginRight:6}}>{q.ref}{q.tag?` · ${q.tag}`:""}</b>}{q.text}
-                            {cm && <div style={{marginTop:4,color:Z.muted,fontStyle:"italic"}}>💬 {cm}</div>}</div>
+                            {cm && <div style={{marginTop:4,color:Z.muted,fontStyle:"italic"}}>💬 {cm}</div>}
+                            {(((selInsp.photos||{})[sc.id]||{})[q.id]||[]).length>0 && <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:6}}>{((selInsp.photos||{})[sc.id]||{})[q.id].map((ph,pi)=><img key={pi} src={photoSrc(ph)} alt={`Evidence photo ${pi+1} for ${q.ref||"this question"}`} style={{width:72,height:72,objectFit:"cover",borderRadius:6,border:`1px solid ${Z.border}`}}/>)}</div>}</div>
                           <span style={{fontWeight:800,color:L?L[1]:Z.muted,whiteSpace:"nowrap"}}>{L?L[0]:"—"}</span>
                         </div>
                       ); })}
@@ -382,7 +423,7 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
                           <p style={{fontWeight:600,fontSize:13,margin:"0 0 8px",color:Z.white,lineHeight:1.5}}>{nc.finding}</p>
                           <div style={{display:"flex",gap:12,flexWrap:"wrap",fontSize:11,color:Z.muted}}>
                             {nc.actionOwner && <span>👤 {nc.actionOwner}</span>}
-                            {nc.actionDue && <span style={{color:nc.actionStatus!=="complete"&&nc.actionDue<today?"#f87171":Z.muted}}>📅 Due: {nc.actionDue}{nc.actionStatus!=="complete"&&nc.actionDue<today?" 🚨":""}</span>}
+                            {nc.actionDue && <span style={{color:nc.actionStatus!=="complete"&&nc.actionDue<today?"#f87171":Z.muted}}>📅 Due: {ukDate(nc.actionDue)}{nc.actionStatus!=="complete"&&nc.actionDue<today?" 🚨":""}</span>}
                           </div>
                         </div>
                         <div style={{display:"flex",gap:6,flexShrink:0}}>
@@ -472,7 +513,7 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
     // Jump to the Non-Conformances tab with a finding pre-filled from a specific checklist question
     // Severity defaults: Non-compliant → major, Partial → minor.
     const flagQuestion = (secForQ, q, ans) => {
-      setNcForm({ ...BLANK_NC, section:secForQ.label, sectionId:secForQ.id, questionId:q.id, severity:ans===0?"major":"minor", finding:q.ref?`${q.ref}${q.tag?` (${q.tag})`:""} – ${q.text}`:q.text });
+      setNcForm({ ...BLANK_NC, photos:[...((((form.photos||{})[secForQ.id]||{})[q.id])||[])], section:secForQ.label, sectionId:secForQ.id, questionId:q.id, severity:ans===0?"major":"minor", finding:q.ref?`${q.ref}${q.tag?` (${q.tag})`:""} – ${q.text}`:q.text });
       setEditNcIdx(null);
       setNcReturnSection(formSection);
       setFormSection(sections.length);
@@ -488,10 +529,10 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
       <div>
         <DraftBanner guard={inspGuard} Z={Z} font={font} what="a new inspection"/>
         <div style={{display:"flex",gap:12,alignItems:"center",marginBottom:20,flexWrap:"wrap"}}>
-          <button onClick={async()=>{if(inspGuard.dirty && !(await confirmLeave())) return; inspGuard.done(); setView("list");setForm(BLANK_FORM);setFormSection(0);setNcForm(null);setEditNcIdx(null);setNcReturnSection(null);}} style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:8,padding:"7px 14px",color:Z.muted,cursor:"pointer",fontFamily:font,fontSize:12,fontWeight:700}}>← Cancel</button>
+          <button onClick={async()=>{if(inspGuard.dirty && !(await confirmLeave())) return; inspGuard.done(); const back=continueId; setContinueId(null); if(back){ setActiveId(back); setView("detail"); } else setView("list");setForm(BLANK_FORM);setFormSection(0);setNcForm(null);setEditNcIdx(null);setNcReturnSection(null);}} style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:8,padding:"7px 14px",color:Z.muted,cursor:"pointer",fontFamily:font,fontSize:12,fontWeight:700}}>← Cancel</button>
           <div style={{flex:1}}>
-            <h2 style={{margin:0,fontSize:20,fontWeight:900,color:Z.white}}>New {ti.label}</h2>
-            <p style={{margin:0,color:Z.muted,fontSize:13}}>Complete all checklist sections then log any non-conformances</p>
+            <h2 style={{margin:0,fontSize:20,fontWeight:900,color:Z.white}}>{continueId?"":"New "}{ti.label}{continueId?" — continue / edit":""}</h2>
+            <p style={{margin:0,color:Z.muted,fontSize:13}}>{continueId?"Carry on where you left off, or correct an answer. Save to update the record.":ti.allowSkip?"Answer what you can; you can save it part-done and carry on later":"Complete all checklist sections then log any non-conformances"}</p>
           </div>
           <div style={{background:Z.overlay,borderRadius:10,padding:"8px 16px",fontSize:13,color:Z.muted,border:`1px solid ${Z.border}`}}>
             {earned}/{possible} pts
@@ -503,7 +544,7 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
           <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:14,marginBottom:14}}>
             <div>
               <label style={lbl}>Inspection Type *</label>
-              <select value={form.type} onChange={e=>{setForm(p=>({...BLANK_FORM,type:e.target.value,date:p.date,inspector:p.inspector,location:p.location}));setFormSection(0);setNcForm(null);setEditNcIdx(null);setNcReturnSection(null);}} style={{...inp,cursor:"pointer"}}>
+              <select disabled={!!continueId} title={continueId?"The type can't be changed once answers are saved":undefined} value={form.type} onChange={e=>{setForm(p=>({...BLANK_FORM,draftId:p.draftId,type:e.target.value,date:p.date,inspector:p.inspector,location:p.location}));setFormSection(0);setNcForm(null);setEditNcIdx(null);setNcReturnSection(null);}} style={{...inp,cursor:"pointer"}}>
                 {(()=>{ const all = inspTypes(); const built = all.filter(t=>!t.custom); const groups = {};
                   all.filter(t=>t.custom).forEach(t=>{ (groups[t.group||"This site's checklists"] = groups[t.group||"This site's checklists"] || []).push(t); });
                   const opt = t => <option key={t.id} value={t.id}>{t.icon} {t.label}</option>;
@@ -608,6 +649,20 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
                       ) : (
                         <button type="button" onClick={()=>setOpenComments(p=>({...p,[key]:true}))} style={{marginTop:8,background:"none",border:"none",padding:0,color:Z.muted,cursor:"pointer",fontFamily:font,fontSize:11.5,textDecoration:"underline"}}>💬 Add a comment</button>
                       ); })()}
+                    {(()=>{ const key=`${sec.id}/${q.id}`; const phs=((form.photos||{})[sec.id]||{})[q.id]||[]; return (
+                      <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginTop:8}}>
+                        {phs.map((ph,pi)=>(
+                          <div key={pi} style={{position:"relative",width:64,height:64,borderRadius:8,overflow:"hidden",border:`1px solid ${Z.border}`}}>
+                            <img src={photoSrc(ph)} alt={`Evidence photo ${pi+1}`} style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
+                            <button type="button" aria-label={`Remove evidence photo ${pi+1}`} onClick={()=>removeQuestionPhoto(sec.id,q.id,pi)} style={{position:"absolute",top:2,right:2,background:"rgba(239,68,68,0.85)",color:"#fff",border:"none",borderRadius:4,width:18,height:18,cursor:"pointer",fontSize:10,lineHeight:1}}>✕</button>
+                          </div>
+                        ))}
+                        <label data-testid="insp-qphoto" style={{display:"inline-flex",alignItems:"center",gap:6,background:"none",border:`1px dashed ${Z.borderMd}`,borderRadius:8,padding:"6px 12px",cursor:"pointer",fontFamily:font,fontSize:11.5,color:Z.muted,fontWeight:600,minHeight:34}}>
+                          {qPhotoBusy===key?"Adding…":`📷 ${phs.length?"Add another photo":"Add photo"}`}
+                          <input type="file" accept={ACCEPT_IMAGES} multiple disabled={!!qPhotoBusy} onChange={e=>{ const fl=e.target.files; addQuestionPhotos(sec.id,q.id,fl); e.target.value=""; }} style={{display:"none"}}/>
+                        </label>
+                      </div>
+                    ); })()}
                     {(ans===0||ans===1) && (
                       <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${Z.border}`}}>
                         {linkedNcIdx===-1 ? (
@@ -751,15 +806,40 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
                 <div><span style={{color:Z.muted,fontSize:12}}>Majors: </span><span style={{fontWeight:700,color:"#f87171"}}>{form.nonConformances.filter(n=>n.severity==="major").length}</span></div>
               </div>
             </div>
-            <button onClick={submitInspection} disabled={!form.inspector.trim()||!form.location.trim()}
+            {(()=>{ const unlogged=[]; sections.forEach(sc=>sc.questions.forEach(q=>{ const a=(form.sections[sc.id]||{})[q.id]; if((a===0||a===1)&&!form.nonConformances.some(n=>n.sectionId===sc.id&&n.questionId===q.id)) unlogged.push({sc,q,a}); }));
+              if(!unlogged.length) return null;
+              return (
+                <div data-testid="insp-unlogged" role="status" style={{marginBottom:16,padding:"12px 14px",borderRadius:12,background:"rgba(245,158,11,0.1)",border:"1px solid rgba(245,158,11,0.45)"}}>
+                  <div style={{fontWeight:800,fontSize:13,color:"#fbbf24",marginBottom:6}}>⚠ {unlogged.length} {unlogged.length===1?"answer is":"answers are"} Partial or Non-Compliant with no non-conformance logged</div>
+                  <div style={{fontSize:12.5,color:Z.muted,marginBottom:8}}>Log a finding so each one gets an owner and a due date, or save anyway if it's already being dealt with.</div>
+                  <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr)",gap:6}}>
+                    {unlogged.slice(0,12).map(({sc,q,a})=>(
+                      <div key={sc.id+q.id} style={{display:"flex",gap:10,alignItems:"center",background:Z.overlay,borderRadius:8,padding:"7px 10px"}}>
+                        <span style={{fontSize:11,fontWeight:800,color:a===0?"#f87171":"#f59e0b",whiteSpace:"nowrap"}}>{a===0?"✗ Non-compliant":"⚠ Partial"}</span>
+                        <span style={{flex:1,minWidth:0,fontSize:12.5,color:Z.white,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{q.ref?`${q.ref} `:""}{q.text}</span>
+                        <button type="button" onClick={()=>{ flagQuestion(sc,q,a); setNcReturnSection(sections.length+1); }} style={{background:"rgba(239,68,68,0.1)",color:"#f87171",border:"1px solid rgba(239,68,68,0.3)",borderRadius:7,padding:"4px 10px",cursor:"pointer",fontFamily:font,fontSize:11.5,fontWeight:700,whiteSpace:"nowrap"}}>+ Log finding</button>
+                      </div>
+                    ))}
+                    {unlogged.length>12 && <div style={{fontSize:12,color:Z.muted}}>…and {unlogged.length-12} more.</div>}
+                  </div>
+                </div>
+              ); })()}
+            <button onClick={async()=>{
+                const n = sections.reduce((c,sc)=>c+sc.questions.filter(q=>{ const a=(form.sections[sc.id]||{})[q.id]; return (a===0||a===1)&&!form.nonConformances.some(x=>x.sectionId===sc.id&&x.questionId===q.id); }).length,0);
+                if (n && !(await ask({ title:`Save with ${n} failed ${n===1?"answer":"answers"} not logged?`, message:`${n===1?"One answer is":`${n} answers are`} Partial or Non-Compliant but has no non-conformance, so nobody is given an action for ${n===1?"it":"them"}. You can log them now (Back), or save and add them later from the inspection.`, ok:"Save anyway", cancel:"Back" }))) return;
+                submitInspection();
+              }} disabled={!form.inspector.trim()||!form.location.trim()} data-testid="insp-save"
               style={{background:`linear-gradient(135deg,${Z.green},#059669)`,color:"#fff",border:"none",borderRadius:12,padding:"12px 32px",fontWeight:800,cursor:"pointer",fontFamily:font,fontSize:14,boxShadow:"0 4px 18px rgba(16,185,129,0.35)",opacity:form.inspector.trim()&&form.location.trim()?1:.45}}>
-              💾 Save Inspection
+              💾 {continueId?"Save changes":"Save Inspection"}
             </button>
           </div>
         )}
       </div>
     );
   }
+
+  // ── CHECKLISTS (manage this site's checklists) ───────────────────────────────
+  if (view==="checklists") return <ChecklistManager inspections={inspections} onClose={()=>setView("list")} Z={Z} font={font}/>;
 
   // ── LIST view ────────────────────────────────────────────────────────────────
   const filtered = inspections.filter(i=>(filterType==="all"||i.type===filterType)&&(filterStatus==="all"||i.status===filterStatus));
@@ -778,10 +858,16 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
           <h2 style={{fontSize:22,fontWeight:900,letterSpacing:-.5,margin:"0 0 4px",color:Z.white}}>Site Inspections <HelpTip dark={true} text="Record regular site inspection findings. Each inspection is scored and failing items can have corrective actions assigned with a due date and responsible person. Completed inspections are stored for audit purposes."/></h2>
           <p style={{color:Z.muted,margin:0,fontSize:13}}>{inspections.length} inspections recorded · H&S Audits, Fire Risk Assessments, Walk Arounds</p>
         </div>
-        <button onClick={()=>{setForm(BLANK_FORM);setFormSection(0);setNcForm(null);setEditNcIdx(null);setNcReturnSection(null);setView("new");}}
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+        <button type="button" data-testid="insp-checklists" onClick={()=>{setView("checklists");window.scrollTo({top:0});}}
+          style={{background:Z.overlay,color:Z.white,border:`1px solid ${Z.borderMd}`,borderRadius:10,padding:"10px 16px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:13}}>
+          📋 Checklists
+        </button>
+        <button onClick={()=>{setContinueId(null);setForm({...BLANK_FORM,draftId:`d${Date.now()}`});setFormSection(0);setNcForm(null);setEditNcIdx(null);setNcReturnSection(null);setView("new");}}
           style={{background:`linear-gradient(135deg,${Z.accent},${Z.blue})`,color:"#fff",border:"none",borderRadius:10,padding:"10px 20px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:13,boxShadow:`0 4px 16px ${Z.accent}44`,display:"flex",alignItems:"center",gap:6}}>
           + New Inspection
         </button>
+        </div>
       </div>
 
       {/* Stat cards */}
@@ -809,7 +895,7 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
               const ti=typeInfo(i.type, i);
               return (
                 <button key={i.id} onClick={()=>{setActiveId(i.id);setView("detail");window.scrollTo({top:0,behavior:"smooth"});}} style={{background:"rgba(239,68,68,0.1)",color:"#fca5a5",border:"1px solid rgba(239,68,68,0.25)",borderRadius:8,padding:"6px 14px",cursor:"pointer",fontFamily:font,fontSize:12,fontWeight:600}}>
-                  {ti.icon} {ti.label} · {i.location} — due {i.nextDue}
+                  {ti.icon} {ti.label} · {i.location} — due {ukDate(i.nextDue)}
                 </button>
               );
             })}
@@ -856,7 +942,7 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
                   <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:4,flexWrap:"wrap"}}>
                     <span style={{fontWeight:800,fontSize:14,color:Z.white}}>{ti.label}</span>
                     <span style={{fontSize:11,color:Z.muted}}>📍 {ins.location}</span>
-                    <span style={{fontSize:11,color:Z.muted}}>📅 {ins.date}</span>
+                    <span style={{fontSize:11,color:Z.muted}}>📅 {ukDate(ins.date)}</span>
                     {ins.status==="open" && <span style={{fontSize:10,background:"rgba(245,158,11,0.15)",color:"#f59e0b",padding:"2px 8px",borderRadius:99,fontWeight:700}}>⏳ Open</span>}
                     {ins.status==="closed" && <span style={{fontSize:10,background:"rgba(16,185,129,0.12)",color:"#10b981",padding:"2px 8px",borderRadius:99,fontWeight:700}}>✓ Closed</span>}
                   </div>
@@ -864,8 +950,8 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
                     {openNCs>0 && <span style={{fontSize:11,color:"#f87171",fontWeight:600}}>{openNCs} open action{openNCs!==1?"s":""}</span>}
                     {ins.nonConformances.length>0 && <span style={{fontSize:11,color:Z.muted}}>{ins.nonConformances.length} finding{ins.nonConformances.length!==1?"s":""}</span>}
                     {ins.inspector && <span style={{fontSize:11,color:Z.muted}}>Inspector: {ins.inspector}</span>}
-                    {newer ? <span style={{fontSize:11,color:Z.muted}}>✓ Re-inspected {newer.date}</span>
-                      : ins.nextDue && <span style={{fontSize:11,color:overduNC?"#f87171":Z.muted,fontWeight:overduNC?700:400}}>{overduNC?"🚨 Overdue — ":"Next: "}{ins.nextDue}</span>}
+                    {newer ? <span style={{fontSize:11,color:Z.muted}}>✓ Re-inspected {ukDate(newer.date)}</span>
+                      : ins.nextDue && <span style={{fontSize:11,color:overduNC?"#f87171":Z.muted,fontWeight:overduNC?700:400}}>{overduNC?"🚨 Overdue — ":"Next: "}{ukDate(ins.nextDue)}</span>}
                   </div>
                 </div>
                 <div style={{textAlign:"center",flexShrink:0}}>

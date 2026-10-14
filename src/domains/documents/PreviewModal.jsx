@@ -1,4 +1,5 @@
 import { TextPreview } from "./TextPreview";
+import { ukDate } from "../../lib/dates";
 
 /**
  * PreviewModal — full-screen document viewer used by both portals.
@@ -44,7 +45,7 @@ function PreviewModal({ doc, onClose, Z, font }) {
           <span style={{fontSize:22}}>{headerIcon}</span>
           <div style={{flex:1,minWidth:0}}>
             <div style={{fontWeight:700,fontSize:15,color:Z.white,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{doc.title}</div>
-            <div style={{color:Z.muted,fontSize:11,marginTop:2}}>{doc.size} · {doc.date}{doc.fileName?` · ${ext}`:""}</div>
+            <div style={{color:Z.muted,fontSize:11,marginTop:2}}>{doc.size} · {ukDate(doc.date)}{doc.fileName?` · ${ext}`:""}</div>
           </div>
           <div style={{display:"flex",gap:8,flexShrink:0}}>
             {doc.fileData && (

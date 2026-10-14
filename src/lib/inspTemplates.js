@@ -24,6 +24,11 @@ import { INSP_TYPES, INSP_SECTIONS } from "../data/seedInspections";
 
 let custom = [];               // normalised templates from the database
 let loaded = false, pending = null;
+// a copy on this device, so a phone with no signal can still run a site checklist
+const CACHE = "zp_insp_templates_v1";
+function fromCache() {
+  try { const rows = JSON.parse(localStorage.getItem(CACHE) || "[]"); return (Array.isArray(rows) ? rows : []).map(normaliseTemplate).filter(Boolean); } catch { return []; }
+}
 const subs = new Set();
 const emit = () => subs.forEach(f => f(custom));
 
@@ -57,10 +62,11 @@ export function loadInspTemplates({ fresh = false } = {}) {
     try {
       const { sb } = await import("./supabase");
       const r = await sb.from("inspection_templates").select("*");
-      // no table yet (inspection_templates.sql not run): just the built-in checklists
-      const rows = r && !r.error && Array.isArray(r.data) ? r.data : [];
-      custom = rows.map(normaliseTemplate).filter(Boolean).sort((a, b) => a.label.localeCompare(b.label, "en-GB", { numeric: true }));
-    } catch { custom = []; }
+      if (r && !r.error && Array.isArray(r.data)) {
+        custom = r.data.map(normaliseTemplate).filter(Boolean).sort((a, b) => a.label.localeCompare(b.label, "en-GB", { numeric: true }));
+        try { localStorage.setItem(CACHE, JSON.stringify(r.data)); } catch { /* full or private mode */ }
+      } else custom = fromCache();   // no signal (phone), or the table isn't there yet (inspection_templates.sql not run)
+    } catch { custom = fromCache(); }
     loaded = true; pending = null; emit();
     return custom;
   })();
@@ -69,10 +75,11 @@ export function loadInspTemplates({ fresh = false } = {}) {
 /** Tests and the template import: put templates in directly. */
 export function _setInspTemplates(rows) { custom = (rows || []).map(normaliseTemplate).filter(Boolean); loaded = true; emit(); }
 
-export function useInspTemplates() {
+/** enabled = false: don't fetch (e.g. staff on the phone, who can't run inspections). */
+export function useInspTemplates(enabled = true) {
   const [, set] = React.useState(0);
-  React.useEffect(() => { const f = () => set(n => n + 1); subs.add(f); loadInspTemplates(); return () => subs.delete(f); }, []);
-  return custom;
+  React.useEffect(() => { if (!enabled) return undefined; const f = () => set(n => n + 1); subs.add(f); loadInspTemplates(); return () => subs.delete(f); }, [enabled]);
+  return enabled ? custom : [];
 }
 
 export const inspTypes = ({ includeHidden = false } = {}) => [...INSP_TYPES, ...custom.filter(t => includeHidden || !t.hidden)];

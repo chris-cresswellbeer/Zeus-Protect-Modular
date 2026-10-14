@@ -1,6 +1,7 @@
 import { useWindowWidth } from "../../shared/hooks";
 import { HelpTip } from "../../shared/HelpTip";
 import { DSE_QUESTION_COUNT } from "../../data/seedDse";
+import { ukDate } from "../../lib/dates";
 
 /**
  * StaffDSETab — the staff member's "My DSE" tab: start/retake the assessment and
@@ -54,7 +55,7 @@ function StaffDSETab({ user, dseReports, adminResponses, setDseAnswers, setDseCo
         <div>
           <h2 style={{fontSize:22,fontWeight:900,letterSpacing:-.5,margin:"0 0 4px"}}>My DSE Assessment <HelpTip dark={true} text="Your Display Screen Equipment assessment. Work through each section honestly — it takes about 5 minutes. Any issues you flag are saved in the portal for the H&S team to review — no email or message is sent — and their responses will appear on this page."/></h2>
           <p style={{color:Z.muted,margin:0,fontSize:13}}>
-            Submitted: {latestReport.date} · {latestReport.totalQuestions} questions
+            Submitted: {ukDate(latestReport.date)} · {latestReport.totalQuestions} questions
             {myReports.length > 1 ? ` · ${myReports.length} assessments on record` : ""}
           </p>
         </div>

@@ -148,7 +148,7 @@ import { isHtmlContent, ensureRteStyles } from "./domains/training/slideTextUtil
 // ── Core libraries, shared UI and theme ──
 import { generateStaffPDF } from "./domains/training/generateStaffPDF";   // kept up front: it opens a window, which must happen straight from the click
 import { sanitizeHtml } from "./lib/sanitizeHtml";
-import { EXPIRY_WARNING_DAYS, getExpiryStatus, localISO, todayISO, localDateTime } from "./lib/dates";
+import { EXPIRY_WARNING_DAYS, getExpiryStatus, localISO, todayISO, localDateTime, ukDate } from "./lib/dates";
 import { EmojiCtx, E, syncEmojiMode } from "./lib/emoji";
 import { startPlainSymbols, stopPlainSymbols } from "./lib/plainSymbols";
 import { sb, hashPassword, DEFAULT_HASH, dbWrite, insertNew } from "./lib/supabase";
@@ -2056,7 +2056,12 @@ export default function App() {
         ...nc,
         photos: await uploadPhotos(PHOTO_BUCKET, `insp_${record.id}_${i}`, nc.photos),
       })));
-      const next = { ...record, nonConformances: ncs };
+      // evidence photos on checklist questions too ({ sectionId: { questionId: [photo] } })
+      const qPhotos = {};
+      for (const [sid, qs] of Object.entries(record.photos || {})) {
+        for (const [qid, list] of Object.entries(qs || {})) (qPhotos[sid] = qPhotos[sid] || {})[qid] = await uploadPhotos(PHOTO_BUCKET, `inspq_${record.id}_${sid}_${qid}`, list);
+      }
+      const next = { ...record, nonConformances: ncs, ...(record.photos ? { photos: qPhotos } : {}) };
       const ok = await dbWrite(sb.from("site_inspections").upsert({ id: next.id, data: next }, { onConflict: "id" }), "site inspection");
       if (ok) markSaved(regRef.current.inspections, next);
       setSiteInspections(p => [next, ...p.filter(r => r.id !== next.id)]);
@@ -3603,7 +3608,7 @@ export default function App() {
                         <span style={{fontSize:20}}>⚡</span>
                         <div style={{flex:1}}>
                           <div style={{fontSize:13,fontWeight:700,color:T.white}}>Finish your hazard report — {inc.location}</div>
-                          <div style={{fontSize:11,color:qc}}>Quick report from {inc.date} needs full details · {quickReportDueLabel(inc)}</div>
+                          <div style={{fontSize:11,color:qc}}>Quick report from {ukDate(inc.date)} needs full details · {quickReportDueLabel(inc)}</div>
                         </div>
                         <button style={{background:qc,border:"none",borderRadius:8,padding:"5px 14px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font}}>Complete →</button>
                       </div>
@@ -3623,7 +3628,7 @@ export default function App() {
                         <span style={{fontSize:20}}>🖥️</span>
                         <div style={{flex:1}}>
                           <div style={{fontSize:13,fontWeight:700,color:T.white}}>DSE Workstation Self-Assessment</div>
-                          <div style={{fontSize:11,color:"#f87171"}}>Annual re-assessment due — last completed {lastDseReport.date}{dseDraft?` · in progress, ${Object.keys(dseDraft.answers||{}).length} of ${DSE_QUESTION_COUNT} answered`:""}</div>
+                          <div style={{fontSize:11,color:"#f87171"}}>Annual re-assessment due — last completed {ukDate(lastDseReport.date)}{dseDraft?` · in progress, ${Object.keys(dseDraft.answers||{}).length} of ${DSE_QUESTION_COUNT} answered`:""}</div>
                         </div>
                         <button style={{background:"linear-gradient(135deg,#ef4444,#dc2626)",border:"none",borderRadius:8,padding:"5px 14px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,whiteSpace:"nowrap"}}>{dseDraft?"Continue →":"Retake →"}</button>
                       </div>
@@ -3735,7 +3740,7 @@ export default function App() {
                         <div style={{fontSize:11,color:T.muted}}>Display Screen Equipment · DSE Regulations 1992 · Annual</div>
                       </div>
                       {dseCompleted && dseIssueCount>0 && <span style={{fontSize:11,color:T.muted}}>{dseResolvedCount}/{dseIssueCount} issues</span>}
-                      {dseCompleted && <span style={{fontSize:11,color:T.muted}}>{lastDseReport.date}</span>}
+                      {dseCompleted && <span style={{fontSize:11,color:T.muted}}>{ukDate(lastDseReport.date)}</span>}
                       <span style={{fontSize:11,fontWeight:700,color:dseStatusColor,background:`${dseStatusColor}18`,border:`1px solid ${dseStatusColor}33`,borderRadius:6,padding:"2px 8px",whiteSpace:"nowrap",flexShrink:0}}>{dseStatusLabel}</span>
                     </div>
                   );
@@ -3789,7 +3794,7 @@ export default function App() {
                             <Bar pct={myC[m.id].recorded?100:myC[m.id].score} color={isPassed(myC[m.id])?T.green:T.amber}/>
                             <span style={{color:isPassed(myC[m.id])?T.green:T.amber,fontWeight:700,fontSize:13}}>{scoreText(myC[m.id])}</span>
                           </div>
-                          <p style={{color:T.muted,fontSize:11,margin:"0 0 6px"}}>Completed {myC[m.id].date}{myC[m.id].recorded?(myC[m.id].recorded.session?" · in a group session":" · from your earlier training records"):""}</p>
+                          <p style={{color:T.muted,fontSize:11,margin:"0 0 6px"}}>Completed {ukDate(myC[m.id].date)}{myC[m.id].recorded?(myC[m.id].recorded.session?" · in a group session":" · from your earlier training records"):""}</p>
                           {m.renewalMonths && (() => {
                             const ex = getExpiryStatus(myC[m.id].date, m.renewalMonths);
                             if (!ex) return null;
@@ -3857,7 +3862,7 @@ export default function App() {
                           ) : (
                             <p style={{color:T.green,fontSize:12,fontWeight:700,margin:"0 0 2px"}}>No issues found ✓</p>
                           )}
-                          <p style={{color:T.muted,fontSize:11,margin:0}}>Last completed: {lastReport.date}</p>
+                          <p style={{color:T.muted,fontSize:11,margin:0}}>Last completed: {ukDate(lastReport.date)}</p>
                         </div>
                       )}
                       <button onClick={openDse}
@@ -3902,7 +3907,7 @@ export default function App() {
                     {allModules.filter(m=>myC[m.id]).map((m,i)=>(
                       <div key={m.id} style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",padding:"16px 20px",borderTop:i>0?`1px solid ${T.border}`:"none",alignItems:"center"}}>
                         <div style={{display:"flex",alignItems:"center",gap:10}}><span>{m.icon}</span><span style={{fontSize:14,fontWeight:700}}>{m.title}</span></div>
-                        <span style={{color:T.muted,fontSize:13}}>{myC[m.id].date}</span>
+                        <span style={{color:T.muted,fontSize:13}}>{ukDate(myC[m.id].date)}</span>
                         <span title={myC[m.id].recorded?"Recorded from your earlier training records":undefined} style={{color:isPassed(myC[m.id])?T.green:T.amber,fontWeight:800,fontSize:15}}>{scoreText(myC[m.id])}</span>
                         <div style={{display:"flex",gap:8,alignItems:"center"}}>
                           <Pill label={myC[m.id].recorded?"Completed":isPassed(myC[m.id])?"Passed":"Failed"} col={isPassed(myC[m.id])?"green":"red"}/>
@@ -3928,7 +3933,7 @@ export default function App() {
                       {earlier.map((h,i)=>{ const m=allModules.find(x=>String(x.id)===String(h.module_id)); return (
                         <div key={i} style={{display:"grid",gridTemplateColumns:isMobile?"1fr auto":"2fr 1fr 1fr 1fr",gap:8,padding:"12px 20px",borderTop:i>0?`1px solid ${T.border}`:"none",alignItems:"center"}}>
                           <div style={{display:"flex",alignItems:"center",gap:10}}><span>{m.icon}</span><span style={{fontSize:13,fontWeight:700}}>{m.title} <span style={{color:T.muted,fontWeight:600}}>· v{h.module_version||1}</span></span></div>
-                          {!isMobile && <span style={{color:T.muted,fontSize:13}}>{h.date}</span>}
+                          {!isMobile && <span style={{color:T.muted,fontSize:13}}>{ukDate(h.date)}</span>}
                           {!isMobile && <span style={{color:T.green,fontWeight:800,fontSize:14}}>{h.score}%</span>}
                           <button onClick={()=>setCert({module:m,score:h.score,date:h.date,certId:h.cert_id||null,moduleVersion:h.module_version||null})} style={{justifySelf:"start",background:`${T.gold}1A`,border:`1px solid ${T.gold}4D`,color:T.gold,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font}}>{E("🏅 ","")}Certificate</button>
                         </div>
@@ -3979,8 +3984,8 @@ export default function App() {
                                       {!ack && <Pill label="Required Reading" col="amber"/>}
                                       {bundleNamesOf(myBundles, d.id).map(n=><span key={n} style={{fontSize:11,fontWeight:600,color:"#60a5fa",background:"rgba(96,165,250,0.1)",border:"1px solid rgba(96,165,250,0.3)",borderRadius:20,padding:"1px 8px"}}>{E("📚 ","")}{n}</span>)}
                                     </div>
-                                    <div style={{color:T.muted,fontSize:12}}>Updated: {d.date} · {d.size}{d.fileName?` · ${d.fileName.split(".").pop().toUpperCase()}`:""}</div>
-                                    {ack && <div style={{color:T.green,fontSize:12,marginTop:3,fontWeight:600}}>✓ You confirmed reading this on {ack.date}</div>}
+                                    <div style={{color:T.muted,fontSize:12}}>Updated: {ukDate(d.date)} · {d.size}{d.fileName?` · ${d.fileName.split(".").pop().toUpperCase()}`:""}</div>
+                                    {ack && <div style={{color:T.green,fontSize:12,marginTop:3,fontWeight:600}}>✓ You confirmed reading this on {ukDate(ack.date)}</div>}
                                   </div>
                                   <div style={{display:"flex",gap:8,flexShrink:0,flexWrap:"wrap",alignItems:"center"}}>
                                     {d.fileData && (
@@ -4026,7 +4031,7 @@ export default function App() {
                                 <span style={{fontSize:26,flexShrink:0}}>{icon}</span>
                                 <div style={{flex:1,minWidth:0}}>
                                   <div style={{fontWeight:700,fontSize:14,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{d.title}</div>
-                                  <div style={{color:T.muted,fontSize:12,marginTop:2}}>Updated: {d.date} · {d.size}{d.fileName?` · ${d.fileName.split(".").pop().toUpperCase()}`:""}</div>
+                                  <div style={{color:T.muted,fontSize:12,marginTop:2}}>Updated: {ukDate(d.date)} · {d.size}{d.fileName?` · ${d.fileName.split(".").pop().toUpperCase()}`:""}</div>
                                 </div>
                                 <Pill label={d.type} col="navy"/>
                                 {d.fileData && (
@@ -4868,7 +4873,7 @@ export default function App() {
                         <span style={{fontSize:18,flexShrink:0}}>{{accident:"🚑",near_miss:"⚠️",unsafe_condition:"🏗",unsafe_act:"🚫"}[inc.type]||"📋"}</span>
                         <div style={{flex:1,minWidth:0}}>
                           <div style={{fontSize:13,fontWeight:700,color:T.white,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{inc.description?.slice(0,60)}{inc.description?.length>60?"…":""}</div>
-                          <div style={{fontSize:11,color:T.muted}}>{inc.date} · {inc.location}</div>
+                          <div style={{fontSize:11,color:T.muted}}>{ukDate(inc.date)} · {inc.location}</div>
                         </div>
                         {inc.riddor&&!inc.riddorReported&&<span style={{fontSize:10,fontWeight:700,color:"#f87171",background:"rgba(239,68,68,0.1)",padding:"2px 7px",borderRadius:6,border:"1px solid rgba(239,68,68,0.25)",flexShrink:0}}>RIDDOR ⚠</span>}
                         <button onClick={()=>{setFocusIncidentId(inc.id);setAtab("incidents");}} style={{background:"rgba(239,68,68,0.1)",color:"#f87171",border:"1px solid rgba(239,68,68,0.2)",borderRadius:7,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font,flexShrink:0}}>View →</button>
@@ -4899,7 +4904,7 @@ export default function App() {
                         <span style={{fontSize:18,flexShrink:0}}>{item.certType.icon}</span>
                         <div style={{flex:1,minWidth:0}}>
                           <div style={{fontSize:13,fontWeight:700,color:T.white,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{item.user.name}</div>
-                          <div style={{fontSize:11,color:"#f87171"}}>{item.certType.label} expired {item.cert.expiryDate}</div>
+                          <div style={{fontSize:11,color:"#f87171"}}>{item.certType.label} expired {ukDate(item.cert.expiryDate)}</div>
                         </div>
                         <button onClick={()=>setAtab("assign")} style={{background:"rgba(239,68,68,0.1)",color:"#f87171",border:"1px solid rgba(239,68,68,0.2)",borderRadius:7,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font,flexShrink:0}}>Update →</button>
                       </>
@@ -4914,7 +4919,7 @@ export default function App() {
                       <span style={{fontSize:16,flexShrink:0}}>{{accident:"🚑",near_miss:"⚠️",unsafe_condition:"🏗",unsafe_act:"🚫"}[inc.type]||"📋"}</span>
                       <div style={{flex:1,minWidth:0}}>
                         <div style={{fontSize:13,fontWeight:600,color:T.white,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{inc.description?.slice(0,70)}{inc.description?.length>70?"…":""}</div>
-                        <div style={{fontSize:11,color:T.muted}}>{inc.date} · {inc.location} · {inc.closed?"Closed":"Open"}</div>
+                        <div style={{fontSize:11,color:T.muted}}>{ukDate(inc.date)} · {inc.location} · {inc.closed?"Closed":"Open"}</div>
                       </div>
                     </>
                   ),()=>setAtab("incidents"))

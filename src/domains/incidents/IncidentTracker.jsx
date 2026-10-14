@@ -9,7 +9,7 @@ import { INCIDENT_TYPES, ACCIDENT_CODES, NUMBER_CODES } from "../../data/seedInc
 import { IncidentPhotos } from "../../shared/IncidentPhotos";
 import { isIncompleteQuickReport, myIncompleteQuickReports, isQuickReportOverdue, quickReportDueLabel } from "./quickReportStatus";
 
-import { todayISO } from "../../lib/dates";
+import { todayISO, ukDate } from "../../lib/dates";
 /**
  * IncidentTracker — the STAFF "Report Incident" tab.
  * Lists incidents the logged-in user reported (matched on reportedBy === user id),
@@ -157,7 +157,7 @@ function IncidentTracker({ user, incidents, setIncidents, equipment, setEquipmen
               <div key={inc.id} style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",background:Z.overlay,border:`1px solid ${late?Z.red+"66":Z.borderMd}`,borderRadius:10,padding:"10px 14px"}}>
                 <div style={{flex:1,minWidth:200}}>
                   <div style={{fontSize:13,fontWeight:700,color:Z.white,marginBottom:2}}>{inc.description}</div>
-                  <div style={{fontSize:11,color:Z.muted}}>📍 {inc.location} · reported {inc.date} · <span style={{color:late?Z.red:Z.amber,fontWeight:700}}>{quickReportDueLabel(inc)}</span></div>
+                  <div style={{fontSize:11,color:Z.muted}}>📍 {inc.location} · reported {ukDate(inc.date)} · <span style={{color:late?Z.red:Z.amber,fontWeight:700}}>{quickReportDueLabel(inc)}</span></div>
                 </div>
                 <button onClick={()=>openEdit(inc)} style={{background:late?Z.red:Z.amber,color:"#fff",border:"none",borderRadius:8,padding:"7px 16px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font,whiteSpace:"nowrap"}}>Complete report →</button>
               </div>
@@ -202,7 +202,7 @@ function IncidentTracker({ user, incidents, setIncidents, equipment, setEquipmen
                     <div style={{flex:1,minWidth:200}}>
                       <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:6,flexWrap:"wrap"}}>
                         <span style={{fontSize:12,fontWeight:800,color:ti.color,background:ti.bg,padding:"2px 10px",borderRadius:99}}>{ti.label}</span>
-                        <span style={{fontSize:11,color:Z.muted}}>{inc.date}{inc.time?` at ${inc.time}`:""}</span>
+                        <span style={{fontSize:11,color:Z.muted}}>{ukDate(inc.date)}{inc.time?` at ${inc.time}`:""}</span>
                         <span style={{fontSize:11,color:Z.muted}}>📍 {inc.location}</span>
                         {inc.riddor && <span style={{fontSize:11,fontWeight:700,color:"#f87171",background:"rgba(239,68,68,0.1)",padding:"2px 8px",borderRadius:6,border:"1px solid rgba(239,68,68,0.3)"}}>RIDDOR</span>}
                         {inc.closed ? <span style={{fontSize:11,color:"#10b981",fontWeight:700}}>✓ Closed</span> : <span style={{fontSize:11,color:"#f59e0b",fontWeight:700}}>⏳ Open</span>}

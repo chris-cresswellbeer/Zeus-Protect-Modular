@@ -7,7 +7,7 @@ import { HelpTip } from "../../shared/HelpTip";
 import { E } from "../../lib/emoji";
 import { EQ_CATEGORIES } from "../../data/seedEquipment";
 
-import { localISO, todayISO } from "../../lib/dates";
+import { localISO, todayISO, ukDate } from "../../lib/dates";
 import { fileShort } from "../../lib/brandCore";
 /**
  * EquipmentTrackerTab — admin asset register for work equipment (FLTs, MEWPs,
@@ -324,7 +324,7 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPres
               <span style={{fontSize:20}}>{cat(e.category).icon}</span>
               <div style={{flex:1}}>
                 <div style={{fontSize:13,fontWeight:700,color:"#fca5a5"}}>{e.name}</div>
-                <div style={{fontSize:11,color:Z.muted}}>{e.assetNo} · Service due: {e.nextService}</div>
+                <div style={{fontSize:11,color:Z.muted}}>{e.assetNo} · Service due: {ukDate(e.nextService)}</div>
               </div>
               <button onClick={()=>{setActiveId(e.id);setDetailTab("service");setView("detail");}}
                 style={{background:"rgba(239,68,68,0.15)",color:"#f87171",border:"1px solid rgba(239,68,68,0.3)",borderRadius:8,padding:"5px 12px",cursor:"pointer",fontFamily:font,fontSize:11,fontWeight:700}}>
@@ -345,7 +345,7 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPres
               <span style={{fontSize:20}}>{cat(d.eq.category).icon}</span>
               <div style={{flex:1}}>
                 <div style={{fontSize:13,fontWeight:700,color:Z.white}}>{d.eq.name}</div>
-                <div style={{fontSize:11,color:"#94a3b8"}}>{d.description} · Reported: {d.date}</div>
+                <div style={{fontSize:11,color:"#94a3b8"}}>{d.description} · Reported: {ukDate(d.date)}</div>
               </div>
               <span style={{fontSize:10,fontWeight:700,background:`${SEV_COL[d.severity]}22`,color:SEV_COL[d.severity],padding:"2px 8px",borderRadius:99,border:`1px solid ${SEV_COL[d.severity]}44`}}>{d.severity}</span>
               <button onClick={()=>{setActiveId(d.eq.id);setDetailTab("defects");setView("detail");}}
@@ -459,7 +459,7 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPres
                 </div>
                 <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
                   {svcOverdue&&<span style={{fontSize:10,fontWeight:700,background:"rgba(239,68,68,0.12)",color:"#f87171",padding:"2px 8px",borderRadius:99,border:"1px solid rgba(239,68,68,0.25)"}}>⏰ Service Overdue</span>}
-                  {svcSoon&&!svcOverdue&&<span style={{fontSize:10,fontWeight:700,background:"rgba(245,158,11,0.12)",color:"#f59e0b",padding:"2px 8px",borderRadius:99}}>📅 Due {e.nextService}</span>}
+                  {svcSoon&&!svcOverdue&&<span style={{fontSize:10,fontWeight:700,background:"rgba(245,158,11,0.12)",color:"#f59e0b",padding:"2px 8px",borderRadius:99}}>📅 Due {ukDate(e.nextService)}</span>}
                   {openDef>0&&<span style={{fontSize:10,fontWeight:700,background:"rgba(239,68,68,0.1)",color:"#fca5a5",padding:"2px 8px",borderRadius:99}}>⚠ {openDef} defect{openDef!==1?"s":""}</span>}
                   {!svcOverdue&&!openDef&&e.status==="active"&&<span style={{fontSize:10,fontWeight:700,background:"rgba(16,185,129,0.1)",color:"#10b981",padding:"2px 8px",borderRadius:99}}>✓ OK</span>}
                   <button onClick={()=>{setActiveId(e.id);setDetailTab("overview");setView("detail");}}
@@ -663,7 +663,7 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPres
                     <div key={i} style={{background:`linear-gradient(135deg,${Z.navyMd},${Z.navy})`,borderRadius:12,padding:"14px 18px",border:`1px solid ${RES_COL[ins.result]||Z.border}33`}}>
                       <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:6,flexWrap:"wrap"}}>
                         <span style={{fontSize:12,fontWeight:800,color:RES_COL[ins.result]}}>{RES_LABEL[ins.result]||ins.result}</span>
-                        <span style={{fontSize:11,color:Z.muted}}>📅 {ins.date}</span>
+                        <span style={{fontSize:11,color:Z.muted}}>📅 {ukDate(ins.date)}</span>
                         {ins.by&&<span style={{fontSize:11,color:Z.muted}}>👤 {ins.by}</span>}
                       </div>
                       {ins.notes&&<p style={{fontSize:12,color:Z.slate,margin:0,lineHeight:1.6}}>{ins.notes}</p>}
@@ -710,7 +710,7 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPres
                   <div key={d.id} style={{background:Z.navyMd,borderRadius:12,padding:"14px 18px",border:`1px solid ${d.status==="resolved"?"rgba(16,185,129,0.35)":"rgba(239,68,68,0.35)"}`}}>
                     <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:6,flexWrap:"wrap"}}>
                       <span style={{fontSize:10,fontWeight:700,background:`${SEV_COL[d.severity]}22`,color:SEV_COL[d.severity],padding:"2px 8px",borderRadius:99,border:`1px solid ${SEV_COL[d.severity]}44`}}>{d.severity}</span>
-                      <span style={{fontSize:11,color:"#94a3b8"}}>📅 {d.date}</span>
+                      <span style={{fontSize:11,color:"#94a3b8"}}>📅 {ukDate(d.date)}</span>
                       {d.reportedBy&&<span style={{fontSize:11,color:"#94a3b8"}}>👤 {d.reportedBy}</span>}
                       <span style={{marginLeft:"auto",fontSize:10,fontWeight:700,color:d.status==="resolved"?"#10b981":"#f87171",background:d.status==="resolved"?"rgba(16,185,129,0.12)":"rgba(239,68,68,0.1)",padding:"2px 8px",borderRadius:99}}>{d.status==="resolved"?"✓ Resolved":"Open"}</span>
                     </div>
@@ -765,7 +765,7 @@ function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPres
                   <div key={i} style={{background:`linear-gradient(135deg,${Z.navyMd},${Z.navy})`,borderRadius:12,padding:"14px 18px",border:`1px solid ${Z.border}`}}>
                     <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:6,flexWrap:"wrap"}}>
                       <span style={{fontSize:13,fontWeight:800,color:Z.accentLt}}>{s.type}</span>
-                      <span style={{fontSize:11,color:Z.muted}}>📅 {s.date}</span>
+                      <span style={{fontSize:11,color:Z.muted}}>📅 {ukDate(s.date)}</span>
                       {s.engineer&&<span style={{fontSize:11,color:Z.muted}}>🔧 {s.engineer}</span>}
                       {s.cost!==undefined&&s.cost!==""&&<span style={{marginLeft:"auto",fontSize:12,fontWeight:700,color:Z.muted}}>€{Number(s.cost).toLocaleString()}</span>}
                     </div>

@@ -38,6 +38,7 @@ import { More, Certificates, CorrectiveActions, TrainingHistory, Appearance } fr
 import { Inspections, InspectionRun } from "./screens/Inspection";
 import { Permits, PermitDetail } from "./screens/Permits";
 import { INSP_TYPES } from "../data/seedInspections";
+import { useInspTemplates, inspTypes, inspTypeLabel } from "../lib/inspTemplates";
 import { myIncompleteQuickReports } from "../domains/incidents/quickReportStatus";
 import { ScrollNav } from "../shared/ScrollNav";
 import { bundlesFor } from "../domains/documents/bundles";
@@ -88,8 +89,8 @@ const PARENT_TAB = {
   permits: "more", permit: "permits",
 };
 
-// Inspection types that make sense to run from a phone — the long audits stay
-// on the desktop where the evidence and sign-off live.
+// Built-in inspection types that make sense to run from a phone (the annual audit and
+// FRA stay on the desktop). This site's own checklists (inspection_templates) are added too.
 // Inspections and permits are supervisor tools — shown to admins only.
 // DSE, incident triage and incident records live in the desktop portal.
 const MOBILE_INSP_TYPES = ["weekly_walk", "office_housekeeping", "warehouse_housekeeping", "fire_drill"];
@@ -388,7 +389,7 @@ function MobileApp({
   }
 
   function typeLabel(id) {
-    const t = INSP_TYPES.find((x) => x.id === id);
+    const t = inspTypes().find((x) => x.id === id);
     return t ? t.label : "walkround";
   }
 
@@ -410,8 +411,12 @@ function MobileApp({
   // of that type at that place (same rule as the desktop: domains/inspections/inspectionDue.js).
   const _t = new Date();
   const todayIso = `${_t.getFullYear()}-${String(_t.getMonth() + 1).padStart(2, "0")}-${String(_t.getDate()).padStart(2, "0")}`;
+  // this site's own checklists (e.g. the BRCGS audits) can be run on the phone too
+  const siteTemplates = useInspTemplates(isAdmin).filter((t) => !t.hidden);
+  const startTypes = [...INSP_TYPES.filter((t) => MOBILE_INSP_TYPES.includes(t.id)), ...siteTemplates];
+  const inspectionPlaces = [...new Set((siteInspections || []).map((r) => r.location).filter(Boolean))];
   const inspectionsDue = [...latestByKey(siteInspections || []).values()]
-    .filter((r) => MOBILE_INSP_TYPES.includes(r.type) && r.nextDue && r.nextDue <= todayIso)
+    .filter((r) => (MOBILE_INSP_TYPES.includes(r.type) || siteTemplates.some((t) => t.id === r.type)) && r.nextDue && r.nextDue <= todayIso)
     .sort((a, b) => String(a.nextDue).localeCompare(String(b.nextDue)))
     .map((r) => ({ typeId: r.type, location: r.location, dueDate: r.nextDue, overdue: r.nextDue < todayIso }));
 
@@ -581,6 +586,7 @@ function MobileApp({
             due={inspectionsDue}
             recent={recentInspections}
             onStart={(d) => { setActiveInspection(d); go("inspection"); }}
+            startTypes={startTypes} places={inspectionPlaces}
             onOpenDesktop={onSwitchToDesktop}
             Z={T} font={FONT}
           />

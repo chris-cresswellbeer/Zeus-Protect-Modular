@@ -28,7 +28,7 @@ import { useFormGuard, DraftBanner } from "../../lib/unsaved";
  *   Z, font       – theme + font
  *
  * SAVED MODULE SHAPE (custom_modules.data):
- *   { id, title, category, level, duration, icon, renewalMonths, passMark?, description?,
+ *   { id, title, category, level, duration, icon, renewalMonths, passMark?, description?, certSummary? ("line\nline", the certificate's "Covering:"),
  *     content: [ { heading, text(HTML), images:[{name,type,url,data}], video:{name,type,url,data}|null,
  *                  hotspots:[{id,x,y,radius,correct,label,feedback}]|null, hotspotInstructions } ],
  *     quiz: [ { q, options:[4 strings], answer:<index 0-3> } ],
@@ -66,7 +66,8 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
     renewalMonths: editingModule.renewalMonths||12,
     passMark: editingModule.passMark||70,
     description: editingModule.description||"",
-  } : { title:"", category:"General H&S", level:"Mandatory", duration:"30 min", icon:"📋", renewalMonths:12, passMark:70 });
+    certSummary: Array.isArray(editingModule.certSummary) ? editingModule.certSummary.join("\n") : (editingModule.certSummary||""),
+  } : { title:"", category:"General H&S", level:"Mandatory", duration:"30 min", icon:"📋", renewalMonths:12, passMark:70, certSummary:"" });
   const [slides, setSlides] = useState(editingModule ? (editingModule.slides||editingModule.content||[]).map(s=>({
     heading: s.heading||"",
     text: s.text||s.body||"",
@@ -172,6 +173,7 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
       ...details,
       renewalMonths: Number(details.renewalMonths)||12,
       passMark: Math.min(100, Math.max(50, Math.round(Number(details.passMark)) || 70)),
+      certSummary: String(details.certSummary||"").split(/\r?\n/).map(x=>x.trim()).filter(Boolean).slice(0,4).join("\n"),
       content: cleanSlides,
       quiz: quiz.map(q=>({...q, answer:Number(q.answer)})),
       _custom: true,
@@ -263,6 +265,12 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
                   </button>
                 ))}
               </div>
+            </div>
+            <div style={{marginTop:18}}>
+              <label style={lbl} htmlFor="cm-certsum">On the certificate: what was covered (optional)</label>
+              <textarea id="cm-certsum" data-testid="cm-certsum" rows={4} value={details.certSummary||""} onChange={e=>setDetails(p=>({...p,certSummary:e.target.value}))}
+                placeholder={"Up to 4 short lines, one per line, e.g.\nAssessing the load\nLifting technique"} style={{...inp,resize:"vertical",lineHeight:1.5}}/>
+              <div style={{fontSize:11.5,color:Z.muted,marginTop:4,lineHeight:1.45}}>Shown on the certificate as "Covering: …". Leave empty to use the slide headings (headings like "Introduction" and "Summary" are skipped).</div>
             </div>
           </div>
           <div style={{display:"flex",justifyContent:"flex-end"}}>

@@ -117,7 +117,7 @@ export function BrandingCard({ Z, font }) {
         <div>
           {field("product", "Portal name", "Sign-in screen, page titles, the \"new version\" bar and emails.", { placeholder: NEUTRAL_BRAND.product })}
           {field("company", "Company name (in full)", "Certificates, compliance reports, the Accident Book and the monthly management report.")}
-          {field("short", "Short name", "Where space is tight, e.g. the seal on certificates.")}
+          {field("short", "Short name", "Where space is tight.")}
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
             <div style={{ flex: 1, minWidth: 140 }}>{field("certPrefix", "Certificate number prefix", `New certificates: ${prefix}-…  Existing ones keep their number.`, { fontFamily: "monospace", placeholder: NEUTRAL_BRAND.certPrefix })}</div>
             <div style={{ flex: 1, minWidth: 140 }}>{field("emailFrom", "Emails come from", "The sender's name. The address stays as set on Netlify.")}</div>

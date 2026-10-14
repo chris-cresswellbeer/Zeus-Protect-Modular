@@ -270,6 +270,7 @@ function MobileApp({
       const ex = m.renewalMonths ? getExpiryStatus(c.date, m.renewalMonths) : null;
       return {
         moduleId: m.id, title: (m._en || m).title, icon: m.icon, score: c.score, certId: c.certId, completed: c.date || "",   // certificates stay in English
+        module: m._en || m, moduleVersion: c.moduleVersion || null,
         validUntil: ex ? ex.expiryDate : null,
         lapsed: ex ? ex.status === "expired" : false,
         expiredOn: ex ? ex.expiryDate : null,
@@ -536,7 +537,7 @@ function MobileApp({
           />
         )}
 
-        {screen === "certificates" && <Certificates certificates={certificates} holder={user && user.name} Z={T} font={FONT} />}
+        {screen === "certificates" && <Certificates certificates={certificates} holder={user && user.name} holderJob={(user && user.jobTitle) || ""} Z={T} font={FONT} />}
 
         {screen === "actions" && (
           <CorrectiveActions

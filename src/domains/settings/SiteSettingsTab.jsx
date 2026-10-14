@@ -5,12 +5,14 @@ import { auditEvent } from "../../lib/audit";
 import { useSiteLists, saveSiteLists, loadSiteLists, SITE_LIST_DEFAULTS } from "../../lib/siteLists";
 import { EmailSettings } from "./EmailSettings";
 import { BrandingCard } from "./BrandingCard";
+import { CertificateSettings } from "./CertificateSettings";
 
 /**
  * SiteSettingsTab — Documents ▼ → Site Settings (admins).
  * The lists that differ from site to site, kept in the database (lib/siteLists.js):
  * first aid zones, first aid shifts and the hazard report locations; and the
- * email reminder settings (EmailSettings.jsx); and, for super admins only, the
+ * certificate settings (CertificateSettings.jsx); email reminder settings
+ * (EmailSettings.jsx); and, for super admins only, the
  * branding (BrandingCard.jsx).
  */
 const LISTS = [
@@ -59,7 +61,7 @@ function ListEditor({ list, items, onChange, Z, font }) {
   );
 }
 
-function SiteSettingsTab({ Z, font, superAdmin = false }) {
+function SiteSettingsTab({ Z, font, superAdmin = false, user = null }) {
   const site = useSiteLists();
   const pick = s => ({ reportLocations: [...s.reportLocations], firstAidZones: [...s.firstAidZones], firstAidShifts: [...s.firstAidShifts] });
   const [form, setForm] = useState(() => pick(site));
@@ -100,6 +102,7 @@ function SiteSettingsTab({ Z, font, superAdmin = false }) {
         {LISTS.map(l => <ListEditor key={l.key} list={l} items={form[l.key]} onChange={v => setForm(f => ({ ...f, [l.key]: v }))} Z={Z} font={font}/>)}
       </div>
       <p style={{ fontSize: 12, color: Z.muted, marginTop: 14 }}>The COSHH substances are kept in the COSHH Register (Documents ▼ → COSHH Register), and machine types under Machinery Competence → Machine types.</p>
+      <CertificateSettings Z={Z} font={font} user={user}/>
       <EmailSettings Z={Z} font={font}/>
     </div>
   );

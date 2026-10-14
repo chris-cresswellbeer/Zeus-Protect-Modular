@@ -136,14 +136,16 @@ function More({
 
 // Tapping an in-date certificate shows it full screen, large and clear, to hold up to
 // an auditor (no sign-in or signal needed for them to read it).
-function Certificates({ certificates, holder, Z, font }) {
+// The full-screen certificate (loaded when first shown; it brings the QR code maker).
+const PhoneCertificate = React.lazy(() => import("./PhoneCertificate"));
+
+function Certificates({ certificates, holder, holderJob = "", Z, font }) {
   const valid = certificates.filter((c) => !c.lapsed);
   const lapsed = certificates.filter((c) => c.lapsed);
   const [shown, setShownRaw] = React.useState(null);
   const lastBtn = React.useRef(null);
   // closing puts the focus back on the certificate that was opened
   const setShown = (v) => { setShownRaw(v); if (!v && lastBtn.current) setTimeout(() => lastBtn.current && lastBtn.current.focus(), 0); };
-  const fmt = (d) => (d && /^\d{4}-\d{2}-\d{2}/.test(d) ? d.slice(0, 10).split("-").reverse().join("/") : d || "—");
 
   return (
     <Screen Z={Z}>
@@ -218,26 +220,9 @@ function Certificates({ certificates, holder, Z, font }) {
         </div>
       )}
       {shown && (
-        <div role="dialog" aria-modal="true" aria-label="Certificate" onClick={() => setShown(null)}
-          onKeyDown={(e) => { if (e.key === "Escape") setShown(null); }}
-          style={{ position: "fixed", inset: 0, zIndex: 9000, overflowY: "auto", background: "linear-gradient(160deg,#0d1f5c,#060d2e)", color: "#fff", fontFamily: font,
-            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "28px 22px", textAlign: "center" }}>
-          <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: 3, color: "#f59e0b", textTransform: "uppercase" }}>Certificate of Completion</div>
-          <div style={{ fontSize: 54, margin: "14px 0 6px" }}>{shown.icon}</div>
-          <div style={{ fontSize: 26, fontWeight: 900, lineHeight: 1.2 }}>{holder || ""}</div>
-          <div style={{ fontSize: 14, color: "#cbd5e1", margin: "8px 0 4px" }}>has completed</div>
-          <div style={{ fontSize: 21, fontWeight: 800, color: "#fbbf24", lineHeight: 1.25, maxWidth: 420 }}>{shown.title}</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 26, width: "100%", maxWidth: 420, textAlign: "left" }}>
-            {[["Certificate no.", shown.certId || "—"], ["Score", `${shown.score}%`], ["Completed", fmt(shown.completed)], ["Valid until", shown.validUntil ? fmt(shown.validUntil) : "No expiry"]].map(([k, v]) => (
-              <div key={k} style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 12, padding: "10px 12px" }}>
-                <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 1, color: "#94a3b8", textTransform: "uppercase" }}>{k}</div>
-                <div style={{ fontSize: 17, fontWeight: 800, marginTop: 3, wordBreak: "break-word" }}>{v}</div>
-              </div>
-            ))}
-          </div>
-          <div style={{ fontSize: 12.5, color: "#cbd5e1", marginTop: 22 }}>{getBrand().product} · checked {fmt(todayISO())}</div>
-          <button type="button" onClick={() => setShown(null)} ref={(el) => { if (el && !el.dataset.f) { el.dataset.f = "1"; el.focus(); } }} style={{ marginTop: 22, minHeight: 48, padding: "0 30px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.1)", color: "#fff", fontSize: 15, fontWeight: 800, fontFamily: font }}>Close</button>
-        </div>
+        <React.Suspense fallback={null}>
+          <PhoneCertificate cert={shown} holder={holder} jobTitle={holderJob} onClose={() => setShown(null)} font={font} />
+        </React.Suspense>
       )}
     </Screen>
   );

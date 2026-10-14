@@ -55,8 +55,17 @@ focusCss.textContent = `
 `;
 document.head.appendChild(focusCss);
 
+// Certificate check (the QR code on a certificate): <portal>/?verify=ID shows only the
+// check page (shared/VerifyPage.jsx), with no sign-in and none of the portal.
+const VERIFY_ID = (() => { try { return new URLSearchParams(window.location.search).get("verify"); } catch { return null; } })();
+const VerifyPage = React.lazy(() => import("./shared/VerifyPage").then(m => ({ default: m.VerifyPage })));
+
 // React 18 root API. `document.getElementById("root")` must match the id in index.html.
-ReactDOM.createRoot(document.getElementById("root")).render(
+if (VERIFY_ID !== null) {
+  ReactDOM.createRoot(document.getElementById("root")).render(
+    <React.Suspense fallback={null}><VerifyPage initialId={VERIFY_ID}/></React.Suspense>
+  );
+} else ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <App />
     {/* on-page messages and confirmation windows (shared/Feedback.jsx) */}

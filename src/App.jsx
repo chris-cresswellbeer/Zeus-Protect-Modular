@@ -3065,7 +3065,7 @@ export default function App() {
                 <div style={{display:"flex",gap:10,justifyContent:"center"}}>
                   <button onClick={()=>{
                     setShowCelebration(false);
-                    setCert({module:mod,score:qPct,date:(comps[user.id]||{})[mod.id]?.date||todayISO(),certId:(comps[user.id]||{})[mod.id]?.certId||null});
+                    setCert({module:mod,score:qPct,date:(comps[user.id]||{})[mod.id]?.date||todayISO(),certId:(comps[user.id]||{})[mod.id]?.certId||null,moduleVersion:(comps[user.id]||{})[mod.id]?.moduleVersion||mod.version||1});
                   }} style={{background:"linear-gradient(135deg,#f59e0b,#d97706)",color:"#0d1f5c",border:"none",borderRadius:10,padding:"10px 22px",fontWeight:800,cursor:"pointer",fontFamily:font,fontSize:13}}>
                     🎓 {t("View Certificate")}
                   </button>
@@ -3245,7 +3245,7 @@ export default function App() {
                 {!passed && <p style={{color:T.amber,marginTop:6}}>{t("You need {pct}% to pass. Review the slides and try again.", { pct: passMarkOf(mod) })}</p>}
                 <div style={{display:"flex",gap:12,justifyContent:"center",marginTop:28,flexWrap:"wrap"}}>
                   {passed && (
-                    <button onClick={()=>setCert({module:mod,score:qPct,date:(comps[user.id]||{})[mod.id]?.date||todayISO(),certId:(comps[user.id]||{})[mod.id]?.certId||null})}
+                    <button onClick={()=>setCert({module:mod,score:qPct,date:(comps[user.id]||{})[mod.id]?.date||todayISO(),certId:(comps[user.id]||{})[mod.id]?.certId||null,moduleVersion:(comps[user.id]||{})[mod.id]?.moduleVersion||mod.version||1})}
                       style={{background:`linear-gradient(135deg,${T.gold},#d97706)`,color:T.navyDk,border:"none",borderRadius:12,padding:"12px 28px",fontWeight:800,cursor:"pointer",fontFamily:font}}>
                       🎓 {t("View Certificate")}
                     </button>
@@ -3821,7 +3821,8 @@ export default function App() {
                           {isDone?(()=>{const ex=m.renewalMonths?getExpiryStatus(myC[m.id].date,m.renewalMonths):null; return ex&&ex.status==="expired"?"Renew Now →":ex&&ex.status==="expiring"?"Renew Soon →":"Review Module"})():prog?`${resumeLabel(prog)} →`:"Start →"}
                         </button>
                         {isDone && !myC[m.id].recorded && (
-                          <button onClick={()=>setCert({module:m,score:myC[m.id].score,date:myC[m.id].date,certId:myC[m.id].certId||null})}
+                          <button onClick={()=>setCert({module:m,score:myC[m.id].score,date:myC[m.id].date,certId:myC[m.id].certId||null,moduleVersion:myC[m.id].moduleVersion||null})}
+                            aria-label={`Certificate: ${m.title}`} title="Certificate"
                             style={{background:"rgba(245,158,11,0.12)",color:T.gold,border:`1px solid rgba(245,158,11,0.3)`,borderRadius:10,padding:"10px 14px",fontWeight:700,cursor:"pointer",fontSize:12,fontFamily:font}}>
                             🏅
                           </button>
@@ -3888,7 +3889,7 @@ export default function App() {
                           <MobileCardRow label="Score" value={<span style={{color:isPassed(myC[m.id])?T.green:T.amber,fontWeight:800}}>{scoreText(myC[m.id])}</span>}/>
                           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:4}}>
                             <Pill label={myC[m.id].recorded?"Completed":isPassed(myC[m.id])?"Passed":"Failed"} col={isPassed(myC[m.id])?"green":"red"}/>
-                            {isPassed(myC[m.id]) && !myC[m.id].recorded && <button onClick={()=>setCert({module:m,score:myC[m.id].score,date:myC[m.id].date,certId:myC[m.id].certId||null})} style={{background:"rgba(245,158,11,0.1)",border:`1px solid rgba(245,158,11,0.3)`,color:T.gold,borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font}}>🏅 Certificate</button>}
+                            {isPassed(myC[m.id]) && !myC[m.id].recorded && <button onClick={()=>setCert({module:m,score:myC[m.id].score,date:myC[m.id].date,certId:myC[m.id].certId||null,moduleVersion:myC[m.id].moduleVersion||null})} style={{background:"rgba(245,158,11,0.1)",border:`1px solid rgba(245,158,11,0.3)`,color:T.gold,borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font}}>🏅 Certificate</button>}
                           </div>
                         </MobileCard>
                       ))}
@@ -3905,7 +3906,7 @@ export default function App() {
                         <span title={myC[m.id].recorded?"Recorded from your earlier training records":undefined} style={{color:isPassed(myC[m.id])?T.green:T.amber,fontWeight:800,fontSize:15}}>{scoreText(myC[m.id])}</span>
                         <div style={{display:"flex",gap:8,alignItems:"center"}}>
                           <Pill label={myC[m.id].recorded?"Completed":isPassed(myC[m.id])?"Passed":"Failed"} col={isPassed(myC[m.id])?"green":"red"}/>
-                          {isPassed(myC[m.id])&&!myC[m.id].recorded&&<button onClick={()=>setCert({module:m,score:myC[m.id].score,date:myC[m.id].date,certId:myC[m.id].certId||null})} style={{background:"rgba(245,158,11,0.1)",border:`1px solid rgba(245,158,11,0.3)`,color:T.gold,borderRadius:8,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font}}>🏅 Cert</button>}
+                          {isPassed(myC[m.id])&&!myC[m.id].recorded&&<button onClick={()=>setCert({module:m,score:myC[m.id].score,date:myC[m.id].date,certId:myC[m.id].certId||null,moduleVersion:myC[m.id].moduleVersion||null})} style={{background:"rgba(245,158,11,0.1)",border:`1px solid rgba(245,158,11,0.3)`,color:T.gold,borderRadius:8,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:font}}>🏅 Cert</button>}
                         </div>
                       </div>
                     ))}
@@ -3929,7 +3930,7 @@ export default function App() {
                           <div style={{display:"flex",alignItems:"center",gap:10}}><span>{m.icon}</span><span style={{fontSize:13,fontWeight:700}}>{m.title} <span style={{color:T.muted,fontWeight:600}}>· v{h.module_version||1}</span></span></div>
                           {!isMobile && <span style={{color:T.muted,fontSize:13}}>{h.date}</span>}
                           {!isMobile && <span style={{color:T.green,fontWeight:800,fontSize:14}}>{h.score}%</span>}
-                          <button onClick={()=>setCert({module:m,score:h.score,date:h.date,certId:h.cert_id||null})} style={{justifySelf:"start",background:`${T.gold}1A`,border:`1px solid ${T.gold}4D`,color:T.gold,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font}}>{E("🏅 ","")}Certificate</button>
+                          <button onClick={()=>setCert({module:m,score:h.score,date:h.date,certId:h.cert_id||null,moduleVersion:h.module_version||null})} style={{justifySelf:"start",background:`${T.gold}1A`,border:`1px solid ${T.gold}4D`,color:T.gold,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:font}}>{E("🏅 ","")}Certificate</button>
                         </div>
                       );})}
                     </div>
@@ -6035,7 +6036,7 @@ export default function App() {
 
           {atab==="settings" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
-            <LazySiteSettingsTab Z={T} font={font} superAdmin={isSuperAdmin(user)}/>
+            <LazySiteSettingsTab Z={T} font={font} superAdmin={isSuperAdmin(user)} user={user}/>
             </React.Suspense>
           )}
 

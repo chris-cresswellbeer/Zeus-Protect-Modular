@@ -22,7 +22,7 @@ const STATUS = { sent: ["Sent", "#10b981"], redirected: ["Sent to test address",
 const toForm = s => ({ ...s, warnDays: s.warnDays.join(", "), extraAdminEmails: s.extraAdminEmails.join(", "), incidentEmails: s.incidentEmails.join(", ") });
 const when = t => { const d = new Date(t); return isNaN(d) ? "" : d.toLocaleString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }); };
 
-function EmailSettings({ Z, font }) {
+function EmailSettings({ Z, font, embedded = false, onStatus }) {
   const [form, setForm] = useState(() => toForm(emailSettings(EMAIL_DEFAULTS)));
   const [savedForm, setSavedForm] = useState(form);
   const [loaded, setLoaded] = useState(false);
@@ -99,12 +99,15 @@ function EmailSettings({ Z, font }) {
     </div>
   );
   const on = form.enabled;
+  // Site Settings: unsaved-changes dot and the line under the section's title
+  const statusLine = !loaded ? "" : savedForm.enabled ? "On · checked every 15 minutes on the live site" : "Off · nothing is sent";
+  useEffect(() => { if (onStatus) onStatus({ dirty: changed, summary: statusLine }); }, [changed, statusLine]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <section data-testid="email-settings" style={{ ...card, marginTop: 18 }}>
+    <section data-testid="email-settings" style={embedded ? {} : { ...card, marginTop: 18 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
         <div style={{ flex: "1 1 320px" }}>
-          <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: Z.white }}>📧 Email reminders</h3>
+          {!embedded && <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: Z.white }}>📧 Email reminders</h3>}
           <p style={{ margin: "4px 0 0", fontSize: 12.5, color: Z.muted, lineHeight: 1.5 }}>
             Emails staff, managers and admins about training, reading and renewals, and admins about high-risk incidents, so nobody has to sign in to find out. Emails say what needs doing and link to the portal;
             they never say who was hurt or how, and never include health information or files.

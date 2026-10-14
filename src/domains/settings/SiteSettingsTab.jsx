@@ -6,6 +6,7 @@ import { useSiteLists, saveSiteLists, loadSiteLists, SITE_LIST_DEFAULTS } from "
 import { EmailSettings } from "./EmailSettings";
 import { BrandingCard } from "./BrandingCard";
 import { CertificateSettings } from "./CertificateSettings";
+import { SettingsSection, SettingsTabs } from "./SettingsSection";
 
 /**
  * SiteSettingsTab — Documents ▼ → Site Settings (admins).
@@ -14,7 +15,11 @@ import { CertificateSettings } from "./CertificateSettings";
  * certificate settings (CertificateSettings.jsx); email reminder settings
  * (EmailSettings.jsx); and, for super admins only, the
  * branding (BrandingCard.jsx).
+ * Laid out as sections that open and close, with tabs at the top that jump to
+ * each one (SettingsSection.jsx).
  */
+const OPEN_KEY = "zp_site_settings_open";   // which sections are open, on this computer
+
 const LISTS = [
   { key: "reportLocations", title: "Hazard report locations", help: "The \"Where was it?\" choices when someone makes a quick hazard report, on a phone or computer. They can always type somewhere else.", add: "e.g. Racking Aisle 4" },
   { key: "firstAidZones", title: "First aid zones", help: "The areas first aid cover is planned for, in the First Aid register and on first aid certificates. Fire wardens' areas are chosen from this list too.", add: "e.g. Ground Floor — Offices" },
@@ -32,9 +37,9 @@ function ListEditor({ list, items, onChange, Z, font }) {
   };
   const move = (i, d) => { const n = [...items]; const j = i + d; if (j < 0 || j >= n.length) return; [n[i], n[j]] = [n[j], n[i]]; onChange(n); };
   return (
-    <section data-testid={`list-${list.key}`} style={{ background: `linear-gradient(135deg,${Z.navyMd},${Z.navy})`, border: `1px solid ${Z.border}`, borderRadius: 14, padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+    <section data-testid={`list-${list.key}`} style={{ background: Z.overlay, border: `1px solid ${Z.border}`, borderRadius: 12, padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
       <div data-part="head">
-        <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: Z.white }}>{list.title}</h3>
+        <h4 style={{ margin: 0, fontSize: 14.5, fontWeight: 800, color: Z.white }}>{list.title}</h4>
         <p style={{ margin: "3px 0 0", fontSize: 12.5, color: Z.muted, lineHeight: 1.5 }}>{list.help}</p>
       </div>
       {items.length ? (
@@ -81,29 +86,68 @@ function SiteSettingsTab({ Z, font, superAdmin = false, user = null }) {
     notify("Site settings saved.");
   }
 
+  // ── Sections: tabs at the top jump to one; each opens and closes (remembered on this computer) ──
+  const [open, setOpenRaw] = useState(() => { try { return JSON.parse(localStorage.getItem(OPEN_KEY) || "{}") || {}; } catch { return {}; } });
+  const setOpen = fn => setOpenRaw(prev => { const next = typeof fn === "function" ? fn(prev) : fn; try { localStorage.setItem(OPEN_KEY, JSON.stringify(next)); } catch { /* private mode */ } return next; });
+  const [status, setStatus] = useState({});        // id → { dirty, summary } from each section
+  const report = id => st => setStatus(p => (p[id] && p[id].dirty === st.dirty && p[id].summary === st.summary) ? p : { ...p, [id]: st });
+  const [active, setActive] = useState("");
+  const listsSummary = `${site.reportLocations.length} hazard report locations · ${site.firstAidZones.length} first aid zones · ${site.firstAidShifts.length} first aid shifts`;
+  const sections = [
+    { id: "lists", icon: "📋", label: "Site lists", title: "Site lists", summary: listsSummary, dirty: changed },
+    { id: "certificates", icon: "🏅", label: "Certificates", title: "Certificates", summary: (status.certificates || {}).summary, dirty: !!(status.certificates || {}).dirty },
+    { id: "email", icon: "📧", label: "Email reminders", title: "Email reminders", summary: (status.email || {}).summary, dirty: !!(status.email || {}).dirty },
+    ...(superAdmin ? [{ id: "branding", icon: "🎨", label: "Branding", title: "Branding (super admin)", summary: (status.branding || {}).summary, dirty: !!(status.branding || {}).dirty }] : []),
+  ];
+  const allOpen = sections.every(x => open[x.id]);
+  function jump(id) {
+    setOpen(p => ({ ...p, [id]: true })); setActive(id);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const el = document.getElementById(`settings-${id}`);
+      if (el) { el.scrollIntoView({ behavior: "smooth", block: "start" }); const b = el.querySelector("button[aria-expanded]"); if (b) b.focus({ preventScroll: true }); }
+    }));
+  }
+  // highlight the tab of the section at the top of the screen while scrolling
+  useEffect(() => {
+    if (typeof IntersectionObserver === "undefined") return undefined;
+    const io = new IntersectionObserver(es => { const v = es.filter(e => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0]; if (v) setActive(v.target.id.replace("settings-", "")); },
+      { rootMargin: "-80px 0px -55% 0px" });
+    sections.forEach(x => { const el = document.getElementById(`settings-${x.id}`); if (el) io.observe(el); });
+    return () => io.disconnect();
+  }, [superAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
+  const sec = id => sections.find(x => x.id === id);
+  const wrap = (id, body) => { const x = sec(id); return (
+    <SettingsSection key={id} id={id} icon={x.icon} title={x.title} summary={x.summary} dirty={x.dirty} open={!!open[id]} onToggle={() => setOpen(p => ({ ...p, [id]: !p[id] }))} Z={Z} font={font}>{body}</SettingsSection>
+  ); };
+
   return (
     <div data-testid="site-settings">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
-        <div>
-          <h2 style={{ fontSize: 22, fontWeight: 900, letterSpacing: -.5, margin: "0 0 4px" }}>Site Settings</h2>
-          <p style={{ color: Z.muted, margin: 0, fontSize: 13 }}>Lists that are particular to this site. Changes apply for everyone as soon as you save.</p>
+      <div style={{ marginBottom: 12 }}>
+        <h2 style={{ fontSize: 22, fontWeight: 900, letterSpacing: -.5, margin: "0 0 4px" }}>Site Settings</h2>
+        <p style={{ color: Z.muted, margin: 0, fontSize: 13 }}>Settings that are particular to this site. Click a heading to open or close it. Each part has its own Save button, and changes apply for everyone as soon as you save.</p>
+      </div>
+      <SettingsTabs sections={sections} active={active} onJump={jump} allOpen={allOpen} onAll={v => setOpen(Object.fromEntries(sections.map(x => [x.id, v])))} Z={Z} font={font}/>
+
+      {wrap("lists", <>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+          <p style={{ margin: 0, fontSize: 12.5, color: Z.muted, lineHeight: 1.5, maxWidth: 640 }}>The lists people choose from in hazard reports and the First Aid register.</p>
+          <button type="button" onClick={save} disabled={busy || !changed} data-testid="site-save"
+            style={{ background: `linear-gradient(135deg,${Z.accent},${Z.blue})`, color: "#fff", border: "none", borderRadius: 10, padding: "8px 18px", fontWeight: 800, cursor: busy || !changed ? "default" : "pointer", fontFamily: font, fontSize: 13, opacity: busy || !changed ? .5 : 1 }}>
+            {busy ? "Saving…" : changed ? "Save lists" : "Saved"}
+          </button>
         </div>
-        <button type="button" onClick={save} disabled={busy || !changed} data-testid="site-save"
-          style={{ background: `linear-gradient(135deg,${Z.accent},${Z.blue})`, color: "#fff", border: "none", borderRadius: 10, padding: "10px 22px", fontWeight: 800, cursor: busy || !changed ? "default" : "pointer", fontFamily: font, fontSize: 13, opacity: busy || !changed ? .5 : 1 }}>
-          {busy ? "Saving…" : changed ? "Save changes" : "Saved"}
-        </button>
-      </div>
-      {!site.saved && <div role="status" style={{ padding: "10px 14px", borderRadius: 12, background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.35)", fontSize: 13, color: Z.white, marginBottom: 14 }}>
-        These are the starting lists. Change them to suit this site and save.
-      </div>}
+        {!site.saved && <div role="status" style={{ padding: "10px 14px", borderRadius: 12, background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.35)", fontSize: 13, color: Z.white, marginBottom: 14 }}>
+          These are the starting lists. Change them to suit this site and save.
+        </div>}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))", gap: 14 }}>
+          {LISTS.map(l => <ListEditor key={l.key} list={l} items={form[l.key]} onChange={v => setForm(f => ({ ...f, [l.key]: v }))} Z={Z} font={font}/>)}
+        </div>
+        <p style={{ fontSize: 12, color: Z.muted, margin: "14px 0 0" }}>The COSHH substances are kept in the COSHH Register (Documents ▼ → COSHH Register), and machine types under Machinery Competence → Machine types.</p>
+      </>)}
+      {wrap("certificates", <CertificateSettings Z={Z} font={font} user={user} embedded onStatus={report("certificates")}/>)}
+      {wrap("email", <EmailSettings Z={Z} font={font} embedded onStatus={report("email")}/>)}
       {/* Branding: super admins only (super_admin.sql); not shown to anyone else at all */}
-      {superAdmin && <BrandingCard Z={Z} font={font}/>}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))", gap: 14 }}>
-        {LISTS.map(l => <ListEditor key={l.key} list={l} items={form[l.key]} onChange={v => setForm(f => ({ ...f, [l.key]: v }))} Z={Z} font={font}/>)}
-      </div>
-      <p style={{ fontSize: 12, color: Z.muted, marginTop: 14 }}>The COSHH substances are kept in the COSHH Register (Documents ▼ → COSHH Register), and machine types under Machinery Competence → Machine types.</p>
-      <CertificateSettings Z={Z} font={font} user={user}/>
-      <EmailSettings Z={Z} font={font}/>
+      {superAdmin && wrap("branding", <BrandingCard Z={Z} font={font} embedded onStatus={report("branding")}/>)}
     </div>
   );
 }

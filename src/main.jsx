@@ -52,6 +52,10 @@ focusCss.textContent = `
   :focus-visible { outline: 3px solid #f59e0b !important; outline-offset: 2px !important; border-radius: 4px; }
   input:focus-visible, select:focus-visible, textarea:focus-visible, [contenteditable]:focus-visible { outline: 2px solid #60a5fa !important; outline-offset: 0 !important; }
   @media (forced-colors: active) { :focus-visible { outline-color: Highlight !important; } }
+  /* The page frame hides anything wider than the screen. "clip" does that without
+     stopping bars that stay at the top while scrolling (Site Settings tabs, bulk actions);
+     older browsers keep "hidden". */
+  @supports (overflow: clip) { .zp-shell { overflow-x: clip !important; } }
 `;
 document.head.appendChild(focusCss);
 

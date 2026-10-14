@@ -2975,7 +2975,7 @@ export default function App() {
       {/* Certificate from "View Certificate" after a pass — this screen must render it
           itself, because the staff views (which also show it) aren't on screen here. */}
       {cert && <CertificateModal cert={cert} user={user} onClose={() => setCert(null)} T={T} font={font}/>}
-      <div style={{minHeight:"100vh",background:T.bg,fontFamily:font,color:T.white,overflowX:"hidden"}}>
+      <div className="zp-shell" style={{minHeight:"100vh",background:T.bg,fontFamily:font,color:T.white,overflowX:"hidden"}}>
 
         {/* Celebration Overlay */}
         {showCelebration && (
@@ -4433,7 +4433,7 @@ export default function App() {
 
     return (
       <EmojiCtx.Provider value={emojiMode}>
-      <div style={{minHeight:"100vh",background:T.bg,fontFamily:font,color:T.white,overflowX:"hidden"}}>
+      <div className="zp-shell" style={{minHeight:"100vh",background:T.bg,fontFamily:font,color:T.white,overflowX:"hidden"}}>
         <PreviewModal doc={previewDoc} onClose={()=>setPreviewDoc(null)} Z={T} font={font}/>
         {/* ▲/▼ top-of-page / bottom-of-page buttons on long screens (shared/ScrollNav.jsx) */}
         <ScrollNav bottom={24} Z={T} font={font}/>

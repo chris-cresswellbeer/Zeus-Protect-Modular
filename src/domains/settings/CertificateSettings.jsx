@@ -44,7 +44,7 @@ export function signatureToPng(file, { maxW = 600, maxH = 200 } = {}) {
   });
 }
 
-export function CertificateSettings({ Z, font, user }) {
+export function CertificateSettings({ Z, font, user, embedded = false, onStatus }) {
   const [f, setF] = useState(() => certSettings(null));
   const [saved, setSaved] = useState(f);
   const [loaded, setLoaded] = useState(false);
@@ -54,6 +54,9 @@ export function CertificateSettings({ Z, font, user }) {
   const changed = loaded && JSON.stringify(f) !== JSON.stringify(saved);
   const guard = useFormGuard({ key: "cert-settings", label: "the certificate settings", active: loaded, value: f, onRestore: v => setF(certSettings(v)), changed });
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  // Site Settings: unsaved-changes dot and the line under the section's title
+  const statusLine = !loaded ? "" : `${saved.signName ? `Signed by ${saved.signName}${saved.signImage ? "" : " (no signature picture)"}` : "No signatory set"} · QR code ${saved.showQR ? "on" : "off"}`;
+  useEffect(() => { if (onStatus) onStatus({ dirty: changed, summary: statusLine }); }, [changed, statusLine]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function pickSignature(file) {
     if (!file) return;
@@ -96,10 +99,10 @@ export function CertificateSettings({ Z, font, user }) {
   const S = 0.5;
 
   return (
-    <section data-testid="cert-settings" style={card}>
+    <section data-testid="cert-settings" style={embedded ? {} : card}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
         <div>
-          <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: Z.white }}>🏅 Certificates</h3>
+          {!embedded && <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: Z.white }}>🏅 Certificates</h3>}
           <p style={{ margin: "3px 0 0", fontSize: 12.5, color: Z.muted, lineHeight: 1.5, maxWidth: 640 }}>Who signs the training certificates, and what they show. Applies to every certificate, including ones already issued, the next time it's opened or printed.</p>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>

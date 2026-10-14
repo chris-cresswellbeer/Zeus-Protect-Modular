@@ -113,9 +113,9 @@ function buildMonthlyReport(data, { year, month }) {
     byOwner: Object.entries(byOwner).sort((a, b) => b[1] - a[1]).map(([owner, count]) => ({ owner, count })), closedInMonth };
 
   // ── Inspections ──
-  const typeLabel = t => (INSP_TYPES.find(x => x.id === t) || {}).label || t || "Inspection";
+  const typeLabel = (t, rec) => (INSP_TYPES.find(x => x.id === t) || {}).label || (rec && rec.typeLabel) || t || "Inspection";   // typeLabel: this site's own checklists (lib/inspTemplates.js)
   const monthIns = inspections.filter(i => inMonth(i.date, year, month)).sort((a, b) => String(a.date).localeCompare(String(b.date)))
-    .map(i => ({ date: i.date, type: typeLabel(i.type), location: i.location || "", inspector: i.inspector || "", pct: inspPct(i),
+    .map(i => ({ date: i.date, type: typeLabel(i.type, i), location: i.location || "", inspector: i.inspector || "", pct: inspPct(i),
       major: (i.nonConformances || []).filter(n => n.severity === "major").length, minor: (i.nonConformances || []).filter(n => n.severity === "minor").length,
       observations: (i.nonConformances || []).filter(n => n.severity === "observation").length }));
   const insTrend = Array.from({ length: 12 }, (_, k) => {

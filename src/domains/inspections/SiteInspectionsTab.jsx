@@ -6,23 +6,28 @@ import { useWindowWidth } from "../../shared/hooks";
 import { HelpTip } from "../../shared/HelpTip";
 import { E } from "../../lib/emoji";
 import { ACCEPT_IMAGES } from "../../lib/constants";
-import { INSP_TYPES, INSP_SECTIONS } from "../../data/seedInspections";
+import { useInspTemplates, inspTypes, inspType, inspSections } from "../../lib/inspTemplates";
 import { embedFiles } from "../../lib/fileAccess";
 import { useRemembered } from "../../lib/remembered";
 import { latestByKey, supersededBy, overdueInspections } from "./inspectionDue";
 
-import { todayISO } from "../../lib/dates";
+import { todayISO, addMonths, localISO } from "../../lib/dates";
 import { brandHtml } from "../../lib/brandCore";
 /**
  * SiteInspectionsTab — admin workplace inspections (checklists + non-conformances).
  *
  * Views: "list" (filter by type/status), "new" (multi-section checklist wizard, last
  * section = Non-Conformances), "detail" (read/edit, manage NC actions), "report" (printable).
- * Checklist templates per inspection type come from data/seedInspections.js (INSP_SECTIONS).
+ * Checklists: the built-in ones (data/seedInspections.js) and this site's own, e.g. the
+ * BRCGS internal audits (inspection_templates table) — both through lib/inspTemplates.js.
+ * A site's own checklist can have clause numbers (ref), an introduction per section
+ * (e.g. Statement of Intent), and can be saved part-done (allowSkip).
  *
  * RECORD SHAPE (site_inspections table, one JSON `data` per inspection):
  *   { id, type, date, inspector, location, summary,
- *     sections: { [sectionId]: { [questionId]: 2|1|0 } },   // 2 Compliant, 1 Partial, 0 Non-compliant
+ *     sections: { [sectionId]: { [questionId]: 2|1|0|"na" } },   // 2 Compliant, 1 Partial, 0 Non-compliant, "na" not applicable
+ *     comments: { [sectionId]: { [questionId]: "evidence / comment" } },
+ *     typeLabel: the checklist's name when saved (so it can be named without the templates),
  *     nonConformances: [ { id:"nc_<ts>", section, sectionId, questionId?, finding,
  *                          severity: major|minor|observation, photos:[dataURL|url],
  *                          actionOwner, actionDue, actionStatus: open|closed, actionNote } ],
@@ -46,12 +51,13 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
     if (inspections.some(i => i.id === preset.openId)) { setActiveId(preset.openId); setView("detail"); window.scrollTo({ top: 0 }); }
     clearPreset && clearPreset();
   }, [preset]); // eslint-disable-line react-hooks/exhaustive-deps
+  useInspTemplates();   // this site's own checklists (re-renders when they arrive)
   const [filterType, setFilterType] = useRemembered("inspections.type", "all");
   const [filterStatus, setFilterStatus] = useRemembered("inspections.status", "all");
   const [photoError, setPhotoError] = useState("");
 
   // New inspection form state
-  const BLANK_FORM = { type:"annual_hs", date:todayISO(), inspector:userName, location:"", summary:"", sections:{}, nonConformances:[] };
+  const BLANK_FORM = { type:"annual_hs", date:todayISO(), inspector:userName, location:"", summary:"", sections:{}, comments:{}, nonConformances:[] };
   const [form, setForm] = useState(BLANK_FORM);
   const [formSection, setFormSection] = useState(0);
   const [ncForm, setNcForm] = useState(null); // { section, finding, severity, photos, actionOwner, actionDue }
@@ -64,23 +70,33 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
 
   const today = (()=>{ const t=new Date(); return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,"0")}-${String(t.getDate()).padStart(2,"0")}`; })();   // local date
   const selInsp = inspections.find(i=>i.id===activeId);
-  const typeInfo = id => INSP_TYPES.find(t=>t.id===id)||INSP_TYPES[0];
+  const typeInfo = (id, rec) => inspType(id, rec);
   // scoring and bands: inspectionScore.js (the same rules as the phone, Fire Safety and reports)
   const scoreColor = pct => scoreBand(pct).color;
   const scoreLabel = pct => scoreBand(pct).label;
+  // one answer as words / colour (checklist view and report)
+  const ANS = { 2:["Compliant","#10b981","#047857"], 1:["Partial","#f59e0b","#b45309"], 0:["Non-compliant","#f87171","#b91c1c"], na:["N/A","#94a3b8","#64748b"], pass:["Compliant","#10b981","#047857"], partial:["Partial","#f59e0b","#b45309"], fail:["Non-compliant","#f87171","#b91c1c"], issue:["Non-compliant","#f87171","#b91c1c"] };
+  const ansOf = (ins, sid, qid) => ((ins.sections||{})[sid]||{})[qid];
+  const commentOf = (ins, sid, qid) => (((ins.comments||{})[sid]||{})[qid]||"").trim();
+  const esc = v => String(v==null?"":v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 
   // Score calculation
   // Score = points earned / points possible (2 per question). Unanswered questions still
   // count toward `possible`, so an incomplete checklist lowers the score.
   // Questions not answered are left out of the score and the maximum (inspectionScore.js).
   function calcScore(type, sections) {
-    return scoreAnswers(INSP_SECTIONS[type]||[], sections);
+    return scoreAnswers(inspSections(type), sections);
   }
 
   // Flat answer helper
   function setAnswer(secId, qId, val) {
     setForm(p=>({ ...p, sections:{ ...p.sections, [secId]:{ ...(p.sections[secId]||{}), [qId]:val } } }));
   }
+  // Comment / evidence for one question (e.g. what the auditor saw or which record was checked)
+  function setComment(secId, qId, text) {
+    setForm(p=>({ ...p, comments:{ ...(p.comments||{}), [secId]:{ ...((p.comments||{})[secId]||{}), [qId]:text } } }));
+  }
+  const [openComments, setOpenComments] = useState({});   // "secId/qId" → comment box shown
 
   // NC photos are read as base64 data URLs (max 5 MB each). ncIdx given → add to an existing
   // NC on the active inspection; otherwise add to the NC currently being drafted.
@@ -130,9 +146,16 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
 
   function submitInspection() {
     const { earned, possible } = calcScore(form.type, form.sections);
+    const t = typeInfo(form.type);
+    // drop empty comments; a site checklist with a frequency gets its next due date
+    const comments = Object.fromEntries(Object.entries(form.comments||{}).map(([k,v])=>[k,Object.fromEntries(Object.entries(v||{}).filter(([,x])=>String(x||"").trim()))]).filter(([,v])=>Object.keys(v).length));
+    const nextDue = form.nextDue || (t.freqMonths && form.date ? localISO(addMonths(form.date, t.freqMonths)) : undefined);
     const newInsp = {
       id: `si${Date.now()}`,
       ...form,
+      comments,
+      typeLabel: t.label,
+      ...(nextDue ? { nextDue } : {}),
       status: form.nonConformances.some(n=>n.actionStatus==="open") ? "open" : "closed",
       overallScore: earned,
       maxScore: possible,
@@ -146,7 +169,7 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
   // uploaded to storage) — the <img> tags below accept both.
   // Printable inspection report (score, answers per section, NC table with photos).
   async function generateReport(ins) {
-    const ti = typeInfo(ins.type);
+    const ti = typeInfo(ins.type, ins);
     const pct = inspectionPct(ins) ?? 0;
     const openNCs = ins.nonConformances.filter(n=>n.actionStatus!=="complete");
     const closedNCs = ins.nonConformances.filter(n=>n.actionStatus==="complete");
@@ -215,6 +238,10 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
         ${nc.photos&&nc.photos.length>0?`<div class="photo-grid">${nc.photos.map((p,j)=>typeof p==="string"?`<img src="${p}" alt="Photo ${j+1}"/>`:`<img src="${p.data||p.url}" alt="${p.name||""}"/>`).join("")}</div>`:""}
       </div>`).join("")}
     `:"<p style='color:#94a3b8'>No non-conformances recorded for this inspection.</p>"}
+    ${(()=>{ const secs = inspSections(ins.type); if(!secs.length) return "";
+      return `<h2>Checklist results</h2>${secs.map(sc=>`<h3 style="font-size:13.5px;margin:18px 0 6px;color:#0d1f5c">${esc(sc.label)}</h3>
+      <table style="width:100%;border-collapse:collapse;font-size:12px"><tr style="background:#f1f5f9"><th style="text-align:left;padding:5px 8px;width:62px">Ref</th><th style="text-align:left;padding:5px 8px">Requirement</th><th style="text-align:left;padding:5px 8px;width:96px">Result</th><th style="text-align:left;padding:5px 8px;width:30%">Comments</th></tr>
+      ${sc.questions.map(q=>{ const a=ansOf(ins,sc.id,q.id); const L=ANS[a]; return `<tr style="border-top:1px solid #e2e8f0;vertical-align:top"><td style="padding:5px 8px;font-weight:700">${esc(q.ref||"")}${q.tag?`<br><span style="font-weight:400;color:#64748b">${esc(q.tag)}</span>`:""}</td><td style="padding:5px 8px;white-space:pre-line">${esc(q.text)}</td><td style="padding:5px 8px;font-weight:700;color:${L?L[2]:"#94a3b8"}">${L?L[0]:"Not answered"}</td><td style="padding:5px 8px;white-space:pre-line">${esc(commentOf(ins,sc.id,q.id))}</td></tr>`; }).join("")}</table>`).join("")}`; })()}
     <div class="footer">
       <span>${brandHtml().foot} — Site Inspection Report</span>
       <span>Generated: ${today}</span>
@@ -234,7 +261,7 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
 
   // ── DETAIL view ─────────────────────────────────────────────────────────────
   if (view==="detail" && selInsp) {
-    const ti = typeInfo(selInsp.type);
+    const ti = typeInfo(selInsp.type, selInsp);
     const pct = inspectionPct(selInsp) ?? 0;
     const sc = scoreColor(pct);
     const openNCs = selInsp.nonConformances.filter(n=>n.actionStatus!=="complete");
@@ -294,6 +321,36 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
             <p style={{margin:0,fontSize:13,color:Z.slate,lineHeight:1.7}}>{selInsp.summary}</p>
           </div>
         )}
+
+        {/* Checklist answers, section by section (closed until clicked) */}
+        {(()=>{ const secs = inspSections(selInsp.type); if(!secs.length) return null;
+          const count = sc => { const c={2:0,1:0,0:0,na:0,none:0}; sc.questions.forEach(q=>{ const a=ansOf(selInsp,sc.id,q.id); const k=a===2||a==="pass"?2:a===1||a==="partial"?1:a===0||a==="fail"||a==="issue"?0:a==="na"?"na":"none"; c[k]++; }); return c; };
+          return (
+            <div data-testid="insp-checklist" style={{marginBottom:20}}>
+              <h3 style={{margin:"0 0 10px",fontSize:13,fontWeight:700,letterSpacing:.5,color:Z.muted,textTransform:"uppercase"}}>Checklist ({secs.reduce((n,sc)=>n+sc.questions.length,0)} items)</h3>
+              <div style={{display:"grid",gap:8}}>
+                {secs.map(sc=>{ const c=count(sc); return (
+                  <details key={sc.id} style={{background:`linear-gradient(135deg,${Z.navyMd},${Z.navy})`,borderRadius:12,border:`1px solid ${c[0]?"rgba(239,68,68,0.35)":Z.border}`}}>
+                    <summary style={{cursor:"pointer",padding:"11px 14px",fontSize:13,fontWeight:700,color:Z.white,display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
+                      <span style={{flex:"1 1 260px"}}>{sc.label}</span>
+                      <span style={{fontSize:11.5,fontWeight:600,color:Z.muted}}>
+                        <span style={{color:"#10b981"}}>✓ {c[2]}</span>{c[1]?<span style={{color:"#f59e0b"}}> · ⚠ {c[1]}</span>:null}{c[0]?<span style={{color:"#f87171"}}> · ✗ {c[0]}</span>:null}{c.na?` · N/A ${c.na}`:""}{c.none?` · ${c.none} not answered`:""}
+                      </span>
+                    </summary>
+                    <div style={{padding:"0 14px 12px",display:"grid",gap:6}}>
+                      {sc.questions.map(q=>{ const a=ansOf(selInsp,sc.id,q.id); const L=ANS[a]; const cm=commentOf(selInsp,sc.id,q.id); return (
+                        <div key={q.id} style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",gap:10,padding:"8px 10px",background:Z.overlay,borderRadius:8,fontSize:12.5,lineHeight:1.5}}>
+                          <div style={{color:Z.white,whiteSpace:"pre-line"}}>{q.ref && <b style={{marginRight:6}}>{q.ref}{q.tag?` · ${q.tag}`:""}</b>}{q.text}
+                            {cm && <div style={{marginTop:4,color:Z.muted,fontStyle:"italic"}}>💬 {cm}</div>}</div>
+                          <span style={{fontWeight:800,color:L?L[1]:Z.muted,whiteSpace:"nowrap"}}>{L?L[0]:"—"}</span>
+                        </div>
+                      ); })}
+                    </div>
+                  </details>
+                ); })}
+              </div>
+            </div>
+          ); })()}
 
         {/* Non-Conformances */}
         <div style={{marginBottom:20}}>
@@ -402,7 +459,11 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
   // ── NEW INSPECTION form ──────────────────────────────────────────────────────
   if (view==="new") {
     const ti = typeInfo(form.type);
-    const sections = INSP_SECTIONS[form.type]||[];
+    const sections = inspSections(form.type);
+    const answeredIn = s2 => s2.questions.filter(q=>(form.sections[s2.id]||{})[q.id]!==undefined).length;
+    const totalQ = sections.reduce((n,s2)=>n+s2.questions.length,0);
+    const totalA = sections.reduce((n,s2)=>n+answeredIn(s2),0);
+    const longList = sections.length > 8;   // e.g. a BRCGS audit: pick the section from a list
     const sec = sections[formSection];
     const isLastSec = formSection===sections.length-1;
     const { earned, possible } = calcScore(form.type, form.sections);
@@ -411,7 +472,7 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
     // Jump to the Non-Conformances tab with a finding pre-filled from a specific checklist question
     // Severity defaults: Non-compliant → major, Partial → minor.
     const flagQuestion = (secForQ, q, ans) => {
-      setNcForm({ ...BLANK_NC, section:secForQ.label, sectionId:secForQ.id, questionId:q.id, severity:ans===0?"major":"minor", finding:q.text });
+      setNcForm({ ...BLANK_NC, section:secForQ.label, sectionId:secForQ.id, questionId:q.id, severity:ans===0?"major":"minor", finding:q.ref?`${q.ref}${q.tag?` (${q.tag})`:""} – ${q.text}`:q.text });
       setEditNcIdx(null);
       setNcReturnSection(formSection);
       setFormSection(sections.length);
@@ -443,13 +504,26 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
             <div>
               <label style={lbl}>Inspection Type *</label>
               <select value={form.type} onChange={e=>{setForm(p=>({...BLANK_FORM,type:e.target.value,date:p.date,inspector:p.inspector,location:p.location}));setFormSection(0);setNcForm(null);setEditNcIdx(null);setNcReturnSection(null);}} style={{...inp,cursor:"pointer"}}>
-                {INSP_TYPES.map(t=><option key={t.id} value={t.id}>{t.icon} {t.label}</option>)}
+                {(()=>{ const all = inspTypes(); const built = all.filter(t=>!t.custom); const groups = {};
+                  all.filter(t=>t.custom).forEach(t=>{ (groups[t.group||"This site's checklists"] = groups[t.group||"This site's checklists"] || []).push(t); });
+                  const opt = t => <option key={t.id} value={t.id}>{t.icon} {t.label}</option>;
+                  return Object.keys(groups).length ? <>
+                    <optgroup label="Site inspections">{built.map(opt)}</optgroup>
+                    {Object.entries(groups).map(([g,list])=><optgroup key={g} label={g}>{list.map(opt)}</optgroup>)}
+                  </> : built.map(opt); })()}
               </select>
             </div>
             <div>
               <label style={lbl}>Inspection Date *</label>
               <input type="date" value={form.date} onChange={e=>setForm(p=>({...p,date:e.target.value}))} style={inp}/>
             </div>
+            {ti.custom && (ti.description || ti.source) && (
+              <div data-testid="insp-template-info" style={{gridColumn:"1 / -1",fontSize:12.5,color:Z.muted,lineHeight:1.5,marginTop:-4}}>
+                {ti.description && <div style={{color:Z.white,fontWeight:600}}>{ti.description}</div>}
+                {ti.source && <div>{ti.source}</div>}
+                <div>{sections.length} sections · {totalQ} requirements{ti.freqMonths?` · next due ${ti.freqMonths} months after the date above`:""}. You can save it part-done: anything not answered is left out of the score.</div>
+              </div>
+            )}
             <div>
               <label style={lbl}>Inspector Name *</label>
               <input value={form.inspector} onChange={e=>setForm(p=>({...p,inspector:e.target.value}))} placeholder="e.g. Linda Osei" list="insp-staff" aria-label="Inspector name" style={inp}/>
@@ -464,9 +538,22 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
           </div>
         </div>
 
-        {/* Section tabs */}
-        <div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap"}}>
-          {sections.map((s,i)=>{
+        {/* Section tabs (a long checklist, e.g. a BRCGS audit: a list to pick from instead) */}
+        <div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
+          {longList && (
+            <label style={{display:"flex",alignItems:"center",gap:8,flex:"1 1 420px",minWidth:0}}>
+              <span style={{...lbl,marginBottom:0,whiteSpace:"nowrap"}}>Section</span>
+              <select data-testid="insp-section-pick" value={formSection<sections.length?String(formSection):""} onChange={e=>{ if(e.target.value!=="") setFormSection(Number(e.target.value)); }} style={{...inp,cursor:"pointer",padding:"8px 12px"}}>
+                {formSection>=sections.length && <option value="">Choose a section…</option>}
+                {[...new Set(sections.map(s2=>s2.group||""))].map(g=>{
+                  const opts = sections.map((s2,i)=>[s2,i]).filter(([s2])=>(s2.group||"")===g).map(([s2,i])=>{ const n=answeredIn(s2); return <option key={s2.id} value={i}>{n===s2.questions.length?"✓ ":n?"◐ ":""}{s2.label} ({n}/{s2.questions.length})</option>; });
+                  return g ? <optgroup key={g} label={g}>{opts}</optgroup> : opts;
+                })}
+              </select>
+            </label>
+          )}
+          {longList && <span data-testid="insp-progress" style={{fontSize:12,color:Z.muted,whiteSpace:"nowrap"}}>{totalA} of {totalQ} answered</span>}
+          {!longList && sections.map((s,i)=>{
             const done = s.questions.every(q=>(form.sections[s.id]||{})[q.id]!==undefined);
             return (
               <button key={s.id} onClick={()=>setFormSection(i)}
@@ -488,22 +575,39 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
         {/* Checklist questions */}
         {formSection<sections.length && sec && (
           <div style={{background:`linear-gradient(135deg,${Z.navyMd},${Z.navy})`,borderRadius:14,padding:"18px 20px",marginBottom:16,border:`1px solid ${Z.borderMd}`}}>
-            <h3 style={{margin:"0 0 16px",fontSize:14,fontWeight:700,color:Z.white}}>{sec.label}</h3>
+            {sec.group && <div style={{fontSize:11,fontWeight:700,letterSpacing:.5,color:Z.muted,textTransform:"uppercase",marginBottom:4}}>{sec.group}</div>}
+            <h3 style={{margin:"0 0 12px",fontSize:14,fontWeight:700,color:Z.white}}>{sec.label}</h3>
+            {sec.intro && (
+              <div data-testid="insp-intro" style={{margin:"0 0 14px",padding:"10px 14px",borderRadius:10,background:"rgba(139,92,246,0.08)",border:"1px solid rgba(139,92,246,0.3)",fontSize:12.5,lineHeight:1.55,color:Z.slate||Z.white,whiteSpace:"pre-line"}}>
+                <div style={{fontSize:10.5,fontWeight:800,letterSpacing:.6,textTransform:"uppercase",color:"#c4b5fd",marginBottom:4}}>{ti.introLabel||"Introduction"}</div>
+                {sec.intro}
+              </div>
+            )}
             <div style={{display:"grid",gap:10}}>
               {sec.questions.map(q=>{
                 const ans = (form.sections[sec.id]||{})[q.id];
                 const linkedNcIdx = form.nonConformances.findIndex(n=>n.sectionId===sec.id&&n.questionId===q.id);
                 return (
                   <div key={q.id} style={{padding:"14px 16px",background:Z.overlay,borderRadius:12,border:`1px solid ${ans===0?"rgba(239,68,68,0.3)":ans===1?"rgba(245,158,11,0.3)":ans===2?"rgba(16,185,129,0.3)":Z.border}`}}>
-                    <p style={{margin:"0 0 10px",fontSize:13,fontWeight:600,color:Z.white,lineHeight:1.5}}>{q.text}</p>
-                    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                      {[{v:2,label:"✓ Compliant",col:"#10b981",bg:"rgba(16,185,129,0.15)"},{v:1,label:"⚠ Partial",col:"#f59e0b",bg:"rgba(245,158,11,0.15)"},{v:0,label:"✗ Non-Compliant",col:"#f87171",bg:"rgba(239,68,68,0.15)"}].map(opt=>(
-                        <button key={opt.v} onClick={()=>setAnswer(sec.id,q.id,opt.v)}
+                    <p style={{margin:"0 0 10px",fontSize:13,fontWeight:600,color:Z.white,lineHeight:1.5,whiteSpace:"pre-line"}}>
+                      {q.ref && <span data-testid="insp-ref" style={{display:"inline-block",fontSize:11.5,fontWeight:800,color:Z.accentLt||"#93c5fd",background:`${Z.accent}22`,border:`1px solid ${Z.accent}55`,borderRadius:6,padding:"1px 7px",marginRight:8,verticalAlign:1,whiteSpace:"nowrap"}}>{q.ref}{q.tag?` · ${q.tag}`:""}</span>}
+                      {q.text}
+                    </p>
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap"}} role="group" aria-label={`Answer ${q.ref||""}`.trim()}>
+                      {[{v:2,label:"✓ Compliant",col:"#10b981",bg:"rgba(16,185,129,0.15)"},{v:1,label:"⚠ Partial",col:"#f59e0b",bg:"rgba(245,158,11,0.15)"},{v:0,label:"✗ Non-Compliant",col:"#f87171",bg:"rgba(239,68,68,0.15)"},{v:"na",label:"N/A",col:"#94a3b8",bg:"rgba(148,163,184,0.15)"}].map(opt=>(
+                        <button key={opt.v} type="button" aria-pressed={ans===opt.v} onClick={()=>setAnswer(sec.id,q.id,opt.v)}
                           style={{padding:"7px 16px",borderRadius:9,border:`2px solid ${ans===opt.v?opt.col:Z.borderMd}`,background:ans===opt.v?opt.bg:Z.overlay,color:ans===opt.v?opt.col:Z.muted,fontWeight:ans===opt.v?700:400,cursor:"pointer",fontFamily:font,fontSize:12,transition:"all .2s"}}>
                           {opt.label}
                         </button>
                       ))}
                     </div>
+                    {(()=>{ const key=`${sec.id}/${q.id}`; const val=((form.comments||{})[sec.id]||{})[q.id]||""; const show=ti.custom||openComments[key]||val;
+                      return show ? (
+                        <textarea data-testid="insp-comment" aria-label={`Comments ${q.ref||""}`.trim()} rows={ti.custom?2:2} value={val} onChange={e=>setComment(sec.id,q.id,e.target.value)}
+                          placeholder={ti.custom?"Comments / evidence seen (e.g. record checked, who was spoken to)":"Comment"} style={{...inp,marginTop:10,resize:"vertical",lineHeight:1.5,fontSize:12.5}}/>
+                      ) : (
+                        <button type="button" onClick={()=>setOpenComments(p=>({...p,[key]:true}))} style={{marginTop:8,background:"none",border:"none",padding:0,color:Z.muted,cursor:"pointer",fontFamily:font,fontSize:11.5,textDecoration:"underline"}}>💬 Add a comment</button>
+                      ); })()}
                     {(ans===0||ans===1) && (
                       <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${Z.border}`}}>
                         {linkedNcIdx===-1 ? (
@@ -528,8 +632,8 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
             </div>
             <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:16}}>
               {formSection>0 && <button onClick={()=>setFormSection(s=>s-1)} style={{background:Z.overlay,border:`1px solid ${Z.borderMd}`,borderRadius:8,padding:"8px 18px",color:Z.muted,cursor:"pointer",fontFamily:font,fontSize:12,fontWeight:700}}>← Prev</button>}
-              <button onClick={()=>setFormSection(s=>s+1)} disabled={!allAnswered}
-                style={{background:`linear-gradient(135deg,${Z.accent},${Z.blue})`,color:"#fff",border:"none",borderRadius:8,padding:"8px 20px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:12,opacity:allAnswered?1:.45}}>
+              <button onClick={()=>{ setFormSection(s=>s+1); window.scrollTo({top:0}); }} disabled={!allAnswered && !ti.allowSkip} data-testid="insp-next"
+                style={{background:`linear-gradient(135deg,${Z.accent},${Z.blue})`,color:"#fff",border:"none",borderRadius:8,padding:"8px 20px",fontWeight:700,cursor:"pointer",fontFamily:font,fontSize:12,opacity:allAnswered||ti.allowSkip?1:.45}}>
                 {isLastSec?"Non-Conformances →":"Next Section →"}
               </button>
             </div>
@@ -702,7 +806,7 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
           <div style={{fontSize:12,fontWeight:800,letterSpacing:.5,color:"#f87171",textTransform:"uppercase",marginBottom:10}}>🚨 Overdue Re-inspections</div>
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
             {overdue.map(i=>{
-              const ti=typeInfo(i.type);
+              const ti=typeInfo(i.type, i);
               return (
                 <button key={i.id} onClick={()=>{setActiveId(i.id);setView("detail");window.scrollTo({top:0,behavior:"smooth"});}} style={{background:"rgba(239,68,68,0.1)",color:"#fca5a5",border:"1px solid rgba(239,68,68,0.25)",borderRadius:8,padding:"6px 14px",cursor:"pointer",fontFamily:font,fontSize:12,fontWeight:600}}>
                   {ti.icon} {ti.label} · {i.location} — due {i.nextDue}
@@ -716,7 +820,7 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
       {/* Filters */}
       <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
         <span style={{fontSize:12,color:Z.muted,fontWeight:600}}>Filter:</span>
-        {[["all","All Types"],...INSP_TYPES.map(t=>[t.id,`${t.icon} ${t.label}`])].map(([id,label])=>(
+        {[["all","All Types"],...inspTypes().map(t=>[t.id,`${t.icon} ${t.label}`])].map(([id,label])=>(
           <button key={id} onClick={()=>setFilterType(id)}
             style={{padding:"5px 12px",borderRadius:8,border:`1px solid ${filterType===id?Z.accent:Z.borderMd}`,background:filterType===id?`linear-gradient(135deg,${Z.accent},${Z.blue})`:Z.overlay,color:filterType===id?"#fff":Z.muted,fontWeight:filterType===id?700:400,cursor:"pointer",fontFamily:font,fontSize:11}}>
             {label}
@@ -735,7 +839,7 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
       {/* Inspection list */}
       <div style={{display:"grid",gap:10}}>
         {filtered.sort((a,b)=>b.date.localeCompare(a.date)).map(ins=>{
-          const ti=typeInfo(ins.type);
+          const ti=typeInfo(ins.type, ins);
           const pct=inspectionPct(ins) ?? 0;
           const sc=scoreColor(pct);
           const openNCs=ins.nonConformances.filter(n=>n.actionStatus!=="complete").length;

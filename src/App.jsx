@@ -1332,7 +1332,7 @@ export default function App() {
   }, [equipment]); // eslint-disable-line
 
   useEffect(() => { if (!_ready.current || !writesAll()) return;
-    auditList("inspection", siteInspections, i => [i.date, (INSP_TYPES.find(t => t.id === i.type) || {}).label || i.type, i.location].filter(Boolean).join(" · "));
+    auditList("inspection", siteInspections, i => [i.date, (INSP_TYPES.find(t => t.id === i.type) || {}).label || i.typeLabel || i.type, i.location].filter(Boolean).join(" · "));
     saveKeyed(regRef.current.inspections, siteInspections, {
       write: x => dbWrite(sb.from("site_inspections").upsert({ id: x.id, data: x }, { onConflict: "id" }), "site inspection"),
       remove: id => dbWrite(sb.from("site_inspections").delete().eq("id", id), "site inspection delete"),

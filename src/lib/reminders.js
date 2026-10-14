@@ -309,7 +309,7 @@ export function dueChecks(data, today, days = 30) {
   (data.docs || []).forEach(d => add("Document review", d.title, d.reviewDate));
   (data.equipment || []).filter(e => e.status === "active").forEach(e => add("Equipment service", [e.assetNo, e.name].filter(Boolean).join(" · ") || "Equipment", e.nextService));
   [...latestByKey(data.inspections || []).values()].filter(i => i.type !== DRILL_INSPECTION && i.type !== FRA_INSPECTION)
-    .forEach(i => add("Site inspection", `${(INSP_TYPES.find(t => t.id === i.type) || {}).label || "Inspection"}${String(i.location || "").trim() ? ` · ${String(i.location).trim()}` : ""}`, i.nextDue));
+    .forEach(i => add("Site inspection", `${(INSP_TYPES.find(t => t.id === i.type) || {}).label || i.typeLabel || "Inspection"}${String(i.location || "").trim() ? ` · ${String(i.location).trim()}` : ""}`, i.nextDue));
   const fs = data.fireSafety || {};
   const fire = fireSummary({ fireSafety: fs, extCerts: data.extCerts || {}, staff: data.staff || [], inspections: data.inspections || [], today });
   if (fire.lastDrill && anyDate(fire.lastDrill.date)) add("Fire drill", "Full evacuation drill (a year after the last one)", plusMonths(anyDate(fire.lastDrill.date), 12));

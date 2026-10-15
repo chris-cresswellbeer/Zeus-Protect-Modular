@@ -8,7 +8,7 @@ import { HelpTip } from "../../shared/HelpTip";
 import { useSiteSignins, signinsOnSite, signinsOutToday, signinsToReview } from "../../lib/siteSignins";
 import { QrSigninCard, QrSignedOutChip, SigninReview } from "./SigninPanel";
 
-import { localISO, todayISO } from "../../lib/dates";
+import { localISO, todayISO, ukDate } from "../../lib/dates";
 /**
  * ContractorsTab — admin contractor management: company list with status filter and
  * search, an "on site now" panel (today's visits), upcoming scheduled visits, and
@@ -190,8 +190,11 @@ function ContractorsTab({ contractors, setContractors, contractorInductions, set
           : <div style={{padding:"32px 20px",textAlign:"center",color:T.muted,fontSize:14}}>No companies match the search or filter.</div>)}
         {filtered.map((c,i)=>{
           const cv=contractorVisits[c.id]||[];
-          const lastVisit=cv.slice().sort((a,b)=>b.date.localeCompare(a.date))[0]?.date;
-          const onSiteToday=cv.some(v=>v.date===today);
+          // visits logged by hand + sign-ins from the reception QR code linked to this company
+          const qv=signins.filter(s=>s.data&&s.data.companyId===c.id);
+          const nVisits=cv.length+qv.length;
+          const lastVisit=[...cv.map(v=>v.date),...qv.map(s=>s.data.date)].filter(d=>d&&d<=today).sort().pop();
+          const onSiteToday=cv.some(v=>v.date===today)||qv.some(s=>s.data.date===today&&!s.data.timeOut);
           const ss=c.status==="active"?{color:"#10b981",bg:"rgba(16,185,129,0.12)",border:"rgba(16,185,129,0.3)"}:c.status==="banned"?{color:"#f87171",bg:"rgba(239,68,68,0.12)",border:"rgba(239,68,68,0.3)"}:{color:T.muted,bg:T.overlay,border:T.borderMd};
           const hasExpiredWorkerCert=(c.workers||[]).some(w=>Object.values(contractorCerts[`${c.id}_${w.id}`]||{}).some(cert=>cert.expiryDate&&cert.expiryDate<today));
           return isMobile ? (
@@ -220,8 +223,8 @@ function ContractorsTab({ contractors, setContractors, contractorInductions, set
               <span style={{fontSize:11,fontWeight:700,padding:"2px 9px",borderRadius:20,background:ss.bg,color:ss.color,border:`1px solid ${ss.border}`,textTransform:"capitalize",display:"inline-block"}}>{c.status}</span>
               <span style={{fontSize:12,color:T.white,fontWeight:600}}>{(c.workers||[]).length} worker{(c.workers||[]).length!==1?"s":""}</span>
               <div>
-                <div style={{fontSize:12,color:T.white,fontWeight:600}}>{cv.length} visit{cv.length!==1?"s":""}</div>
-                {lastVisit && <div style={{fontSize:10,color:T.muted}}>Last: {lastVisit}</div>}
+                <div data-testid="con-visits" style={{fontSize:12,color:T.white,fontWeight:600}}>{nVisits} visit{nVisits!==1?"s":""}</div>
+                {lastVisit && <div style={{fontSize:10,color:T.muted}}>Last: {ukDate(lastVisit)}</div>}
               </div>
               <button onClick={()=>{setSelected(c.id);setView("detail");}} style={{background:"rgba(37,99,235,0.1)",color:T.accentLt,border:"1px solid rgba(37,99,235,0.25)",borderRadius:8,padding:"6px 12px",cursor:"pointer",fontFamily:font,fontWeight:700,fontSize:11}}>View →</button>
             </div>

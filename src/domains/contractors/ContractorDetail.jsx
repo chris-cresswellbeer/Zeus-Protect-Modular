@@ -44,6 +44,8 @@ function ContractorDetail({ selCon, contractorInductions, setContractorInduction
   const allVisits = (contractorVisits[selCon.id]||[]).slice();
   const visits = allVisits.filter(v=>v.date<=today).sort((a,b)=>b.date.localeCompare(a.date));
   const upcoming = allVisits.filter(v=>v.date>today).sort((a,b)=>a.date.localeCompare(b.date));
+  // last visit, logged by hand or signed in with the reception QR code
+  const lastAny = [...visits.map(v=>v.date), ...qrSignins.map(s=>s.data.date)].filter(Boolean).sort().pop();
   const inp = {width:"100%",background:T.overlay,border:`1px solid ${T.borderMd}`,borderRadius:9,padding:"9px 13px",color:T.white,fontSize:13,outline:"none",fontFamily:font,boxSizing:"border-box"};
   const lbl = {fontSize:11,fontWeight:700,color:T.muted,letterSpacing:.5,textTransform:"uppercase",display:"block",marginBottom:5};
 
@@ -93,7 +95,7 @@ function ContractorDetail({ selCon, contractorInductions, setContractorInduction
           </div>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:8}}>
-          {[{l:"Workers",v:workers.length},{l:"Total Visits",v:visits.length},{l:"Last Visit",v:visits[0]?.date||"Never"},{l:"On Site Today",v:visits.filter(v=>v.date===today).length>0?"Yes":"No"}].map((r,i)=>(
+          {[{l:"Workers",v:workers.length},{l:"Total Visits",v:visits.length+qrSignins.length},{l:"Last Visit",v:lastAny?ukDate(lastAny):"Never"},{l:"On Site Today",v:visits.some(v=>v.date===today)||qrSignins.some(s=>s.data.date===today&&!s.data.timeOut)?"Yes":"No"}].map((r,i)=>(
             <div key={i} style={{background:T.overlay,borderRadius:8,padding:"8px 12px"}}>
               <div style={{fontSize:10,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:.5,marginBottom:2}}>{r.l}</div>
               <div style={{fontSize:13,color:T.white,fontWeight:700}}>{r.v}</div>
@@ -110,7 +112,7 @@ function ContractorDetail({ selCon, contractorInductions, setContractorInduction
 
       {/* Tabs */}
       <div style={{display:"flex",borderBottom:`1px solid ${T.border}`,marginBottom:20}}>
-        {[["visits",`🗓 Visits (${visits.length})`],["workers",`👷 Workers (${workers.length})`]].map(([id,label])=>(
+        {[["visits",`🗓 Visits (${visits.length+qrSignins.length})`],["workers",`👷 Workers (${workers.length})`]].map(([id,label])=>(
           <button key={id} onClick={()=>setTab(id)} style={{padding:"11px 18px",background:"none",border:"none",borderBottom:`2px solid ${tab===id?T.gold:"transparent"}`,color:tab===id?T.white:T.muted,fontWeight:tab===id?700:400,cursor:"pointer",fontFamily:font,fontSize:13}}>{label}</button>
         ))}
       </div>

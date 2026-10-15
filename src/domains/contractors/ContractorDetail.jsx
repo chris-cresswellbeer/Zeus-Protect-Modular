@@ -4,6 +4,8 @@ import { Avatar } from "../../shared/primitives";
 import { INDUCTION_ITEMS } from "../../data/seedContractors";
 import { WorkerDetailModal } from "./WorkerDetailModal";
 import { CompanyForm } from "./CompanyForm";
+import { useSiteSignins } from "../../lib/siteSignins";
+import { CompanySignins } from "./SigninPanel";
 
 import { localISO, todayISO, ukDate } from "../../lib/dates";
 /**
@@ -25,6 +27,7 @@ import { localISO, todayISO, ukDate } from "../../lib/dates";
  */
 function ContractorDetail({ selCon, contractorInductions, setContractorInductions, contractorCerts, setContractorCerts, contractorVisits, setContractorVisits, contractors, setContractors, dbSaveContractor, dbDeleteContractor, dbSaveContractorInductions, dbSaveContractorCerts, dbSaveContractorVisits, staff, isMobile, setView, T, font }) {
   const today = todayISO();
+  const qrSignins = useSiteSignins(true, { fresh: true }).filter(x => x.data && x.data.companyId === selCon.id);
   const [tab, setTab] = React.useState("visits");
   const [showVisitForm, setShowVisitForm] = React.useState(false);
   const [visitForm, setVisitForm] = React.useState({id:"",date:today,timeIn:"",timeOut:"",purpose:"",areas:"",signedInBy:"",workers:[],permitRequired:false,notes:""});
@@ -269,8 +272,9 @@ function ContractorDetail({ selCon, contractorInductions, setContractorInduction
             </div>
           )}
 
+          <CompanySignins list={qrSignins} T={T}/>
           {visits.length===0
-            ? <div style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:14,padding:"32px 20px",textAlign:"center",border:`1px solid ${T.border}`,color:T.muted,fontSize:14}}>No visits logged yet.</div>
+            ? <div style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:14,padding:"32px 20px",textAlign:"center",border:`1px solid ${T.border}`,color:T.muted,fontSize:14}}>{qrSignins.length ? "No visits logged by hand yet." : "No visits logged yet."}</div>
             : <div style={{display:"flex",flexDirection:"column",gap:10}}>
               {visits.map((v,vi)=>(
                 <div key={v.id||vi} style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:14,padding:"16px 20px",border:`1px solid ${editingVisitIdx===vi?T.accent:T.border}`}}>

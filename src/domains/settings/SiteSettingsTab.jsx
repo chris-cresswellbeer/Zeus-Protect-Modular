@@ -6,6 +6,7 @@ import { useSiteLists, saveSiteLists, loadSiteLists, SITE_LIST_DEFAULTS } from "
 import { EmailSettings } from "./EmailSettings";
 import { BrandingCard } from "./BrandingCard";
 import { CertificateSettings } from "./CertificateSettings";
+import { ContractorSigninSettings } from "./ContractorSigninSettings";
 import { SettingsSection, SettingsTabs } from "./SettingsSection";
 
 /**
@@ -13,7 +14,8 @@ import { SettingsSection, SettingsTabs } from "./SettingsSection";
  * The lists that differ from site to site, kept in the database (lib/siteLists.js):
  * first aid zones, first aid shifts and the hazard report locations; and the
  * certificate settings (CertificateSettings.jsx); email reminder settings
- * (EmailSettings.jsx); and, for super admins only, the
+ * (EmailSettings.jsx); contractor sign-in at reception (ContractorSigninSettings.jsx);
+ * and, for super admins only, the
  * branding (BrandingCard.jsx).
  * Laid out as sections that open and close, with tabs at the top that jump to
  * each one (SettingsSection.jsx).
@@ -97,6 +99,7 @@ function SiteSettingsTab({ Z, font, superAdmin = false, user = null }) {
     { id: "lists", icon: "📋", label: "Site lists", title: "Site lists", summary: listsSummary, dirty: changed },
     { id: "certificates", icon: "🏅", label: "Certificates", title: "Certificates", summary: (status.certificates || {}).summary, dirty: !!(status.certificates || {}).dirty },
     { id: "email", icon: "📧", label: "Email reminders", title: "Email reminders", summary: (status.email || {}).summary, dirty: !!(status.email || {}).dirty },
+    { id: "signin", icon: "🪪", label: "Contractor sign-in", title: "Contractor sign-in (reception QR code)", summary: (status.signin || {}).summary, dirty: !!(status.signin || {}).dirty },
     ...(superAdmin ? [{ id: "branding", icon: "🎨", label: "Branding", title: "Branding (super admin)", summary: (status.branding || {}).summary, dirty: !!(status.branding || {}).dirty }] : []),
   ];
   const allOpen = sections.every(x => open[x.id]);
@@ -146,6 +149,7 @@ function SiteSettingsTab({ Z, font, superAdmin = false, user = null }) {
       </>)}
       {wrap("certificates", <CertificateSettings Z={Z} font={font} user={user} embedded onStatus={report("certificates")}/>)}
       {wrap("email", <EmailSettings Z={Z} font={font} embedded onStatus={report("email")}/>)}
+      {wrap("signin", <ContractorSigninSettings Z={Z} font={font} embedded onStatus={report("signin")}/>)}
       {/* Branding: super admins only (super_admin.sql); not shown to anyone else at all */}
       {superAdmin && wrap("branding", <BrandingCard Z={Z} font={font} embedded onStatus={report("branding")}/>)}
     </div>

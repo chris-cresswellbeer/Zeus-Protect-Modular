@@ -182,6 +182,7 @@ import { useRemembered, clearRemembered } from "./lib/remembered";
 import { setAuditUser, primeAudit, primeAuditList, primeAuditMap, auditRecord, auditList, auditDelete, auditEvent } from "./lib/audit";
 import { pingIncidentAlert } from "./lib/incidentAlert";
 import { sameName } from "./lib/openActions";
+import { useSiteSignins, signinsOnSite, signinsToReview } from "./lib/siteSignins";
 
 
 /**
@@ -402,6 +403,8 @@ export default function App() {
   const [contractorInductions, setContractorInductions] = useState({});
   const [contractorCerts, setContractorCerts] = useState({});
   const [contractorVisits, setContractorVisits] = useState({}); // risk assessments
+  // contractors who signed in with the reception QR code (admins only; lib/siteSignins.js)
+  const siteSignins = useSiteSignins(!!user && user.role === "admin");
   const [quizFailures, setQuizFailures] = useState([]); // [{ userId, userName, moduleId, moduleTitle, score, date }]
   const [extCerts, setExtCerts] = useState({}); // { userId: { certType: { fileName, fileUrl, issuedDate, expiryDate, uploadedAt } } }
   const [msdsFiles, setMsdsFiles] = useState({}); // { [chemCode]: { fileName, fileData, fileUrl, uploadedAt } }
@@ -4577,6 +4580,8 @@ export default function App() {
               const today3=todayISO();
               const expiredConCerts=(contractors||[]).filter(c=>Object.values(contractorCerts[c.id]||{}).some(cert=>cert.expiryDate&&cert.expiryDate<today3));
               if(expiredConCerts.length) notifications.push({type:"document",urgent:true,title:`${expiredConCerts.length} contractor${expiredConCerts.length!==1?"s":""} with expired certificates`,detail:"Check Contractors tab",nav:{tab:"contractors"}});
+              const qrReview=signinsToReview(siteSignins);
+              if(qrReview.length) notifications.push({type:"document",urgent:true,title:`${qrReview.length} new contractor${qrReview.length!==1?"s":""} to review`,detail:"Signed in with the reception QR code but not in the Contractor Register",nav:{tab:"contractors"}});
 
               // Fire safety alerts — same rules as the Fire Safety screen (domains/fireSafety/fireLogic.js)
               const fsum = fireSummary({ fireSafety: fireSafety||{}, extCerts: extCerts||{}, staff, inspections: siteInspections||[], today: fireToday() });
@@ -4808,6 +4813,7 @@ export default function App() {
                           else onSiteWorkers.push(c.name);
                         });
                       });
+                      signinsOnSite(siteSignins, today).forEach(s=>onSiteWorkers.push(s.data.workerName));
                       const uniqueOnSite=[...new Set(onSiteWorkers)];
                       return card(E("🪪",""),"On Site Now",uniqueOnSite.length,uniqueOnSite.length>0?uniqueOnSite.slice(0,2).join(", ")+(uniqueOnSite.length>2?` +${uniqueOnSite.length-2} more`:""):"No contractors today",null,false,()=>setAtab("contractors"));
                     })() },

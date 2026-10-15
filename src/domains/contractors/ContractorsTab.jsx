@@ -5,12 +5,16 @@ import { ContractorDetail } from "./ContractorDetail";
 import { CompanyForm } from "./CompanyForm";
 import { useRemembered } from "../../lib/remembered";
 import { HelpTip } from "../../shared/HelpTip";
+import { useSiteSignins, signinsOnSite, signinsOutToday, signinsToReview } from "../../lib/siteSignins";
+import { QrSigninCard, QrSignedOutChip, SigninReview } from "./SigninPanel";
 
 import { localISO, todayISO } from "../../lib/dates";
 /**
  * ContractorsTab — admin contractor management: company list with status filter and
  * search, an "on site now" panel (today's visits), upcoming scheduled visits, and
  * flags for expired worker certificates. Selecting a company opens ContractorDetail.
+ * People who signed in with the reception QR code (lib/siteSignins.js) show in On Site
+ * Right Now too, and new companies / workers from it under "New contractors to review".
  *
  * CONTRACTOR DATA MODEL (App.jsx state → Supabase table)
  *   contractors          [ { id:"con_<ts>", name, type, status, email, phone, notes,
@@ -36,6 +40,10 @@ function ContractorsTab({ contractors, setContractors, contractorInductions, set
     setFocusContractorId && setFocusContractorId(null);
   }, [focusContractorId]); // eslint-disable-line react-hooks/exhaustive-deps
   const today = todayISO();
+  const signins = useSiteSignins(true, { fresh: true });
+  const qrActive = signinsOnSite(signins, today);
+  const qrOut = signinsOutToday(signins, today);
+  const qrReview = signinsToReview(signins);
 
   const selCon = contractors.find(c=>c.id===selected);
   const filtered = contractors.filter(c=>{
@@ -69,17 +77,19 @@ function ContractorsTab({ contractors, setContractors, contractorInductions, set
         });
         const active = onSiteNow.filter(x=>!x.signedOut);
         const signedOut = onSiteNow.filter(x=>x.signedOut);
-        if (onSiteNow.length===0) return null;
+        if (onSiteNow.length===0 && !qrActive.length && !qrOut.length) return null;
+        const nActive = active.length + qrActive.length, nOut = signedOut.length + qrOut.length;
         return (
-          <div style={{background:active.length>0?`linear-gradient(135deg,rgba(16,185,129,0.1),rgba(16,185,129,0.05))`:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:16,padding:20,marginBottom:20,border:`1px solid ${active.length>0?"rgba(16,185,129,0.3)":T.border}`}}>
+          <div style={{background:nActive>0?`linear-gradient(135deg,rgba(16,185,129,0.1),rgba(16,185,129,0.05))`:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:16,padding:20,marginBottom:20,border:`1px solid ${nActive>0?"rgba(16,185,129,0.3)":T.border}`}} data-testid="onsite-board">
             <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16,flexWrap:"wrap"}}>
-              <div style={{width:10,height:10,borderRadius:"50%",background:active.length>0?"#10b981":"#64748b",boxShadow:active.length>0?"0 0 0 3px rgba(16,185,129,0.25)":"none",animation:active.length>0?"pulse 2s infinite":"none",flexShrink:0}}/>
+              <div style={{width:10,height:10,borderRadius:"50%",background:nActive>0?"#10b981":"#64748b",boxShadow:nActive>0?"0 0 0 3px rgba(16,185,129,0.25)":"none",animation:nActive>0?"pulse 2s infinite":"none",flexShrink:0}}/>
               <h3 style={{margin:0,fontSize:15,fontWeight:800,color:T.white}}>On Site Right Now</h3>
-              <span style={{fontSize:12,color:active.length>0?"#10b981":T.muted,fontWeight:600}}>{active.length} active · {signedOut.length} signed out</span>
+              <span data-testid="onsite-count" style={{fontSize:12,color:nActive>0?"#10b981":T.muted,fontWeight:600}}>{nActive} active · {nOut} signed out</span>
               <style>{`@keyframes pulse{0%,100%{box-shadow:0 0 0 3px rgba(16,185,129,0.25)}50%{box-shadow:0 0 0 6px rgba(16,185,129,0.1)}}`}</style>
             </div>
-            {active.length>0 && (
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:10,marginBottom:signedOut.length>0?16:0}}>
+            {nActive>0 && (
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:10,marginBottom:nOut>0?16:0}}>
+                {qrActive.map(s=><QrSigninCard key={s.id} s={s} T={T} font={font}/>)}
                 {active.map((entry,i)=>(
                   <div key={i} style={{background:"rgba(16,185,129,0.08)",borderRadius:12,padding:"12px 14px",border:"1px solid rgba(16,185,129,0.25)"}}>
                     <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
@@ -98,10 +108,11 @@ function ContractorsTab({ contractors, setContractors, contractorInductions, set
                 ))}
               </div>
             )}
-            {signedOut.length>0 && (
+            {nOut>0 && (
               <div>
                 <div style={{fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:.5,marginBottom:8}}>Signed Out Today</div>
                 <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+                  {qrOut.map(s=><QrSignedOutChip key={s.id} s={s} T={T}/>)}
                   {signedOut.map((entry,i)=>(
                     <div key={i} style={{display:"flex",alignItems:"center",gap:7,padding:"6px 12px",borderRadius:20,background:T.overlay,border:`1px solid ${T.border}`}}>
                       {entry.worker ? <Avatar name={entry.worker.name} size={18}/> : <span style={{fontSize:12}}>🏢</span>}
@@ -142,6 +153,8 @@ function ContractorsTab({ contractors, setContractors, contractorInductions, set
           </div>
         );
       })()}
+
+      <SigninReview list={qrReview} contractors={contractors} setContractors={setContractors} dbSaveContractor={dbSaveContractor} onOpenCompany={id=>{setSelected(id);setView("detail");}} T={T} font={font}/>
 
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20,flexWrap:"wrap",gap:12}}>
         <div>

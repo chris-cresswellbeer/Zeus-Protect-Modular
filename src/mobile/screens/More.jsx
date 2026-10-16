@@ -18,7 +18,7 @@ const tr = t;   // in Appearance, `t` is the theme being drawn
 
 function More({
   user, counts, queue, onRetryQueued, canInstall,
-  onOpenDocs, onOpenCerts, onOpenActions, onOpenHistory, onOpenAppearance, onOpenLone, loneActive = false,
+  onOpenDocs, onOpenCerts, onOpenActions, onOpenHistory, onOpenAppearance, onOpenLone, loneActive = false, onOpenPpe, ppeToSign = 0,
   onOpenInspections, onOpenPermits, onOpenLanguage, language = "en",
   onSignOut, onSwitchToDesktop, Z, font,
 }) {
@@ -45,6 +45,10 @@ function More({
           right={<Chevron Z={Z} badge={counts.certificates} badgeColor={Z.green} />} />
         <Row Z={Z} font={font} icon="✅" title={t("My corrective actions")} onClick={onOpenActions}
           right={<Chevron Z={Z} badge={counts.openActions} badgeColor={Z.gold} />} />
+        {onOpenPpe && (
+          <Row Z={Z} font={font} icon="🦺" title={t("My PPE")} sub={ppeToSign ? t("Sign for your new PPE") : t("Boots, gloves, hi-vis and more")} onClick={onOpenPpe}
+            right={<Chevron Z={Z} badge={ppeToSign} badgeColor={Z.accent} />} />
+        )}
         {onOpenLone && (
           <Row Z={Z} font={font} icon="🧍" title={t("Lone working")} sub={loneActive ? t("Checking in now") : t("Working alone? Start check-ins")} onClick={onOpenLone}
             right={<Chevron Z={Z} badge={loneActive ? 1 : 0} badgeColor={Z.green} />} />

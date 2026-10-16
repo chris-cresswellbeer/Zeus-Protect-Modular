@@ -41,6 +41,8 @@ import { LoneWorking, LoneBanner } from "./screens/LoneWorking";
 import { LoneRespond } from "../shared/LoneRespond";
 import { useLoneSettings, useLoneSessions } from "../lib/loneClient";
 import { LONE_OPEN, LONE_ALARM } from "../lib/loneWorking";
+import { MyPpe, PpeBanner } from "./screens/MyPpe";
+import { usePpeSettings, usePpeIssues } from "../lib/ppeClient";
 import { getSiteLists } from "../lib/siteLists";
 import { INSP_TYPES } from "../data/seedInspections";
 import { useInspTemplates, inspTypes, inspTypeLabel } from "../lib/inspTemplates";
@@ -84,6 +86,7 @@ const TITLES = {
   inspection: ["Inspection", ""],
   permits: ["Permits to work", ""],
   lone: ["Lone working", ""],
+  ppe: ["Account", "My PPE"],
   lonealert: ["Lone working", "Alert"],
   permit: ["Permit to work", ""],
 };
@@ -94,7 +97,7 @@ const PARENT_TAB = {
   certificates: "more", actions: "more", history: "more", appearance: "more", language: "more",
   inspections: "more", inspection: "inspections",
   permits: "more", permit: "permits",
-  lone: "more", lonealert: "today",
+  lone: "more", lonealert: "today", ppe: "more",
 };
 
 // Built-in inspection types that make sense to run from a phone (the annual audit and
@@ -151,6 +154,10 @@ function MobileApp({
   const norm = (x) => String(x || "").toLowerCase().replace(/\s+/g, " ").trim();
   const myTeam = (r) => isAdmin || (user.role === "manager" && allUsers.some((u) => String(u.id) === String(r.user_id) && norm(u.manager) === norm(user.name)));
   const otherAlarms = loneSessions.filter((r) => String(r.user_id) !== String(user.id) && LONE_ALARM.includes(r.status) && myTeam(r));
+  // PPE register: your own PPE (sign for it, report a problem)
+  const ppeSettings = usePpeSettings(true);
+  const ppeRows = usePpeIssues(ppeSettings.staffCanSee);
+  const ppeToSign = ppeSettings.staffCanSee ? ppeRows.filter((r) => String(r.user_id) === String(user.id) && r.status === "issued" && !(r.data || {}).signature).length : 0;
   const [loneAlertId, setLoneAlertId] = React.useState(() => { try { return new URLSearchParams(window.location.search).get("lone"); } catch { return null; } });
   const [tab, setTab] = React.useState("today");
   const [screen, setScreen] = React.useState(() => { try { return new URLSearchParams(window.location.search).get("lone") ? "lonealert" : "today"; } catch { return "today"; } });
@@ -489,6 +496,9 @@ function MobileApp({
             ))}
           </div>
         )}
+        {screen === "today" && ppeToSign > 0 && (
+          <div style={{ padding: "18px 18px 0" }}><PpeBanner count={ppeToSign} onOpen={() => go("ppe")} Z={T} font={FONT} /></div>
+        )}
         {screen === "today" && myLone && (
           <div style={{ padding: "18px 18px 0" }}><LoneBanner row={myLone} onOpen={() => go("lone")} Z={T} font={FONT} /></div>
         )}
@@ -564,6 +574,8 @@ function MobileApp({
             onOpenActions={() => go("actions")}
             onOpenLone={loneSettings.enabled ? () => go("lone") : undefined}
             loneActive={!!myLone}
+            onOpenPpe={ppeSettings.staffCanSee ? () => go("ppe") : undefined}
+            ppeToSign={ppeToSign}
             onOpenInspections={isAdmin ? () => go("inspections") : undefined}
             onOpenPermits={isAdmin ? () => go("permits") : undefined}
             onOpenHistory={() => go("history")}
@@ -575,6 +587,8 @@ function MobileApp({
             Z={T} font={FONT}
           />
         )}
+
+        {screen === "ppe" && <MyPpe user={user} rows={ppeRows} settings={ppeSettings} online={online} Z={T} font={FONT} />}
 
         {screen === "lone" && (
           <LoneWorking user={user} settings={loneSettings} sessions={loneSessions} online={online}

@@ -187,6 +187,10 @@ import { useLoneSettings, useLoneSessions } from "./lib/loneClient";
 import { LONE_ALARM } from "./lib/loneWorking";
 import { LoneAlertBar } from "./shared/LoneRespond";
 import { LoneWorkingTab } from "./domains/lone/LoneWorkingTab";
+import { usePpeSettings, usePpeIssues } from "./lib/ppeClient";
+import { ppeState } from "./lib/ppe";
+import { PpeRegisterTab } from "./domains/ppe/PpeRegisterTab";
+import { MyPpeTab } from "./domains/ppe/MyPpeTab";
 
 
 /**
@@ -415,6 +419,11 @@ export default function App() {
   const loneWatch = !!user && loneSettings.enabled && (user.role === "admin" || user.role === "manager");
   const loneSessions = useLoneSessions(loneWatch, { every: 30000 });
   const [loneFocus, setLoneFocus] = useState(() => { try { return new URLSearchParams(window.location.search).get("lone"); } catch { return null; } });
+  // PPE register (lib/ppeClient.js): what each person may see (own; line managers their team; admins all).
+  const ppeSettings = usePpeSettings(!!user);
+  const ppeRows = usePpeIssues(!!user);
+  const showMyPpe = !!user && (ppeSettings.staffCanSee || user.role === "manager");
+  const [ppeFocus, setPpeFocus] = useState(null);
   const loneBar = () => loneWatch ? <LoneAlertBar sessions={loneSessions} people={allUsers} me={user} focusId={loneFocus} onFocusDone={() => { setLoneFocus(null); try { const u = new URL(window.location.href); u.searchParams.delete("lone"); window.history.replaceState(null, "", u.toString()); } catch { /* */ } }} Z={T} font={font}/> : null;
   const [quizFailures, setQuizFailures] = useState([]); // [{ userId, userName, moduleId, moduleTitle, score, date }]
   const [extCerts, setExtCerts] = useState({}); // { userId: { certType: { fileName, fileUrl, issuedDate, expiryDate, uploadedAt } } }
@@ -2676,15 +2685,15 @@ export default function App() {
     const toAdmin = (tab, then) => jump(() => { setMod(null); setViewRaw("admin"); setAtabRaw(tab); if (then) then(); });
     const fmt = d => (d ? String(d).slice(0, 10).split("-").reverse().join("/") : "");
     // pages
-    const STAFF_PAGES = { dashboard: "Dashboard", training: "My Training", history: "Training history & certificates", documents: "Documents", incidents: "Report Incident", dse: "My DSE", machinery: "My Machinery", mequip: "Machinery & Equipment", actions: "My Actions", team: "My Team", account: "My Account" };
-    const staffTabs = ["dashboard", "training", "history", "documents", "incidents", "dse", ...(isWarehouseWorker(user) ? ["machinery"] : []), "actions", ...(user.role === "manager" ? ["team"] : []), ...(user.role !== "admin" && hasMachineryAccess(user) ? ["mequip"] : []), "account"];
-    staffTabs.forEach(t => items.push({ id: `p:s:${t}`, group: "Pages", icon: "📄", label: STAFF_PAGES[t], sub: isAdmin ? "Your own training view" : "Page", words: t === "history" ? "certificates certificate history" : t === "incidents" ? "report hazard near miss" : "", run: () => toStaff(t) }));
+    const STAFF_PAGES = { dashboard: "Dashboard", training: "My Training", history: "Training history & certificates", documents: "Documents", incidents: "Report Incident", dse: "My DSE", machinery: "My Machinery", mequip: "Machinery & Equipment", actions: "My Actions", ppe: "My PPE", team: "My Team", account: "My Account" };
+    const staffTabs = ["dashboard", "training", "history", "documents", "incidents", "dse", ...(isWarehouseWorker(user) ? ["machinery"] : []), "actions", ...(showMyPpe ? ["ppe"] : []), ...(user.role === "manager" ? ["team"] : []), ...(user.role !== "admin" && hasMachineryAccess(user) ? ["mequip"] : []), "account"];
+    staffTabs.forEach(t => items.push({ id: `p:s:${t}`, group: "Pages", icon: "📄", label: STAFF_PAGES[t], sub: isAdmin ? "Your own training view" : "Page", words: t === "history" ? "certificates certificate history" : t === "incidents" ? "report hazard near miss" : t === "ppe" ? "ppe boots gloves hi-vis sign" : "", run: () => toStaff(t) }));
     if (isAdmin) {
       const ADMIN_PAGES = [["dashboard", "Admin dashboard", ""], ["users", "Staff", "staff accounts people users"], ["assign", "Assign Training", "training"], ["modules", "Training Library", "modules training"],
         ["create", "Create Module", "new module training"], ["reports", "Reports", "training matrix report excel"], ["documents", "H&S Documents", "documents bundles policies"], ["coshh", "COSHH Register", "chemicals"],
         ["audit", "Audit Trail", "log history"], ["settings", "Site Settings", "locations first aid zones shifts report locations"], ["incidents", "Incidents", "accidents near miss riddor"], ["inspections", "Inspections", "site inspection"], ["ra", "Risk Assessments", "risk"],
         ["firesafety", "Fire Safety", "wardens extinguishers drills"], ["firstaid", "First Aid", "first aiders"], ["contractors", "Contractors", ""], ["permits", "Permits", "permit to work"], ["lone", "Lone Working", "lone worker working alone check-in"],
-        ["machinery", "Machinery Competence", "forklift"], ["equipment", "Equipment Register", "equipment"], ["account", "My Account", "password"]];
+        ["machinery", "Machinery Competence", "forklift"], ["equipment", "Equipment Register", "equipment"], ["ppe", "PPE Register", "ppe personal protective equipment boots gloves hi-vis ear defenders glasses issue signature"], ["account", "My Account", "password"]];
       ADMIN_PAGES.forEach(([t, l, w]) => items.push({ id: `p:a:${t}`, group: "Pages", icon: "🧭", label: l, sub: "Admin page", words: w, run: () => toAdmin(t) }));
       // pages inside other pages
       items.push({ id: "p:a:investigations", group: "Pages", icon: "🔍", label: "Investigations", sub: "Incidents → Investigations", words: "investigation root cause corrective actions", run: () => toAdmin("investigation", () => setInvestigationView(null)) });
@@ -3422,11 +3431,14 @@ export default function App() {
     // 1700px everything is shown in full; narrower, the search shrinks to 🔍; below 1400
     // the first name goes, the labels drop "My" and the tabs tighten up. At 1024px and
     // below the ☰ menu takes over (CSS below).
-    const sTight = winW < 1700, sTiny = winW < 1400;
+    // more tabs (machinery, PPE, team, machinery & equipment) need the shorter labels sooner
+    const sTabCount = 7 + (isWarehouseWorker(user)?1:0) + (showMyPpe?1:0) + (user.role==="manager"?1:0) + (user.role!=="admin"&&hasMachineryAccess(user)?1:0);
+    const sExtra = Math.max(0, sTabCount - 9) * 130;
+    const sTight = winW < 1700 + sExtra, sTiny = winW < 1400 + sExtra, sSnug = sTiny && sTabCount >= 10;
     // Menu names in the person's language (lib/i18n.js); the pages behind them are English for now.
     const inLang = o => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, t(v)]));
-    const STAFF_TAB_LABEL = inLang({dashboard:"Dashboard",training:"My Training",history:"History",documents:"Documents",incidents:"Report Incident",dse:"My DSE",machinery:"My Machinery",mequip:"Machinery & Equipment",actions:"My Actions",team:"My Team"});
-    const STAFF_TAB_SHORT = inLang({dashboard:"Dashboard",training:"Training",history:"History",documents:"Documents",incidents:"Report",dse:"DSE",machinery:"Machinery",mequip:"Equipment",actions:"Actions",team:"Team"});
+    const STAFF_TAB_LABEL = inLang({dashboard:"Dashboard",training:"My Training",history:"History",documents:"Documents",incidents:"Report Incident",dse:"My DSE",machinery:"My Machinery",mequip:"Machinery & Equipment",actions:"My Actions",ppe:"My PPE",team:"My Team"});
+    const STAFF_TAB_SHORT = inLang({dashboard:"Dashboard",training:"Training",history:"History",documents:"Documents",incidents:"Report",dse:"DSE",machinery:"Machinery",mequip:"Equipment",actions:"Actions",ppe:"PPE",team:"Team"});
     return (
       <EmojiCtx.Provider value={emojiMode}>
       <div style={{minHeight:"100vh",background:T.bg,fontFamily:font,color:T.white}}>
@@ -3439,9 +3451,9 @@ export default function App() {
         <div style={{background:`linear-gradient(90deg,${T.navyDk},${T.navyMd})`,borderBottom:`1px solid ${T.border}`,padding:sTiny?"0 14px":"0 24px",display:"flex",alignItems:"center",position:"relative"}}>
           <div style={{marginRight:sTiny?10:20,padding:"10px 0",flexShrink:0}}><BrandLogo darkMode={darkMode}/></div>
           <div style={{display:"flex",alignItems:"center",gap:sTiny?0:2,flex:1,minWidth:0,overflowX:"auto"}} className="staff-nav-tabs" data-testid="staff-tabs">
-            {["dashboard","training","history","documents","incidents","dse",...(isWarehouseWorker(user)?["machinery"]:[]),"actions",...(user.role==="manager"?["team"]:[]),...(user.role!=="admin"&&hasMachineryAccess(user)?["mequip"]:[])].map(t=>(
+            {["dashboard","training","history","documents","incidents","dse",...(isWarehouseWorker(user)?["machinery"]:[]),"actions",...(showMyPpe?["ppe"]:[]),...(user.role==="manager"?["team"]:[]),...(user.role!=="admin"&&hasMachineryAccess(user)?["mequip"]:[])].map(t=>(
               <button key={t} onClick={()=>setStab(t)} title={STAFF_TAB_LABEL[t]}
-                style={{background:"none",border:"none",borderBottom:stab===t?`2px solid ${T.accent}`:"2px solid transparent",color:stab===t?T.white:T.muted,fontWeight:stab===t?700:400,fontSize:13,cursor:"pointer",padding:sTiny?"14px 8px 12px":sTight?"14px 10px 12px":"14px 14px 12px",fontFamily:font,whiteSpace:"nowrap",letterSpacing:.3,transition:"color .15s"}}>
+                style={{background:"none",border:"none",borderBottom:stab===t?`2px solid ${T.accent}`:"2px solid transparent",color:stab===t?T.white:T.muted,fontWeight:stab===t?700:400,fontSize:13,cursor:"pointer",padding:sSnug?"14px 6px 12px":sTiny?"14px 8px 12px":sTight?"14px 10px 12px":"14px 14px 12px",fontFamily:font,whiteSpace:"nowrap",letterSpacing:.3,transition:"color .15s"}}>
                 {(sTiny?STAFF_TAB_SHORT:STAFF_TAB_LABEL)[t]}
               </button>
             ))}
@@ -3503,6 +3515,12 @@ export default function App() {
                 if (dseOpen) notifications.push({type:"dse",urgent:false,title:`${dseOpen} team DSE issue${dseOpen!==1?"s":""} to sign off`,detail:"Open My Team to review and sign off",nav:{tab:"team"}});
                 if (actsToSign) notifications.push({type:"report",urgent:false,title:`${actsToSign} completed team action${actsToSign!==1?"s":""} awaiting your sign-off`,detail:"Open My Team to sign them off",nav:{tab:"team"}});
               }
+              if (showMyPpe) { const mine=(ppeRows||[]).filter(r=>String(r.user_id)===String(user.id)&&r.status==="issued");
+                const uns=mine.filter(r=>!(r.data||{}).signature), od=mine.filter(r=>ppeState(r,undefined,ppeSettings.dueSoonDays).overdue);
+                if (ppeSettings.staffCanSee && uns.length) notifications.push({type:"document",urgent:true,title:t("Sign for your PPE"),detail:uns.map(r=>r.data.item).join(", "),nav:{tab:"ppe"}});
+                if (od.length) notifications.push({type:"document",urgent:false,title:t("PPE due for replacement"),detail:`${od.map(r=>r.data.item).join(", ")} · ${t("speak to your supervisor")}`,nav:{tab:"ppe"}});
+                if (user.role==="manager") { const ids=new Set(teamOf(user, allUsers).map(u=>String(u.id))); const tp=(ppeRows||[]).filter(r=>ids.has(String(r.user_id))&&r.status==="issued"&&ppeState(r,undefined,ppeSettings.dueSoonDays).problem).length;
+                  if (tp) notifications.push({type:"report",urgent:true,title:`${tp} PPE problem${tp!==1?"s":""} reported by your team`,detail:"Open My PPE → My team's PPE",nav:{tab:"ppe"}}); } }
               if(overdueActions.length) notifications.push({type:"report",urgent:true,title:`${overdueActions.length} overdue corrective action${overdueActions.length!==1?"s":""}`,detail:"Investigation actions past due date — action required",nav:{tab:"actions"}});
               else if(myActions.length) notifications.push({type:"report",urgent:false,title:`${myActions.length} open corrective action${myActions.length!==1?"s":""}`,detail:`You have been assigned action${myActions.length!==1?"s":""} from an investigation`,nav:{tab:"actions"}});
               return <NotificationBell notifications={notifications} onNavigate={n=>{ setStab(n.tab); if(n.editId) setQuickEditId(n.editId); }} Z={T} font={font}/>;
@@ -3541,10 +3559,10 @@ export default function App() {
       {/* Mobile nav drawer */}
         {mobileMenuOpen && (
           <div className="mobile-nav-drawer" style={{position:"relative"}}>
-            {["dashboard","training","history","documents","incidents","dse",...(isWarehouseWorker(user)?["machinery"]:[]),"actions",...(user.role==="manager"?["team"]:[]),...(user.role!=="admin"&&hasMachineryAccess(user)?["mequip"]:[])].map(t=>(
+            {["dashboard","training","history","documents","incidents","dse",...(isWarehouseWorker(user)?["machinery"]:[]),"actions",...(showMyPpe?["ppe"]:[]),...(user.role==="manager"?["team"]:[]),...(user.role!=="admin"&&hasMachineryAccess(user)?["mequip"]:[])].map(t=>(
               <button key={t} onClick={()=>{setStab(t);setMobileMenuOpen(false);}}
                 style={{display:"block",width:"100%",textAlign:"left",padding:"12px 24px",background:stab===t?"rgba(37,99,235,0.15)":"transparent",border:"none",borderBottom:`1px solid rgba(255,255,255,0.05)`,color:stab===t?T.white:T.muted,fontWeight:stab===t?700:400,fontSize:14,cursor:"pointer",fontFamily:font}}>
-                {{dashboard:E("🏠 ",""),training:E("📚 ",""),history:E("📋 ",""),documents:E("📄 ",""),incidents:E("🚨 ",""),dse:"🖥️ ",machinery:"⚙️ ",mequip:"🛠 ",actions:"✅ ",team:E("👥 ","")}[t]}{STAFF_TAB_LABEL[t]}
+                {{dashboard:E("🏠 ",""),training:E("📚 ",""),history:E("📋 ",""),documents:E("📄 ",""),incidents:E("🚨 ",""),dse:"🖥️ ",machinery:"⚙️ ",mequip:"🛠 ",actions:"✅ ",ppe:E("🦺 ",""),team:E("👥 ","")}[t]}{STAFF_TAB_LABEL[t]}
               </button>
             ))}
           </div>
@@ -4132,6 +4150,9 @@ export default function App() {
             />
           )}
 
+          {stab==="ppe" && showMyPpe && (
+            <MyPpeTab user={user} people={allUsers} team={user.role==="manager"?teamOf(user, allUsers):[]} Z={T} font={font}/>
+          )}
           {stab==="team" && user.role==="manager" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
             <LazyMyTeamTab manager={user} users={allUsers} allModules={allModules} assigns={assigns} comps={comps}
@@ -4485,7 +4506,7 @@ export default function App() {
           {!isMobile && !navCompact && <><div style={{width:1,height:28,background:T.headerBgMd,marginRight:8}}/><Pill label="ADMIN" col="navy"/><div style={{width:1,height:20,background:T.headerBgMd,margin:"0 12px"}}/></>}
           {!isMobile && (()=>{
             const TRAINING_TABS=["assign","modules","create","reports"]; const trainingActive=TRAINING_TABS.includes(atab);
-            const ME_TABS=["machinery","equipment"]; const meActive=ME_TABS.includes(atab);
+            const ME_TABS=["machinery","equipment","ppe"]; const meActive=ME_TABS.includes(atab);
             return (<>
               <button onClick={()=>setAtab("dashboard")} style={navBtn(atab==="dashboard",T.gold)}>Dashboard</button>
               <button onClick={()=>setAtab("users")} style={navBtn(atab==="users",T.gold)}>Staff</button>
@@ -4501,7 +4522,7 @@ export default function App() {
               {(()=>{ const DOC_TABS=["documents","coshh","audit","settings"]; const docActive=DOC_TABS.includes(atab); return (
                 <NavMenu label="Documents" active={docActive} items={[["documents","H&S Documents"],["coshh","COSHH Register"],["audit","Audit Trail"],["settings","Site Settings"]]} current={atab} onPick={setAtab} btnStyle={{...navBtn(docActive,T.gold),maxWidth:"none",whiteSpace:"nowrap"}} Z={T} font={font}/>
               ); })()}
-              <NavMenu label="Machinery & Equipment" active={meActive} items={[["machinery","Machinery Competence"],["equipment","Equipment Register"]]} current={atab} onPick={setAtab} btnStyle={{...navBtn(meActive,T.gold),maxWidth:navTight?124:"none"}} Z={T} font={font}/>
+              <NavMenu label="Machinery & Equipment" active={meActive} items={[["machinery","Machinery Competence"],["equipment","Equipment Register"],["ppe","PPE Register"]]} current={atab} onPick={setAtab} btnStyle={{...navBtn(meActive,T.gold),maxWidth:navTight?124:"none"}} Z={T} font={font}/>
             </>);
           })()}
           <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:isMobile?6:navCompact?6:10}}>
@@ -4595,6 +4616,11 @@ export default function App() {
               if(expiredConCerts.length) notifications.push({type:"document",urgent:true,title:`${expiredConCerts.length} contractor${expiredConCerts.length!==1?"s":""} with expired certificates`,detail:"Check Contractors tab",nav:{tab:"contractors"}});
               const qrReview=signinsToReview(siteSignins);
               const loneAlarms=(loneSessions||[]).filter(r=>LONE_ALARM.includes(r.status));
+              { const cur=(ppeRows||[]).filter(r=>r.status==="issued").map(r=>ppeState(r,undefined,ppeSettings.dueSoonDays));
+                const pp=cur.filter(s=>s.problem).length, od=cur.filter(s=>s.overdue).length, un=cur.filter(s=>s.unsigned).length;
+                if(pp) notifications.push({type:"report",urgent:true,title:`${pp} PPE problem${pp!==1?"s":""} reported`,detail:"Damaged, lost or not fitting — Machinery & Equipment ▼ → PPE Register",nav:{tab:"ppe"}});
+                if(od) notifications.push({type:"report",urgent:true,title:`${od} PPE item${od!==1?"s":""} overdue for replacement`,detail:"Machinery & Equipment ▼ → PPE Register",nav:{tab:"ppe"}});
+                if(un) notifications.push({type:"report",urgent:false,title:`${un} PPE issue${un!==1?"s":""} waiting for a signature`,detail:"They can sign in the phone app (More → My PPE), or use Get signature",nav:{tab:"ppe"}}); }
               if(loneAlarms.length) notifications.push({type:"document",urgent:true,title:`Lone working: ${loneAlarms.length} alert${loneAlarms.length!==1?"s":""} need a response`,detail:loneAlarms.map(r=>(r.data||{}).name).join(", "),nav:{tab:"lone"}});
               if(qrReview.length) notifications.push({type:"document",urgent:true,title:`${qrReview.length} new contractor${qrReview.length!==1?"s":""} to review`,detail:"Signed in with the reception QR code but not in the Contractor Register",nav:{tab:"contractors"}});
 
@@ -4678,6 +4704,7 @@ export default function App() {
               ["settings", E("⚙ ","")+"Site Settings"],
               ["machinery","🔧 Machinery Competence"],
               ["equipment","📦 Equipment Register"],
+              ["ppe", E("🦺 ","")+"PPE Register"],
               ["account","👤 My Account"],
             ].map(([id,label])=>(
               <button key={id} onClick={()=>{setAtab(id);setMobileMenuOpen(false);}}
@@ -6140,6 +6167,9 @@ export default function App() {
             </React.Suspense>
           )}
 
+          {atab==="ppe" && (
+            <PpeRegisterTab me={user} people={allUsers} scope={allUsers} isAdmin focus={ppeFocus} onFocusDone={()=>setPpeFocus(null)} Z={T} font={font}/>
+          )}
           {atab==="lone" && (
             <LoneWorkingTab me={user} people={allUsers} settings={loneSettings} onOpenSettings={()=>setAtab("settings")} Z={T} font={font}/>
           )}

@@ -191,6 +191,11 @@ import { usePpeSettings, usePpeIssues } from "./lib/ppeClient";
 import { ppeState } from "./lib/ppe";
 import { PpeRegisterTab } from "./domains/ppe/PpeRegisterTab";
 import { MyPpeTab } from "./domains/ppe/MyPpeTab";
+import { useRacking } from "./lib/rackClient";
+import { rackingSummary } from "./lib/racking";
+import { RackingTab, EquipmentPage } from "./domains/racking/RackingTab";
+import { RackBay } from "./shared/RackBay";
+import { bayName } from "./lib/racking";
 
 
 /**
@@ -424,6 +429,36 @@ export default function App() {
   const ppeRows = usePpeIssues(!!user);
   const showMyPpe = !!user && (ppeSettings.staffCanSee || user.role === "manager");
   const [ppeFocus, setPpeFocus] = useState(null);
+  // Racking (lib/rackClient.js): racking inspectors (admins + Machinery & Equipment access)
+  // get the bell items; ?rack=CODE (the QR label on a bay) opens that bay for anyone.
+  const rackInspector = !!user && (user.role === "admin" || hasMachineryAccess(user));
+  const [rackFocus, setRackFocus] = useState(() => { try { return new URLSearchParams(window.location.search).get("rack"); } catch { return null; } });
+  const racking = useRacking(!!user && (rackInspector || !!rackFocus), { checks: rackInspector });
+  const closeRack = () => { setRackFocus(null); try { const u = new URL(window.location.href); u.searchParams.delete("rack"); window.history.replaceState(null, "", u.toString()); } catch { /* */ } };
+  const rackWindow = () => {
+    if (!user || !rackFocus) return null;
+    const loc = racking.locations.find(l => l.id === rackFocus) || null;
+    return (
+      <div role="dialog" aria-modal="true" aria-label="Racking bay" data-testid="rack-window" style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",zIndex:8500,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"3vh 12px",overflowY:"auto"}}>
+        <div style={{background:`linear-gradient(160deg,${T.navyMd},${T.navyDk||T.navy})`,border:`1px solid ${T.borderMd}`,borderRadius:18,width:"100%",maxWidth:620,color:T.white,fontFamily:font}}>
+          <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${T.border}`}}>
+            <h2 style={{margin:0,fontSize:19,fontWeight:900,flex:1}}>{loc ? bayName(loc) : `Bay ${rackFocus}`}</h2>
+            <button type="button" onClick={closeRack} aria-label="Close" style={{background:T.overlay,border:`1px solid ${T.borderMd}`,color:T.white,borderRadius:10,width:40,height:40,cursor:"pointer"}}>✕</button>
+          </div>
+          <div style={{padding:20}}>{racking.loaded ? <RackBay code={rackFocus} loc={loc} damage={racking.damage} user={user} isInspector={rackInspector} settings={racking.settings} Z={T} font={font}/> : <div style={{color:T.muted}}>Loading…</div>}</div>
+        </div>
+      </div>
+    );
+  };
+  const rackBell = (notifications, nav) => {
+    if (!rackInspector || !racking.loaded) return;
+    const s = rackingSummary(racking.damage, racking.checks, racking.settings);
+    if (s.red) notifications.push({type:"report",urgent:true,title:`RED racking damage: ${s.red} bay${s.red!==1?"s":""} out of use`,detail:s.redNotOffloaded?`${s.redNotOffloaded} not marked offloaded yet`:"Book and record the repair",nav});
+    if (s.amberLate) notifications.push({type:"report",urgent:true,title:`${s.amberLate} amber racking repair${s.amberLate!==1?"s":""} overdue`,detail:`Past ${racking.settings.amberDays} days`,nav});
+    if (s.unconfirmed) notifications.push({type:"report",urgent:false,title:`${s.unconfirmed} racking damage report${s.unconfirmed!==1?"s":""} to confirm`,detail:"Check the rating the reporter chose",nav});
+    if (racking.locations.length && s.weeklyLate) notifications.push({type:"report",urgent:false,title:"Racking check due",detail:s.lastWeekly?`Last one ${s.lastWeekly.split("-").reverse().join("/")}`:"None recorded yet",nav});
+    if (racking.locations.length && (s.expertLate || !s.expertDue)) notifications.push({type:"report",urgent:false,title:s.expertDue?"Expert racking inspection overdue":"Record the last expert racking inspection",detail:"Equipment → Racking → Inspections",nav});
+  };
   const loneBar = () => loneWatch ? <LoneAlertBar sessions={loneSessions} people={allUsers} me={user} focusId={loneFocus} onFocusDone={() => { setLoneFocus(null); try { const u = new URL(window.location.href); u.searchParams.delete("lone"); window.history.replaceState(null, "", u.toString()); } catch { /* */ } }} Z={T} font={font}/> : null;
   const [quizFailures, setQuizFailures] = useState([]); // [{ userId, userName, moduleId, moduleTitle, score, date }]
   const [extCerts, setExtCerts] = useState({}); // { userId: { certType: { fileName, fileUrl, issuedDate, expiryDate, uploadedAt } } }
@@ -2703,6 +2738,7 @@ export default function App() {
       [["matrix", "Training Matrix", "matrix excel"], ["monthly", "Monthly management report", "monthly report board"], ["evidence", "Audit evidence pack", "evidence pack audit customer insurer iso 45001 brcgs chas safecontractor"], ["dse", "DSE Reports", "dse display screen workstation assessments"],
        ["expiry", "Expiring training", "expiry expired renewals"], ["failures", "Quiz Failures", "quiz failed"], ["documents", "Document Read Status", "read confirmations acknowledgements"]]
         .forEach(([v, l, w]) => items.push({ id: `p:a:rep:${v}`, group: "Pages", icon: "📊", label: l, sub: "Reports", words: w, run: () => toAdmin("reports", () => setAdminReportView(v)) }));
+      items.push({ id: "p:a:racking", group: "Pages", icon: "🧭", label: "Racking", sub: "Admin page · Equipment → Racking", words: "racking rack racks damage sema inspection qr labels bays aisles", run: () => toAdmin("equipment", () => setPagePreset({ tab: "racking" })) });
       items.push({ id: "p:a:welcome", group: "Pages", icon: "🎬", label: "Welcome video", sub: "Staff → the video new staff see when they first sign in", words: "first sign in login new starter induction tour", run: () => toAdmin("users", () => setShowWelcomeSettings(true)) });
       // people
       allUsers.forEach(u => {
@@ -3454,6 +3490,7 @@ export default function App() {
         {/* ▲/▼ top-of-page / bottom-of-page buttons on long screens (shared/ScrollNav.jsx) */}
         <ScrollNav bottom={isMobile && stab!=="dashboard" ? 92 : 24} Z={T} font={font}/>
         {loneBar()}
+        {rackWindow()}
         {/* Nav */}
         <div style={{background:`linear-gradient(90deg,${T.navyDk},${T.navyMd})`,borderBottom:`1px solid ${T.border}`,padding:sTiny?"0 14px":"0 24px",display:"flex",alignItems:"center",position:"relative"}}>
           <div style={{marginRight:sTiny?10:20,padding:"10px 0",flexShrink:0}}><BrandLogo darkMode={darkMode}/></div>
@@ -3522,6 +3559,7 @@ export default function App() {
                 if (dseOpen) notifications.push({type:"dse",urgent:false,title:`${dseOpen} team DSE issue${dseOpen!==1?"s":""} to sign off`,detail:"Open My Team to review and sign off",nav:{tab:"team"}});
                 if (actsToSign) notifications.push({type:"report",urgent:false,title:`${actsToSign} completed team action${actsToSign!==1?"s":""} awaiting your sign-off`,detail:"Open My Team to sign them off",nav:{tab:"team"}});
               }
+              if (user.role!=="admin") rackBell(notifications, {tab:"mequip",preset:{tab:"racking"}});
               if (showMyPpe) { const mine=(ppeRows||[]).filter(r=>String(r.user_id)===String(user.id)&&r.status==="issued");
                 const uns=mine.filter(r=>!(r.data||{}).signature), od=mine.filter(r=>ppeState(r,undefined,ppeSettings.dueSoonDays).overdue);
                 if (ppeSettings.staffCanSee && uns.length) notifications.push({type:"document",urgent:true,title:t("Sign for your PPE"),detail:uns.map(r=>r.data.item).join(", "),nav:{tab:"ppe"}});
@@ -3530,7 +3568,7 @@ export default function App() {
                   if (tp) notifications.push({type:"report",urgent:true,title:`${tp} PPE problem${tp!==1?"s":""} reported by your team`,detail:"Open My PPE → My team's PPE",nav:{tab:"ppe"}}); } }
               if(overdueActions.length) notifications.push({type:"report",urgent:true,title:`${overdueActions.length} overdue corrective action${overdueActions.length!==1?"s":""}`,detail:"Investigation actions past due date — action required",nav:{tab:"actions"}});
               else if(myActions.length) notifications.push({type:"report",urgent:false,title:`${myActions.length} open corrective action${myActions.length!==1?"s":""}`,detail:`You have been assigned action${myActions.length!==1?"s":""} from an investigation`,nav:{tab:"actions"}});
-              return <NotificationBell notifications={notifications} onNavigate={n=>{ setStab(n.tab); if(n.editId) setQuickEditId(n.editId); }} Z={T} font={font}/>;
+              return <NotificationBell notifications={notifications} onNavigate={n=>{ if(n.preset) setPagePreset(n.preset); setStab(n.tab); if(n.editId) setQuickEditId(n.editId); }} Z={T} font={font}/>;
             })()}
             <QuickSearch getItems={quickItems} Z={T} font={font} compact={isMobile||sTight}/>
             <div style={{width:1,height:20,background:T.headerBgMd,margin:"0 4px"}}/>
@@ -4154,7 +4192,8 @@ export default function App() {
           {/* Machinery & Equipment for people an admin has given access (Edit Staff): the same
               Machinery Competence and Equipment Register pages admins use. */}
           {stab==="mequip" && user.role!=="admin" && hasMachineryAccess(user) && (
-            <MachineryEquipmentPage Z={T} font={font} initial={pagePreset&&pagePreset.tab==="equipment"?"equipment":"machinery"}
+            <MachineryEquipmentPage key={pagePreset&&pagePreset.tab==="racking"?"rk":"me"} Z={T} font={font} initial={pagePreset&&pagePreset.tab==="equipment"?"equipment":pagePreset&&pagePreset.tab==="racking"?"racking":"machinery"}
+              racking={<RackingTab me={user} Z={T} font={font}/>}
               machinery={
                 <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
                 <LazyAdminMachineryTab allStaff={allUsers.filter(u=>u.id!==1)} machineComps={machineComps} setMachineComps={setMachineComps} allMachineTypes={allMachineTypes} allMachineCategories={allMachineCategories} customMachineTypes={customMachineTypes} preset={pagePreset&&pagePreset.tab==="machinery"?pagePreset:null} clearPreset={()=>setPagePreset(null)} setCustomMachineTypes={setCustomMachineTypes} dbDeleteCustomMachineType={dbDeleteCustomMachineType} dbSaveMachineComp={dbSaveMachineComp} dbDeleteMachineComp={dbDeleteMachineComp} Z={T} font={font}/>
@@ -4517,6 +4556,7 @@ export default function App() {
         {tempPwNotice && <TempPasswordsModal {...tempPwNotice} onClose={()=>setTempPwNotice(null)} Z={T} font={font}/>}
         {showWelcomeSettings && <WelcomeVideoSettings user={user} onClose={()=>setShowWelcomeSettings(false)} Z={T} font={font}/>}
         {loneBar()}
+        {rackWindow()}
         {/* Nav */}
         <div style={{background:`linear-gradient(90deg,${T.navyDk},${T.navyMd})`,borderBottom:`1px solid ${T.border}`,padding:isMobile?"0 12px":navTight?"0 16px":"0 28px",display:"flex",alignItems:"center",position:"relative",flexWrap:isMobile?"nowrap":"wrap",rowGap:0}}>
           <div style={{marginRight:isMobile?8:navTight?14:28,padding:"12px 0",flexShrink:0}}><BrandLogo darkMode={darkMode}/></div>
@@ -4640,6 +4680,7 @@ export default function App() {
                 if(od) notifications.push({type:"report",urgent:true,title:`${od} PPE item${od!==1?"s":""} overdue for replacement`,detail:"Site Safety ▼ → PPE Register",nav:{tab:"ppe"}});
                 if(un) notifications.push({type:"report",urgent:false,title:`${un} PPE issue${un!==1?"s":""} waiting for a signature`,detail:"They can sign in the phone app (More → My PPE), or use Get signature",nav:{tab:"ppe"}}); }
               if(loneAlarms.length) notifications.push({type:"document",urgent:true,title:`Lone working: ${loneAlarms.length} alert${loneAlarms.length!==1?"s":""} need a response`,detail:loneAlarms.map(r=>(r.data||{}).name).join(", "),nav:{tab:"lone"}});
+              rackBell(notifications, {tab:"equipment",preset:{tab:"racking"}});
               if(qrReview.length) notifications.push({type:"document",urgent:true,title:`${qrReview.length} new contractor${qrReview.length!==1?"s":""} to review`,detail:"Signed in with the reception QR code but not in the Contractor Register",nav:{tab:"contractors"}});
 
               // Fire safety alerts — same rules as the Fire Safety screen (domains/fireSafety/fireLogic.js)
@@ -6167,10 +6208,12 @@ export default function App() {
           )}
 
           {atab==="equipment" && (
-            <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
+            <EquipmentPage key={pagePreset&&pagePreset.tab==="racking"?"rk":"as"} initial={pagePreset&&pagePreset.tab==="racking"?"racking":"assets"} Z={T} font={font}
+              assets={<React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
             <LazyEquipmentTrackerTab equipment={equipment} setEquipment={setEquipment} preset={pagePreset&&pagePreset.tab==="equipment"?pagePreset:null} clearPreset={()=>setPagePreset(null)} staff={staff}
               extinguishers={(fireSafety&&fireSafety.extinguishers)||[]} onOpenFireSafety={()=>{ setPagePreset({tab:"firesafety",sub:"extinguishers"}); setAtab("firesafety"); }} Z={T} font={font}/>
-            </React.Suspense>
+            </React.Suspense>}
+              racking={<RackingTab me={user} Z={T} font={font}/>}/>
           )}
 
           {atab==="contractors" && (

@@ -43,6 +43,11 @@ import { useLoneSettings, useLoneSessions } from "../lib/loneClient";
 import { LONE_OPEN, LONE_ALARM } from "../lib/loneWorking";
 import { MyPpe, PpeBanner } from "./screens/MyPpe";
 import { usePpeSettings, usePpeIssues } from "../lib/ppeClient";
+import { RackPick } from "./screens/Racking";
+import { RackBay } from "../shared/RackBay";
+import { useRacking } from "../lib/rackClient";
+import { bayName } from "../lib/racking";
+import { hasMachineryAccess } from "../data/seedMachinery";
 import { getSiteLists } from "../lib/siteLists";
 import { INSP_TYPES } from "../data/seedInspections";
 import { useInspTemplates, inspTypes, inspTypeLabel } from "../lib/inspTemplates";
@@ -87,6 +92,8 @@ const TITLES = {
   permits: ["Permits to work", ""],
   lone: ["Lone working", ""],
   ppe: ["Account", "My PPE"],
+  rack: ["Racking", ""],
+  rackpick: ["Racking", "Find a bay"],
   lonealert: ["Lone working", "Alert"],
   permit: ["Permit to work", ""],
 };
@@ -97,7 +104,7 @@ const PARENT_TAB = {
   certificates: "more", actions: "more", history: "more", appearance: "more", language: "more",
   inspections: "more", inspection: "inspections",
   permits: "more", permit: "permits",
-  lone: "more", lonealert: "today", ppe: "more",
+  lone: "more", lonealert: "today", ppe: "more", rack: "more", rackpick: "more",
 };
 
 // Built-in inspection types that make sense to run from a phone (the annual audit and
@@ -160,7 +167,12 @@ function MobileApp({
   const ppeToSign = ppeSettings.staffCanSee ? ppeRows.filter((r) => String(r.user_id) === String(user.id) && r.status === "issued" && !(r.data || {}).signature).length : 0;
   const [loneAlertId, setLoneAlertId] = React.useState(() => { try { return new URLSearchParams(window.location.search).get("lone"); } catch { return null; } });
   const [tab, setTab] = React.useState("today");
-  const [screen, setScreen] = React.useState(() => { try { return new URLSearchParams(window.location.search).get("lone") ? "lonealert" : "today"; } catch { return "today"; } });
+  const [screen, setScreen] = React.useState(() => { try { const q = new URLSearchParams(window.location.search); return q.get("rack") ? "rack" : q.get("lone") ? "lonealert" : "today"; } catch { return "today"; } });
+  // racking: ?rack=CODE (the QR label on a bay) opens that bay; More → Racking damage finds one by hand
+  const [rackCode, setRackCode] = React.useState(() => { try { return new URLSearchParams(window.location.search).get("rack"); } catch { return null; } });
+  const racking = useRacking(true, { every: 30000 });
+  const rackInspector = user.role === "admin" || hasMachineryAccess(user);
+  React.useEffect(() => { if (screen !== "rack" && rackCode) { try { const u = new URL(window.location.href); if (u.searchParams.get("rack")) { u.searchParams.delete("rack"); window.history.replaceState(null, "", u.toString()); } } catch { /* */ } } }, [screen]); // eslint-disable-line react-hooks/exhaustive-deps
   const mainRef = React.useRef(null);   // the scrolling <main>, for ScrollNav
   const [activeModule, setActiveModule] = React.useState(null);
   const [activeInspection, setActiveInspection] = React.useState(null);
@@ -460,6 +472,7 @@ function MobileApp({
     (fixedTitle && t(fixedTitle)) ||
     (screen === "training" ? t("{n} modules assigned", { n: myMods.length })
       : screen === "module" ? (activeModule || {}).title
+      : screen === "rack" ? (bayName(racking.locations.find((l) => l.id === rackCode)) || rackCode || "")
       : screen === "more" ? user.name
       : screen === "inspection" ? typeLabel((activeInspection || {}).typeId)
       : screen === "permits" ? `${myPermits.filter((p) => !p.closed).length} live on site`
@@ -575,6 +588,8 @@ function MobileApp({
             onOpenLone={loneSettings.enabled ? () => go("lone") : undefined}
             loneActive={!!myLone}
             onOpenPpe={ppeSettings.staffCanSee ? () => go("ppe") : undefined}
+            onOpenRacking={racking.locations.length ? () => go("rackpick") : undefined}
+            rackRed={racking.damage.filter((r) => r.status === "open" && r.rating === "red").length}
             ppeToSign={ppeToSign}
             onOpenInspections={isAdmin ? () => go("inspections") : undefined}
             onOpenPermits={isAdmin ? () => go("permits") : undefined}
@@ -588,6 +603,13 @@ function MobileApp({
           />
         )}
 
+        {screen === "rackpick" && <RackPick locations={racking.locations} damage={racking.damage} onPick={(c) => { setRackCode(c); go("rack"); }} Z={T} font={FONT} />}
+        {screen === "rack" && rackCode && (
+          <div style={{ padding: 18 }}>
+            {racking.loaded ? <RackBay code={rackCode} loc={racking.locations.find((l) => l.id === rackCode) || null} damage={racking.damage} user={user} isInspector={rackInspector} settings={racking.settings} Z={T} font={FONT} />
+              : <div style={{ color: T.muted, fontSize: 14 }}>{t("Loading…")}</div>}
+          </div>
+        )}
         {screen === "ppe" && <MyPpe user={user} rows={ppeRows} settings={ppeSettings} online={online} Z={T} font={FONT} />}
 
         {screen === "lone" && (

@@ -3,12 +3,13 @@ import React, { useState } from "react";
 /**
  * MachineryEquipmentPage — the "Machinery & Equipment" page in the staff portal, for
  * people an admin has given Machinery & Equipment access in Edit Staff (e.g. warehouse
- * managers). Two tabs over the SAME pages admins use: Machinery Competence
- * (AdminMachineryTab) and Equipment Register (EquipmentTrackerTab), passed in ready-made
+ * managers): they are also the racking inspectors. Tabs over the SAME pages admins use:
+ * Machinery Competence (AdminMachineryTab), Equipment Register (EquipmentTrackerTab) and
+ * Racking (domains/racking/RackingTab.jsx), passed in ready-made
  * by App.jsx. No other admin pages are reachable from here.
  */
-export function MachineryEquipmentPage({ machinery, equipment, initial = "machinery", Z, font }) {
-  const [tab, setTab] = useState(initial === "equipment" ? "equipment" : "machinery");
+export function MachineryEquipmentPage({ machinery, equipment, racking, initial = "machinery", Z, font }) {
+  const [tab, setTab] = useState(["equipment", "racking"].includes(initial) ? initial : "machinery");
   const pill = on => ({
     background: on ? `linear-gradient(135deg,${Z.accent},${Z.blue})` : Z.overlay,
     color: on ? "#fff" : Z.muted, border: `1px solid ${on ? Z.accent : Z.borderMd}`,
@@ -19,8 +20,9 @@ export function MachineryEquipmentPage({ machinery, equipment, initial = "machin
       <div role="tablist" aria-label="Machinery and Equipment" style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
         <button role="tab" aria-selected={tab === "machinery"} onClick={() => setTab("machinery")} style={pill(tab === "machinery")}>🏗 Machinery Competence</button>
         <button role="tab" aria-selected={tab === "equipment"} onClick={() => setTab("equipment")} style={pill(tab === "equipment")}>📦 Equipment Register</button>
+        {racking && <button role="tab" aria-selected={tab === "racking"} onClick={() => setTab("racking")} style={pill(tab === "racking")} data-testid="mequip-racking">Racking</button>}
       </div>
-      {tab === "machinery" ? machinery : equipment}
+      {tab === "machinery" ? machinery : tab === "racking" ? racking : equipment}
     </div>
   );
 }

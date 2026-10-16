@@ -14,6 +14,7 @@ import { isPassed, scoreText, recordedText } from "./completion";
 import { AdminDSETab } from "../dse/AdminDSETab";
 import { TrainingMatrixView } from "./TrainingMatrixView";
 import { MonthlyReportView } from "../reports/MonthlyReportView";
+import { EvidencePackView } from "../reports/EvidencePackView";
 import { useRemembered } from "../../lib/remembered";
 import { useSort, sortRows, SortButton } from "../../shared/Sortable";
 import { isActionDone } from "../../lib/actionStatus";
@@ -27,6 +28,7 @@ import { trainingCompliance, complianceBand, staffTraining, PRINT_COLOR, moduleS
  *
  *   "matrix"    – staff × module training matrix, coloured by status, Excel export (TrainingMatrixView)
  *   "monthly"   – monthly H&S management report / board pack as PDF (MonthlyReportView)
+ *   "evidence"  – audit evidence pack for customers / insurers / auditors, any period, no names (EvidencePackView)
  *   "staff"     – per-staff training progress, expandable to quiz answers, ext. certs, machinery
  *   "manager"   – compliance grouped by line manager (uses ManagerRow)
  *   "expiry"    – training + machinery competences expired/expiring
@@ -57,7 +59,7 @@ function saveQuizFailureReviewed(f) {
   if (req) dbWrite(req, "quiz failure reviewed", { alertOnError: true });
 }
 
-function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledgements, reportView, setReportView, dseReports, adminResponses, setAdminResponses, darkMode, Z, font, modules, machineComps, allMachineTypes, lastLoginMap, extCerts, quizFailures, setQuizFailures, incidents, inspections, ras, investigations, onExportPDF, setAtab, userName, dueDates, onMatrixAssign, onMatrixRecord, onMatrixDue, onMatrixOpen }) {
+function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledgements, reportView, setReportView, dseReports, adminResponses, setAdminResponses, darkMode, Z, font, modules, machineComps, allMachineTypes, lastLoginMap, extCerts, quizFailures, setQuizFailures, incidents, inspections, ras, investigations, onExportPDF, setAtab, userName, dueDates, onMatrixAssign, onMatrixRecord, onMatrixDue, onMatrixOpen, evidenceData }) {
   const isMobile = useWindowWidth() <= 1024;
   const [rptFilterSearch, setRptFilterSearch] = React.useState("");
   const [showTeamExport, setShowTeamExport] = React.useState(false);
@@ -203,6 +205,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
         <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
           {tabBtn("matrix",    E("▦ ","")+"Training Matrix")}
           {tabBtn("monthly",   E("📑 ","")+"Monthly Report")}
+          {tabBtn("evidence",  E("📦 ","")+"Evidence Pack")}
           {tabBtn("staff",     E("👥 ","")+"Staff Overview")}
           {tabBtn("manager",   E("📊 ","")+"Manager Performance")}
           {tabBtn("dse",       E("🖥 ","")+"DSE Reports")}
@@ -735,6 +738,11 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
       {reportView === "monthly" && (
         <MonthlyReportView incidents={incidents} investigations={investigations} inspections={inspections} ras={ras}
           staff={staff} modules={allModules} assigns={assigns} comps={comps} userName={userName} Z={Z} font={font}/>
+      )}
+
+      {reportView === "evidence" && (
+        <EvidencePackView data={{ ...(evidenceData || {}), incidents, investigations, inspections, ras, staff, modules: allModules, assigns, comps, docs, docAssignments, docAcknowledgements,
+          dseReports, extCerts, machineComps, machineTypes: allMachineTypes }} userName={userName} Z={Z} font={font}/>
       )}
 
       {reportView === "trends" && (() => {

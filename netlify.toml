@@ -10,3 +10,8 @@
 # for the UK send hour set in Site Settings.
 [functions."zp-email-run"]
   schedule = "*/15 * * * *"
+
+# Lone working: check for missed check-ins every 2 minutes (live site only, like the
+# email schedule). netlify/shared/loneJob.mjs.
+[functions."zp-lone-run"]
+  schedule = "*/2 * * * *"

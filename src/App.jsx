@@ -183,6 +183,10 @@ import { setAuditUser, primeAudit, primeAuditList, primeAuditMap, auditRecord, a
 import { pingIncidentAlert } from "./lib/incidentAlert";
 import { sameName } from "./lib/openActions";
 import { useSiteSignins, signinsOnSite, signinsToReview } from "./lib/siteSignins";
+import { useLoneSettings, useLoneSessions } from "./lib/loneClient";
+import { LONE_ALARM } from "./lib/loneWorking";
+import { LoneAlertBar } from "./shared/LoneRespond";
+import { LoneWorkingTab } from "./domains/lone/LoneWorkingTab";
 
 
 /**
@@ -405,6 +409,13 @@ export default function App() {
   const [contractorVisits, setContractorVisits] = useState({}); // risk assessments
   // contractors who signed in with the reception QR code (admins only; lib/siteSignins.js)
   const siteSignins = useSiteSignins(!!user && user.role === "admin");
+  // lone working (lib/loneClient.js): settings for everyone signed in; sessions for admins and
+  // line managers, for the alert bar. ?lone=ID (the link in an alert email) opens that alert.
+  const loneSettings = useLoneSettings(!!user);
+  const loneWatch = !!user && loneSettings.enabled && (user.role === "admin" || user.role === "manager");
+  const loneSessions = useLoneSessions(loneWatch, { every: 30000 });
+  const [loneFocus, setLoneFocus] = useState(() => { try { return new URLSearchParams(window.location.search).get("lone"); } catch { return null; } });
+  const loneBar = () => loneWatch ? <LoneAlertBar sessions={loneSessions} people={allUsers} me={user} focusId={loneFocus} onFocusDone={() => { setLoneFocus(null); try { const u = new URL(window.location.href); u.searchParams.delete("lone"); window.history.replaceState(null, "", u.toString()); } catch { /* */ } }} Z={T} font={font}/> : null;
   const [quizFailures, setQuizFailures] = useState([]); // [{ userId, userName, moduleId, moduleTitle, score, date }]
   const [extCerts, setExtCerts] = useState({}); // { userId: { certType: { fileName, fileUrl, issuedDate, expiryDate, uploadedAt } } }
   const [msdsFiles, setMsdsFiles] = useState({}); // { [chemCode]: { fileName, fileData, fileUrl, uploadedAt } }
@@ -2672,13 +2683,13 @@ export default function App() {
       const ADMIN_PAGES = [["dashboard", "Admin dashboard", ""], ["users", "Staff", "staff accounts people users"], ["assign", "Assign Training", "training"], ["modules", "Training Library", "modules training"],
         ["create", "Create Module", "new module training"], ["reports", "Reports", "training matrix report excel"], ["documents", "H&S Documents", "documents bundles policies"], ["coshh", "COSHH Register", "chemicals"],
         ["audit", "Audit Trail", "log history"], ["settings", "Site Settings", "locations first aid zones shifts report locations"], ["incidents", "Incidents", "accidents near miss riddor"], ["inspections", "Inspections", "site inspection"], ["ra", "Risk Assessments", "risk"],
-        ["firesafety", "Fire Safety", "wardens extinguishers drills"], ["firstaid", "First Aid", "first aiders"], ["contractors", "Contractors", ""], ["permits", "Permits", "permit to work"],
+        ["firesafety", "Fire Safety", "wardens extinguishers drills"], ["firstaid", "First Aid", "first aiders"], ["contractors", "Contractors", ""], ["permits", "Permits", "permit to work"], ["lone", "Lone Working", "lone worker working alone check-in"],
         ["machinery", "Machinery Competence", "forklift"], ["equipment", "Equipment Register", "equipment"], ["account", "My Account", "password"]];
       ADMIN_PAGES.forEach(([t, l, w]) => items.push({ id: `p:a:${t}`, group: "Pages", icon: "🧭", label: l, sub: "Admin page", words: w, run: () => toAdmin(t) }));
       // pages inside other pages
       items.push({ id: "p:a:investigations", group: "Pages", icon: "🔍", label: "Investigations", sub: "Incidents → Investigations", words: "investigation root cause corrective actions", run: () => toAdmin("investigation", () => setInvestigationView(null)) });
       items.push({ id: "p:a:accidentbook", group: "Pages", icon: "📖", label: "Accident Book", sub: "Incidents → Accident Book", words: "accident book bi510 print", run: () => toAdmin("incidents", () => setPagePreset({ tab: "incidents", accidentBook: true })) });
-      [["matrix", "Training Matrix", "matrix excel"], ["monthly", "Monthly management report", "monthly report board"], ["dse", "DSE Reports", "dse display screen workstation assessments"],
+      [["matrix", "Training Matrix", "matrix excel"], ["monthly", "Monthly management report", "monthly report board"], ["evidence", "Audit evidence pack", "evidence pack audit customer insurer iso 45001 brcgs chas safecontractor"], ["dse", "DSE Reports", "dse display screen workstation assessments"],
        ["expiry", "Expiring training", "expiry expired renewals"], ["failures", "Quiz Failures", "quiz failed"], ["documents", "Document Read Status", "read confirmations acknowledgements"]]
         .forEach(([v, l, w]) => items.push({ id: `p:a:rep:${v}`, group: "Pages", icon: "📊", label: l, sub: "Reports", words: w, run: () => toAdmin("reports", () => setAdminReportView(v)) }));
       items.push({ id: "p:a:welcome", group: "Pages", icon: "🎬", label: "Welcome video", sub: "Staff → the video new staff see when they first sign in", words: "first sign in login new starter induction tour", run: () => toAdmin("users", () => setShowWelcomeSettings(true)) });
@@ -3423,6 +3434,7 @@ export default function App() {
         <PreviewModal doc={previewDoc} onClose={()=>setPreviewDoc(null)} Z={T} font={font}/>
         {/* ▲/▼ top-of-page / bottom-of-page buttons on long screens (shared/ScrollNav.jsx) */}
         <ScrollNav bottom={isMobile && stab!=="dashboard" ? 92 : 24} Z={T} font={font}/>
+        {loneBar()}
         {/* Nav */}
         <div style={{background:`linear-gradient(90deg,${T.navyDk},${T.navyMd})`,borderBottom:`1px solid ${T.border}`,padding:sTiny?"0 14px":"0 24px",display:"flex",alignItems:"center",position:"relative"}}>
           <div style={{marginRight:sTiny?10:20,padding:"10px 0",flexShrink:0}}><BrandLogo darkMode={darkMode}/></div>
@@ -4466,6 +4478,7 @@ export default function App() {
         )}
         {tempPwNotice && <TempPasswordsModal {...tempPwNotice} onClose={()=>setTempPwNotice(null)} Z={T} font={font}/>}
         {showWelcomeSettings && <WelcomeVideoSettings user={user} onClose={()=>setShowWelcomeSettings(false)} Z={T} font={font}/>}
+        {loneBar()}
         {/* Nav */}
         <div style={{background:`linear-gradient(90deg,${T.navyDk},${T.navyMd})`,borderBottom:`1px solid ${T.border}`,padding:isMobile?"0 12px":navTight?"0 16px":"0 28px",display:"flex",alignItems:"center",position:"relative",flexWrap:isMobile?"nowrap":"wrap",rowGap:0}}>
           <div style={{marginRight:isMobile?8:navTight?14:28,padding:"12px 0",flexShrink:0}}><BrandLogo darkMode={darkMode}/></div>
@@ -4482,8 +4495,8 @@ export default function App() {
               <button onClick={()=>setAtab("incidents")} style={navBtn(atab==="incidents",T.gold)}>Incidents</button>
               <button onClick={()=>setAtab("ra")} style={navBtn(atab==="ra",T.gold)}>Risk Assessments</button>
               <button onClick={()=>setAtab("inspections")} style={navBtn(atab==="inspections",T.gold)}>Inspections</button>
-              {(()=>{ const CON_TABS=["contractors","permits"]; const conActive=CON_TABS.includes(atab); return (
-                <NavMenu label="Contractors" active={conActive} items={[["contractors","Contractors"],["permits","Permits"]]} current={atab} onPick={setAtab} btnStyle={{...navBtn(conActive,T.gold),maxWidth:"none",whiteSpace:"nowrap"}} Z={T} font={font}/>
+              {(()=>{ const CON_TABS=["contractors","permits","lone"]; const conActive=CON_TABS.includes(atab); return (
+                <NavMenu label="Contractors" active={conActive} items={[["contractors","Contractors"],["permits","Permits"],...(loneSettings.enabled||atab==="lone"?[["lone","Lone Working"]]:[])]} current={atab} onPick={setAtab} btnStyle={{...navBtn(conActive,T.gold),maxWidth:"none",whiteSpace:"nowrap"}} Z={T} font={font}/>
               ); })()}
               {(()=>{ const DOC_TABS=["documents","coshh","audit","settings"]; const docActive=DOC_TABS.includes(atab); return (
                 <NavMenu label="Documents" active={docActive} items={[["documents","H&S Documents"],["coshh","COSHH Register"],["audit","Audit Trail"],["settings","Site Settings"]]} current={atab} onPick={setAtab} btnStyle={{...navBtn(docActive,T.gold),maxWidth:"none",whiteSpace:"nowrap"}} Z={T} font={font}/>
@@ -4581,6 +4594,8 @@ export default function App() {
               const expiredConCerts=(contractors||[]).filter(c=>Object.values(contractorCerts[c.id]||{}).some(cert=>cert.expiryDate&&cert.expiryDate<today3));
               if(expiredConCerts.length) notifications.push({type:"document",urgent:true,title:`${expiredConCerts.length} contractor${expiredConCerts.length!==1?"s":""} with expired certificates`,detail:"Check Contractors tab",nav:{tab:"contractors"}});
               const qrReview=signinsToReview(siteSignins);
+              const loneAlarms=(loneSessions||[]).filter(r=>LONE_ALARM.includes(r.status));
+              if(loneAlarms.length) notifications.push({type:"document",urgent:true,title:`Lone working: ${loneAlarms.length} alert${loneAlarms.length!==1?"s":""} need a response`,detail:loneAlarms.map(r=>(r.data||{}).name).join(", "),nav:{tab:"lone"}});
               if(qrReview.length) notifications.push({type:"document",urgent:true,title:`${qrReview.length} new contractor${qrReview.length!==1?"s":""} to review`,detail:"Signed in with the reception QR code but not in the Contractor Register",nav:{tab:"contractors"}});
 
               // Fire safety alerts — same rules as the Fire Safety screen (domains/fireSafety/fireLogic.js)
@@ -4656,6 +4671,7 @@ export default function App() {
               ["inspections","🏗️ Inspections"],
               ["contractors","🪪 Contractors"],
               ["permits", E("📋 ","")+"Permits"],
+              ...(loneSettings.enabled ? [["lone", E("🧍 ","")+"Lone Working"]] : []),
               ["documents","📄 H&S Documents"],
               ["coshh","🧪 COSHH Register"],
               ["audit", E("🕘 ","")+"Audit Trail"],
@@ -6061,6 +6077,7 @@ export default function App() {
           {atab==="reports" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
             <LazyReportsTab staff={staff} assigns={assigns} comps={comps} docs={docs} docAssignments={docAssignments} docAcknowledgements={docAcknowledgements} reportView={adminReportView} setReportView={setAdminReportView} dseReports={dseReports} adminResponses={adminResponses} setAdminResponses={setAdminResponses} darkMode={darkMode} Z={T} font={font} modules={allModules} machineComps={machineComps} allMachineTypes={allMachineTypes} lastLoginMap={lastLoginMap} extCerts={extCerts} quizFailures={quizFailures} setQuizFailures={setQuizFailures} incidents={incidents} inspections={siteInspections} ras={ras} investigations={investigations} setAtab={setAtab} userName={user?.name||""}
+              evidenceData={{ fireSafety, firstAidData, coshhAssessments, customChemicals, equipment, permits, contractors, contractorInductions, contractorCerts, contractorVisits, siteSignins }}
               dueDates={dueDates} onMatrixAssign={matrixAssign} onMatrixDue={askDueDate} onMatrixOpen={uid=>openInAssign(uid)}
               onMatrixRecord={(uid,mid)=>openInAssign(uid, ()=>setRecordFor({uid:String(uid),mid}))}
               onExportPDF={u=>generateStaffPDF(u,allModules,assigns,comps,docs,docAssignments,docAcknowledgements,extCerts,machineComps,lastLoginMap,T,allMachineTypes)}/>
@@ -6123,6 +6140,9 @@ export default function App() {
             </React.Suspense>
           )}
 
+          {atab==="lone" && (
+            <LoneWorkingTab me={user} people={allUsers} settings={loneSettings} onOpenSettings={()=>setAtab("settings")} Z={T} font={font}/>
+          )}
           {atab==="permits" && (
             <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
             <LazyPermitsTab permits={permits} setPermits={setPermits} dbSavePermit={dbSavePermit} dbDeletePermit={dbDeletePermit} staff={staff} contractors={contractors} T={T} font={font}/>

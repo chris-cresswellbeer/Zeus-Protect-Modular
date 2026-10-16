@@ -210,7 +210,7 @@ async function deliver(c, list, started, onBatch, budget = TIME_BUDGET_MS) {
   // Incident alerts go one at a time with a fixed Idempotency-Key per recipient and incident, so the
   // alert function and the 15-minute job running at the same moment can't both send one: Resend
   // keeps the first and answers 409 to the other, which counts as sent.
-  const singles = list.filter(e => e.kind === "incident");
+  const singles = list.filter(e => e.kind === "incident" || e.kind === "lone");
   if (singles.length) {
     const res = [];
     for (const e of singles) {
@@ -229,7 +229,7 @@ async function deliver(c, list, started, onBatch, budget = TIME_BUDGET_MS) {
     }
     out.push(...res);
     if (onBatch) await onBatch(res);
-    list = list.filter(e => e.kind !== "incident");
+    list = list.filter(e => e.kind !== "incident" && e.kind !== "lone");
   }
   for (let i = 0; i < list.length; i += 100) {
     const batch = list.slice(i, i + 100);
@@ -253,6 +253,21 @@ async function deliver(c, list, started, onBatch, budget = TIME_BUDGET_MS) {
     if (onBatch) await onBatch(res);
   }
   return out;
+}
+
+/**
+ * Urgent emails that go whatever the reminder settings say (lone working alerts:
+ * netlify/shared/loneJob.mjs). Each goes on its own with a fixed Idempotency-Key from
+ * e.keys[0], so two runs at once can't send it twice. Test mode still applies.
+ *   list [{ to, name, user_id, subject, html, text, keys:[key] }]  → [{ e, ok, error }]
+ */
+export async function sendUrgent(c, list) {
+  if (!list.length) return [];
+  const routed = list.map(e => route(c, { ...e, kind: "lone" }));
+  const res = await deliver(c, routed, Date.now(), null, INCIDENT_BUDGET_MS);
+  await addLog(c, res.map(r => ({ day: ukClock().today, kind: "lone", user_id: r.e.user_id || null, to_addr: r.e.actualTo, intended_to: r.e.to, subject: r.e.subject,
+    status: r.ok ? r.e.status : r.held ? "failed" : "failed", error: r.ok ? null : r.error, resend_id: r.id || null, mode: "lone" }))).catch(() => {});
+  return res;
 }
 
 /** What's missing before emails can go. [] when ready. */

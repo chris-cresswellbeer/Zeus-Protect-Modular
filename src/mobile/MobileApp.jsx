@@ -37,6 +37,11 @@ import { Documents } from "./screens/Documents";
 import { More, Certificates, CorrectiveActions, TrainingHistory, Appearance } from "./screens/More";
 import { Inspections, InspectionRun } from "./screens/Inspection";
 import { Permits, PermitDetail } from "./screens/Permits";
+import { LoneWorking, LoneBanner } from "./screens/LoneWorking";
+import { LoneRespond } from "../shared/LoneRespond";
+import { useLoneSettings, useLoneSessions } from "../lib/loneClient";
+import { LONE_OPEN, LONE_ALARM } from "../lib/loneWorking";
+import { getSiteLists } from "../lib/siteLists";
 import { INSP_TYPES } from "../data/seedInspections";
 import { useInspTemplates, inspTypes, inspTypeLabel } from "../lib/inspTemplates";
 import { myIncompleteQuickReports } from "../domains/incidents/quickReportStatus";
@@ -78,6 +83,8 @@ const TITLES = {
   inspections: ["Inspections", "Due & recent"],
   inspection: ["Inspection", ""],
   permits: ["Permits to work", ""],
+  lone: ["Lone working", ""],
+  lonealert: ["Lone working", "Alert"],
   permit: ["Permit to work", ""],
 };
 
@@ -87,6 +94,7 @@ const PARENT_TAB = {
   certificates: "more", actions: "more", history: "more", appearance: "more", language: "more",
   inspections: "more", inspection: "inspections",
   permits: "more", permit: "permits",
+  lone: "more", lonealert: "today",
 };
 
 // Built-in inspection types that make sense to run from a phone (the annual audit and
@@ -134,8 +142,18 @@ function MobileApp({
   React.useEffect(() => { applyLightThemeFix(isLightTheme(effectiveTheme)); applyThemeVars(effectiveTheme); }, [effectiveTheme, brand]);
 
   const isAdmin = user.role === "admin";
+  // lone working: everyone's own session; admins and line managers also see alerts for others
+  const loneSettings = useLoneSettings(true);
+  const loneSessions = useLoneSessions(loneSettings.enabled, { every: 20000 });
+  const myLone = loneSessions.find((r) => String(r.user_id) === String(user.id) && LONE_OPEN.includes(r.status)) || null;
+  // the database rules already limit this to the team (managers) or everyone (admins); the
+  // same check here keeps the old sign-in (no database rules) from showing staff other people's
+  const norm = (x) => String(x || "").toLowerCase().replace(/\s+/g, " ").trim();
+  const myTeam = (r) => isAdmin || (user.role === "manager" && allUsers.some((u) => String(u.id) === String(r.user_id) && norm(u.manager) === norm(user.name)));
+  const otherAlarms = loneSessions.filter((r) => String(r.user_id) !== String(user.id) && LONE_ALARM.includes(r.status) && myTeam(r));
+  const [loneAlertId, setLoneAlertId] = React.useState(() => { try { return new URLSearchParams(window.location.search).get("lone"); } catch { return null; } });
   const [tab, setTab] = React.useState("today");
-  const [screen, setScreen] = React.useState("today");
+  const [screen, setScreen] = React.useState(() => { try { return new URLSearchParams(window.location.search).get("lone") ? "lonealert" : "today"; } catch { return "today"; } });
   const mainRef = React.useRef(null);   // the scrolling <main>, for ScrollNav
   const [activeModule, setActiveModule] = React.useState(null);
   const [activeInspection, setActiveInspection] = React.useState(null);
@@ -460,6 +478,20 @@ function MobileApp({
       {(!online || queue.length > 0) && <OfflineBanner online={online} queueCount={waiting} stuckCount={queue.length - waiting} Z={T} />}
 
       <main ref={mainRef} style={{ flex: 1, overflow: "auto", WebkitOverflowScrolling: "touch" }}>
+        {otherAlarms.length > 0 && screen !== "lonealert" && (
+          <div style={{ padding: "12px 18px 0", display: "flex", flexDirection: "column", gap: 8 }}>
+            {otherAlarms.map((r) => (
+              <button key={r.id} type="button" data-testid="m-lone-alarm" onClick={() => { setLoneAlertId(r.id); go("lonealert"); }}
+                style={{ textAlign: "left", display: "flex", gap: 10, alignItems: "center", padding: "12px 14px", borderRadius: 14, border: "none", background: "linear-gradient(90deg,#b91c1c,#dc2626)", color: "#fff", fontFamily: FONT, fontWeight: 800, fontSize: 14, cursor: "pointer" }}>
+                <span style={{ fontSize: 20 }}>🧍</span>
+                <span style={{ flex: 1 }}>{(r.data || {}).name} {r.status === "help" ? "has asked for help" : "missed a lone working check-in"}<span style={{ display: "block", fontWeight: 600, fontSize: 12, opacity: .9 }}>{(r.data || {}).place} · tap to respond</span></span>
+              </button>
+            ))}
+          </div>
+        )}
+        {screen === "today" && myLone && (
+          <div style={{ padding: "18px 18px 0" }}><LoneBanner row={myLone} onOpen={() => go("lone")} Z={T} font={FONT} /></div>
+        )}
         {screen === "today" && (
           <Today
             user={user} myMods={myMods} myComps={myComps} unreadDocs={unreadDocs} compliance={myCompliance}
@@ -530,6 +562,8 @@ function MobileApp({
             onOpenDocs={() => go("documents")}
             onOpenCerts={() => go("certificates")}
             onOpenActions={() => go("actions")}
+            onOpenLone={loneSettings.enabled ? () => go("lone") : undefined}
+            loneActive={!!myLone}
             onOpenInspections={isAdmin ? () => go("inspections") : undefined}
             onOpenPermits={isAdmin ? () => go("permits") : undefined}
             onOpenHistory={() => go("history")}
@@ -541,6 +575,19 @@ function MobileApp({
             Z={T} font={FONT}
           />
         )}
+
+        {screen === "lone" && (
+          <LoneWorking user={user} settings={loneSettings} sessions={loneSessions} online={online}
+            places={(getSiteLists() || {}).reportLocations || []} Z={T} font={FONT} />
+        )}
+
+        {screen === "lonealert" && (() => {
+          const r = loneSessions.find((x) => x.id === loneAlertId);
+          const box = { padding: 18 };
+          if (!r) return <div style={{ ...box, color: T.muted, fontSize: 14 }}>{loneSessions.length ? "This alert has been closed, or you can't see it." : "Loading…"}</div>;
+          if (!LONE_ALARM.includes(r.status)) return <div style={{ ...box, color: T.white, fontSize: 15, lineHeight: 1.5 }} data-testid="m-lone-closed">{(r.data || {}).name}: {r.data && r.data.ack ? `already dealt with by ${r.data.ack.by}.` : "they've checked in, or the session has ended."}</div>;
+          return <div style={box}><LoneRespond row={r} people={allUsers} byName={user.name} Z={T} font={FONT} onDone={() => { setLoneAlertId(null); go("today"); }} /></div>;
+        })()}
 
         {screen === "certificates" && <Certificates certificates={certificates} holder={user && user.name} holderJob={(user && user.jobTitle) || ""} Z={T} font={FONT} />}
 

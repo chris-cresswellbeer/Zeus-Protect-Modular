@@ -6,7 +6,7 @@
  *   firstAidShifts    the shifts first aid cover is planned for
  *   reportLocations   the "Where was it?" choices on quick hazard reports
  *
- * Admins edit them on Documents ▼ → Site Settings (domains/settings/SiteSettingsTab.jsx).
+ * Admins edit them on ⚙ → Site Settings (domains/settings/SiteSettingsTab.jsx).
  * Everyone signed in can read them (app_settings is readable by all; db_rules.sql).
  * Until a site has saved its own, the generic DEFAULTS below are used.
  * The Biggleswade lists were put in the database by site_content.sql.

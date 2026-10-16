@@ -158,7 +158,7 @@ function ContractorsTab({ contractors, setContractors, contractorInductions, set
 
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20,flexWrap:"wrap",gap:12}}>
         <div>
-          <h2 style={{fontSize:22,fontWeight:900,letterSpacing:-.5,margin:"0 0 4px"}}>Contractor Register <HelpTip dark={false} text="One entry per company that works on site. Open a company to record its insurance and accreditation certificates (with expiry dates), its workers and their site inductions, and each visit. Expired certificates show in the bell, and today's visits make up 'On Site Now' on the dashboard. Permits to work are under Contractors ▼ → Permits."/></h2>
+          <h2 style={{fontSize:22,fontWeight:900,letterSpacing:-.5,margin:"0 0 4px"}}>Contractor Register <HelpTip dark={false} text="One entry per company that works on site. Open a company to record its insurance and accreditation certificates (with expiry dates), its workers and their site inductions, and each visit. Expired certificates show in the bell, and today's visits make up 'On Site Now' on the dashboard. Permits to work are under Risk ▼ → Permits to Work."/></h2>
           <p style={{color:T.muted,fontSize:13,margin:0}}>{contractors.filter(c=>c.status==="active").length} active companies · {contractors.reduce((s,c)=>(s+(c.workers||[]).length),0)} workers total</p>
         </div>
         <button onClick={()=>setShowForm(v=>!v)} style={{background:showForm?"rgba(239,68,68,0.1)":`linear-gradient(135deg,${T.accent},${T.blue})`,color:showForm?"#f87171":"#fff",border:showForm?"1px solid rgba(239,68,68,0.2)":"none",borderRadius:10,padding:"10px 20px",cursor:"pointer",fontFamily:font,fontWeight:700,fontSize:13}}>

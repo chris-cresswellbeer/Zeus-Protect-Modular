@@ -6,7 +6,7 @@ import { auditEvent } from "../../lib/audit";
 import { fileProduct } from "../../lib/brandCore";
 
 /**
- * BackupPanel — top of Documents ▼ → Audit Trail (admins). Downloads a full
+ * BackupPanel — top of ⚙ → Audit Trail (admins). Downloads a full
  * backup of the portal's records (lib/backup.js) and shows when the last one
  * was taken. The notification bell reminds admins after 30 days (App.jsx).
  */

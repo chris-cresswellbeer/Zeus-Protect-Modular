@@ -2685,16 +2685,18 @@ export default function App() {
     const toAdmin = (tab, then) => jump(() => { setMod(null); setViewRaw("admin"); setAtabRaw(tab); if (then) then(); });
     const fmt = d => (d ? String(d).slice(0, 10).split("-").reverse().join("/") : "");
     // pages
-    const STAFF_PAGES = { dashboard: "Dashboard", training: "My Training", history: "Training history & certificates", documents: "Documents", incidents: "Report Incident", dse: "My DSE", machinery: "My Machinery", mequip: "Machinery & Equipment", actions: "My Actions", ppe: "My PPE", team: "My Team", account: "My Account" };
-    const staffTabs = ["dashboard", "training", "history", "documents", "incidents", "dse", ...(isWarehouseWorker(user) ? ["machinery"] : []), "actions", ...(showMyPpe ? ["ppe"] : []), ...(user.role === "manager" ? ["team"] : []), ...(user.role !== "admin" && hasMachineryAccess(user) ? ["mequip"] : []), "account"];
+    const STAFF_PAGES = { dashboard: "Dashboard", training: "My Training", history: "My Training → History & certificates", documents: "Documents", incidents: "Report Incident", dse: "My DSE", machinery: "My Training → My machinery", mequip: "Machinery & Equipment", actions: "My Actions", ppe: "My PPE", team: "My Team", account: "My Account" };
+    const staffTabs = ["dashboard", "training", "history", ...(isWarehouseWorker(user) ? ["machinery"] : []), "documents", "incidents", "dse", ...(showMyPpe ? ["ppe"] : []), "actions", ...(user.role === "manager" ? ["team"] : []), ...(user.role !== "admin" && hasMachineryAccess(user) ? ["mequip"] : []), "account"];
     staffTabs.forEach(t => items.push({ id: `p:s:${t}`, group: "Pages", icon: "📄", label: STAFF_PAGES[t], sub: isAdmin ? "Your own training view" : "Page", words: t === "history" ? "certificates certificate history" : t === "incidents" ? "report hazard near miss" : t === "ppe" ? "ppe boots gloves hi-vis sign" : "", run: () => toStaff(t) }));
     if (isAdmin) {
       const ADMIN_PAGES = [["dashboard", "Admin dashboard", ""], ["users", "Staff", "staff accounts people users"], ["assign", "Assign Training", "training"], ["modules", "Training Library", "modules training"],
         ["create", "Create Module", "new module training"], ["reports", "Reports", "training matrix report excel"], ["documents", "H&S Documents", "documents bundles policies"], ["coshh", "COSHH Register", "chemicals"],
-        ["audit", "Audit Trail", "log history"], ["settings", "Site Settings", "locations first aid zones shifts report locations"], ["incidents", "Incidents", "accidents near miss riddor"], ["inspections", "Inspections", "site inspection"], ["ra", "Risk Assessments", "risk"],
-        ["firesafety", "Fire Safety", "wardens extinguishers drills"], ["firstaid", "First Aid", "first aiders"], ["contractors", "Contractors", ""], ["permits", "Permits", "permit to work"], ["lone", "Lone Working", "lone worker working alone check-in"],
+        ["audit", "Audit Trail & backup", "log history backup download"], ["settings", "Site Settings", "locations first aid zones shifts report locations"], ["incidents", "Incidents", "accidents near miss riddor"], ["inspections", "Inspections", "site inspection"], ["ra", "Risk Assessments", "risk"],
+        ["firesafety", "Fire Safety", "wardens extinguishers drills"], ["firstaid", "First Aid", "first aiders"], ["contractors", "Contractors", ""], ["permits", "Permits to Work", "permits permit to work hot work"], ["lone", "Lone Working", "lone worker working alone check-in"],
         ["machinery", "Machinery Competence", "forklift"], ["equipment", "Equipment Register", "equipment"], ["ppe", "PPE Register", "ppe personal protective equipment boots gloves hi-vis ear defenders glasses issue signature"], ["account", "My Account", "password"]];
-      ADMIN_PAGES.forEach(([t, l, w]) => items.push({ id: `p:a:${t}`, group: "Pages", icon: "🧭", label: l, sub: "Admin page", words: w, run: () => toAdmin(t) }));
+      const WHERE = { machinery: "Staff ▼", assign: "Training ▼", modules: "Training ▼", create: "Training ▼", ra: "Risk ▼", coshh: "Risk ▼", inspections: "Risk ▼", permits: "Risk ▼",
+        firesafety: "Site Safety ▼", firstaid: "Site Safety ▼", lone: "Site Safety ▼", ppe: "Site Safety ▼", settings: "⚙ by your name", audit: "⚙ by your name" };
+      ADMIN_PAGES.forEach(([t, l, w]) => items.push({ id: `p:a:${t}`, group: "Pages", icon: "🧭", label: l, sub: WHERE[t] ? `Admin page · ${WHERE[t]}` : "Admin page", words: w, run: () => toAdmin(t) }));
       // pages inside other pages
       items.push({ id: "p:a:investigations", group: "Pages", icon: "🔍", label: "Investigations", sub: "Incidents → Investigations", words: "investigation root cause corrective actions", run: () => toAdmin("investigation", () => setInvestigationView(null)) });
       items.push({ id: "p:a:accidentbook", group: "Pages", icon: "📖", label: "Accident Book", sub: "Incidents → Accident Book", words: "accident book bi510 print", run: () => toAdmin("incidents", () => setPagePreset({ tab: "incidents", accidentBook: true })) });
@@ -3432,7 +3434,12 @@ export default function App() {
     // the first name goes, the labels drop "My" and the tabs tighten up. At 1024px and
     // below the ☰ menu takes over (CSS below).
     // more tabs (machinery, PPE, team, machinery & equipment) need the shorter labels sooner
-    const sTabCount = 7 + (isWarehouseWorker(user)?1:0) + (showMyPpe?1:0) + (user.role==="manager"?1:0) + (user.role!=="admin"&&hasMachineryAccess(user)?1:0);
+    // The staff tabs. History and My Machinery are sections of My Training (Oct 2026), so
+    // stab "history" / "machinery" still exist and light up the My Training tab.
+    const STAFF_BAR = ["dashboard","training","documents","incidents","dse",...(showMyPpe?["ppe"]:[]),"actions",...(user.role==="manager"?["team"]:[]),...(user.role!=="admin"&&hasMachineryAccess(user)?["mequip"]:[])];
+    const TRAINING_PARTS = ["training","history",...(isWarehouseWorker(user)?["machinery"]:[])];
+    const tabOn = t => stab===t || (t==="training" && TRAINING_PARTS.includes(stab));
+    const sTabCount = STAFF_BAR.length;
     const sExtra = Math.max(0, sTabCount - 9) * 130;
     const sTight = winW < 1700 + sExtra, sTiny = winW < 1400 + sExtra, sSnug = sTiny && sTabCount >= 10;
     // Menu names in the person's language (lib/i18n.js); the pages behind them are English for now.
@@ -3451,9 +3458,9 @@ export default function App() {
         <div style={{background:`linear-gradient(90deg,${T.navyDk},${T.navyMd})`,borderBottom:`1px solid ${T.border}`,padding:sTiny?"0 14px":"0 24px",display:"flex",alignItems:"center",position:"relative"}}>
           <div style={{marginRight:sTiny?10:20,padding:"10px 0",flexShrink:0}}><BrandLogo darkMode={darkMode}/></div>
           <div style={{display:"flex",alignItems:"center",gap:sTiny?0:2,flex:1,minWidth:0,overflowX:"auto"}} className="staff-nav-tabs" data-testid="staff-tabs">
-            {["dashboard","training","history","documents","incidents","dse",...(isWarehouseWorker(user)?["machinery"]:[]),"actions",...(showMyPpe?["ppe"]:[]),...(user.role==="manager"?["team"]:[]),...(user.role!=="admin"&&hasMachineryAccess(user)?["mequip"]:[])].map(t=>(
+            {STAFF_BAR.map(t=>(
               <button key={t} onClick={()=>setStab(t)} title={STAFF_TAB_LABEL[t]}
-                style={{background:"none",border:"none",borderBottom:stab===t?`2px solid ${T.accent}`:"2px solid transparent",color:stab===t?T.white:T.muted,fontWeight:stab===t?700:400,fontSize:13,cursor:"pointer",padding:sSnug?"14px 6px 12px":sTiny?"14px 8px 12px":sTight?"14px 10px 12px":"14px 14px 12px",fontFamily:font,whiteSpace:"nowrap",letterSpacing:.3,transition:"color .15s"}}>
+                aria-current={tabOn(t)?"page":undefined} style={{background:"none",border:"none",borderBottom:tabOn(t)?`2px solid ${T.accent}`:"2px solid transparent",color:tabOn(t)?T.white:T.muted,fontWeight:tabOn(t)?700:400,fontSize:13,cursor:"pointer",padding:sSnug?"14px 6px 12px":sTiny?"14px 8px 12px":sTight?"14px 10px 12px":"14px 14px 12px",fontFamily:font,whiteSpace:"nowrap",letterSpacing:.3,transition:"color .15s"}}>
                 {(sTiny?STAFF_TAB_SHORT:STAFF_TAB_LABEL)[t]}
               </button>
             ))}
@@ -3559,9 +3566,9 @@ export default function App() {
       {/* Mobile nav drawer */}
         {mobileMenuOpen && (
           <div className="mobile-nav-drawer" style={{position:"relative"}}>
-            {["dashboard","training","history","documents","incidents","dse",...(isWarehouseWorker(user)?["machinery"]:[]),"actions",...(showMyPpe?["ppe"]:[]),...(user.role==="manager"?["team"]:[]),...(user.role!=="admin"&&hasMachineryAccess(user)?["mequip"]:[])].map(t=>(
+            {STAFF_BAR.map(t=>(
               <button key={t} onClick={()=>{setStab(t);setMobileMenuOpen(false);}}
-                style={{display:"block",width:"100%",textAlign:"left",padding:"12px 24px",background:stab===t?"rgba(37,99,235,0.15)":"transparent",border:"none",borderBottom:`1px solid rgba(255,255,255,0.05)`,color:stab===t?T.white:T.muted,fontWeight:stab===t?700:400,fontSize:14,cursor:"pointer",fontFamily:font}}>
+                style={{display:"block",width:"100%",textAlign:"left",padding:"12px 24px",background:tabOn(t)?"rgba(37,99,235,0.15)":"transparent",border:"none",borderBottom:`1px solid rgba(255,255,255,0.05)`,color:tabOn(t)?T.white:T.muted,fontWeight:tabOn(t)?700:400,fontSize:14,cursor:"pointer",fontFamily:font}}>
                 {{dashboard:E("🏠 ",""),training:E("📚 ",""),history:E("📋 ",""),documents:E("📄 ",""),incidents:E("🚨 ",""),dse:"🖥️ ",machinery:"⚙️ ",mequip:"🛠 ",actions:"✅ ",ppe:E("🦺 ",""),team:E("👥 ","")}[t]}{STAFF_TAB_LABEL[t]}
               </button>
             ))}
@@ -3804,6 +3811,16 @@ export default function App() {
             </div>
           )}
 
+          {TRAINING_PARTS.includes(stab) && TRAINING_PARTS.length > 1 && (
+            <div role="tablist" aria-label="My Training" data-testid="training-parts" style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:20}}>
+              {TRAINING_PARTS.map(p => (
+                <button key={p} type="button" role="tab" aria-selected={stab===p} onClick={()=>setStab(p)} data-testid={`training-part-${p}`}
+                  style={{fontFamily:font,fontSize:13.5,fontWeight:700,cursor:"pointer",borderRadius:20,padding:"8px 16px",minHeight:38,color:stab===p?T.white:T.muted,background:stab===p?`${T.accent}40`:T.overlay,border:`1px solid ${stab===p?T.accent:T.borderMd}`}}>
+                  {{training:t("Assigned to me"),history:t("History & certificates"),machinery:t("My machinery")}[p]}
+                </button>
+              ))}
+            </div>
+          )}
           {stab==="training" && (
             <div>
               <h2 style={{fontSize:22,fontWeight:900,letterSpacing:-.5,marginBottom:24}}>My Assigned Training <HelpTip dark={true} text="Modules assigned to you by your manager. Work through each one at your own pace — you'll need to pass the quiz at the end to receive your certificate. Modules with an expiry date will need to be repeated periodically."/></h2>
@@ -4505,24 +4522,25 @@ export default function App() {
           <div style={{marginRight:isMobile?8:navTight?14:28,padding:"12px 0",flexShrink:0}}><BrandLogo darkMode={darkMode}/></div>
           {!isMobile && !navCompact && <><div style={{width:1,height:28,background:T.headerBgMd,marginRight:8}}/><Pill label="ADMIN" col="navy"/><div style={{width:1,height:20,background:T.headerBgMd,margin:"0 12px"}}/></>}
           {!isMobile && (()=>{
-            const TRAINING_TABS=["assign","modules","create","reports"]; const trainingActive=TRAINING_TABS.includes(atab);
-            const ME_TABS=["machinery","equipment","ppe"]; const meActive=ME_TABS.includes(atab);
+            // Menus grouped by the kind of work (Oct 2026): people, training, incidents, risk,
+            // site safety, then equipment, contractors, documents and reports. Site Settings and
+            // the Audit Trail are under the ⚙ by your name.
+            const STAFF_TABS=["users","machinery"]; const staffActive=STAFF_TABS.includes(atab);
+            const TRAINING_TABS=["assign","modules","create"]; const trainingActive=TRAINING_TABS.includes(atab);
+            const RISK_TABS=["ra","coshh","inspections","permits"]; const riskActive=RISK_TABS.includes(atab);
+            const SAFETY_TABS=["firesafety","firstaid","lone","ppe"]; const safetyActive=SAFETY_TABS.includes(atab);
+            const menuBtn = a => ({...navBtn(a,T.gold),maxWidth:"none",whiteSpace:"nowrap"});
             return (<>
               <button onClick={()=>setAtab("dashboard")} style={navBtn(atab==="dashboard",T.gold)}>Dashboard</button>
-              <button onClick={()=>setAtab("users")} style={navBtn(atab==="users",T.gold)}>Staff</button>
-              <NavMenu label="Training" active={trainingActive} items={[["assign","Assign Training"],["modules","Training Library"],["create","Create Module"],["reports","Reports"]]} current={atab} onPick={setAtab} btnStyle={{...navBtn(trainingActive,T.gold),maxWidth:"none",whiteSpace:"nowrap"}} Z={T} font={font}/>
-              <button onClick={()=>setAtab("firesafety")} style={navBtn(atab==="firesafety",T.gold)}>Fire Safety</button>
-              <button onClick={()=>setAtab("firstaid")} style={navBtn(atab==="firstaid",T.gold)}>First Aid</button>
-              <button onClick={()=>setAtab("incidents")} style={navBtn(atab==="incidents",T.gold)}>Incidents</button>
-              <button onClick={()=>setAtab("ra")} style={navBtn(atab==="ra",T.gold)}>Risk Assessments</button>
-              <button onClick={()=>setAtab("inspections")} style={navBtn(atab==="inspections",T.gold)}>Inspections</button>
-              {(()=>{ const CON_TABS=["contractors","permits","lone"]; const conActive=CON_TABS.includes(atab); return (
-                <NavMenu label="Contractors" active={conActive} items={[["contractors","Contractors"],["permits","Permits"],...(loneSettings.enabled||atab==="lone"?[["lone","Lone Working"]]:[])]} current={atab} onPick={setAtab} btnStyle={{...navBtn(conActive,T.gold),maxWidth:"none",whiteSpace:"nowrap"}} Z={T} font={font}/>
-              ); })()}
-              {(()=>{ const DOC_TABS=["documents","coshh","audit","settings"]; const docActive=DOC_TABS.includes(atab); return (
-                <NavMenu label="Documents" active={docActive} items={[["documents","H&S Documents"],["coshh","COSHH Register"],["audit","Audit Trail"],["settings","Site Settings"]]} current={atab} onPick={setAtab} btnStyle={{...navBtn(docActive,T.gold),maxWidth:"none",whiteSpace:"nowrap"}} Z={T} font={font}/>
-              ); })()}
-              <NavMenu label="Machinery & Equipment" active={meActive} items={[["machinery","Machinery Competence"],["equipment","Equipment Register"],["ppe","PPE Register"]]} current={atab} onPick={setAtab} btnStyle={{...navBtn(meActive,T.gold),maxWidth:navTight?124:"none"}} Z={T} font={font}/>
+              <NavMenu label="Staff" testId="nav-staff" active={staffActive} items={[["users","Staff"],["machinery","Machinery Competence"]]} current={atab} onPick={setAtab} btnStyle={menuBtn(staffActive)} Z={T} font={font}/>
+              <NavMenu label="Training" testId="nav-training" active={trainingActive} items={[["assign","Assign Training"],["modules","Training Library"],["create","Create Module"]]} current={atab} onPick={setAtab} btnStyle={menuBtn(trainingActive)} Z={T} font={font}/>
+              <button onClick={()=>setAtab("incidents")} style={navBtn(atab==="incidents"||atab==="investigation",T.gold)}>Incidents</button>
+              <NavMenu label="Risk" testId="nav-risk" active={riskActive} items={[["ra","Risk Assessments"],["coshh","COSHH Register"],["inspections","Inspections"],["permits","Permits to Work"]]} current={atab} onPick={setAtab} btnStyle={menuBtn(riskActive)} Z={T} font={font}/>
+              <NavMenu label="Site Safety" testId="nav-safety" active={safetyActive} items={[["firesafety","Fire Safety"],["firstaid","First Aid"],...(loneSettings.enabled||atab==="lone"?[["lone","Lone Working"]]:[]),["ppe","PPE Register"]]} current={atab} onPick={setAtab} btnStyle={menuBtn(safetyActive)} Z={T} font={font}/>
+              <button onClick={()=>setAtab("equipment")} style={navBtn(atab==="equipment",T.gold)}>Equipment</button>
+              <button onClick={()=>setAtab("contractors")} style={navBtn(atab==="contractors",T.gold)}>Contractors</button>
+              <button onClick={()=>setAtab("documents")} style={navBtn(atab==="documents",T.gold)}>Documents</button>
+              <button onClick={()=>setAtab("reports")} style={navBtn(atab==="reports",T.gold)}>Reports</button>
             </>);
           })()}
           <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:isMobile?6:navCompact?6:10}}>
@@ -4534,7 +4552,7 @@ export default function App() {
               const notifications = [];
               // Full backup reminder (Audit Trail → Download full backup)
               if (lastBackup !== undefined && (lastBackup === null || (Date.now() - new Date(lastBackup).getTime()) / 86400000 >= BACKUP_DUE_DAYS))
-                notifications.push({type:"report",urgent:false,title:lastBackup?"A full backup is due":"Download a first full backup",detail:lastBackup?`Last one ${Math.floor((Date.now()-new Date(lastBackup).getTime())/86400000)} days ago — Documents ▼ → Audit Trail`:"Keeps a copy of every record — Documents ▼ → Audit Trail",nav:{tab:"audit"}});
+                notifications.push({type:"report",urgent:false,title:lastBackup?"A full backup is due":"Download a first full backup",detail:lastBackup?`Last one ${Math.floor((Date.now()-new Date(lastBackup).getTime())/86400000)} days ago — ⚙ → Audit Trail & backup`:"Keeps a copy of every record — ⚙ → Audit Trail & backup",nav:{tab:"audit"}});
               // Staff with overdue mandatory modules
               const overdueStaff = staff.filter(u=>{
                 const mandatory = allModules.filter(m=>m.level==="Mandatory"&&(assigns[u.id]||[]).includes(m.id));
@@ -4602,7 +4620,7 @@ export default function App() {
               else if(!riddorIncidents.length && openIncidents.length) notifications.push({type:"report",urgent:false,title:`${openIncidents.length} open incident${openIncidents.length!==1?"s":""}`,detail:"Check Incidents tab to review and close",nav:{tab:"incidents"}});
               // Quiz failures in last 7 days
               const recentFailures = quizFailures.filter(f=>!f.acknowledged && f.date >= localISO(new Date(Date.now()-7*86400000)));
-              if(recentFailures.length) notifications.push({type:"module",urgent:false,title:`${recentFailures.length} quiz failure${recentFailures.length!==1?"s":""} in last 7 days`,detail:"Check Training → Reports to review",nav:{tab:"reports"}});
+              if(recentFailures.length) notifications.push({type:"module",urgent:false,title:`${recentFailures.length} quiz failure${recentFailures.length!==1?"s":""} in last 7 days`,detail:"Check Reports → Quiz Failures",nav:{tab:"reports"}});
               // RA review dates
               const today2 = todayISO();
               const overdueRAs = ras.filter(ra2=>ra2.reviewDate&&ra2.reviewDate<today2);
@@ -4618,8 +4636,8 @@ export default function App() {
               const loneAlarms=(loneSessions||[]).filter(r=>LONE_ALARM.includes(r.status));
               { const cur=(ppeRows||[]).filter(r=>r.status==="issued").map(r=>ppeState(r,undefined,ppeSettings.dueSoonDays));
                 const pp=cur.filter(s=>s.problem).length, od=cur.filter(s=>s.overdue).length, un=cur.filter(s=>s.unsigned).length;
-                if(pp) notifications.push({type:"report",urgent:true,title:`${pp} PPE problem${pp!==1?"s":""} reported`,detail:"Damaged, lost or not fitting — Machinery & Equipment ▼ → PPE Register",nav:{tab:"ppe"}});
-                if(od) notifications.push({type:"report",urgent:true,title:`${od} PPE item${od!==1?"s":""} overdue for replacement`,detail:"Machinery & Equipment ▼ → PPE Register",nav:{tab:"ppe"}});
+                if(pp) notifications.push({type:"report",urgent:true,title:`${pp} PPE problem${pp!==1?"s":""} reported`,detail:"Damaged, lost or not fitting — Site Safety ▼ → PPE Register",nav:{tab:"ppe"}});
+                if(od) notifications.push({type:"report",urgent:true,title:`${od} PPE item${od!==1?"s":""} overdue for replacement`,detail:"Site Safety ▼ → PPE Register",nav:{tab:"ppe"}});
                 if(un) notifications.push({type:"report",urgent:false,title:`${un} PPE issue${un!==1?"s":""} waiting for a signature`,detail:"They can sign in the phone app (More → My PPE), or use Get signature",nav:{tab:"ppe"}}); }
               if(loneAlarms.length) notifications.push({type:"document",urgent:true,title:`Lone working: ${loneAlarms.length} alert${loneAlarms.length!==1?"s":""} need a response`,detail:loneAlarms.map(r=>(r.data||{}).name).join(", "),nav:{tab:"lone"}});
               if(qrReview.length) notifications.push({type:"document",urgent:true,title:`${qrReview.length} new contractor${qrReview.length!==1?"s":""} to review`,detail:"Signed in with the reception QR code but not in the Contractor Register",nav:{tab:"contractors"}});
@@ -4661,6 +4679,10 @@ export default function App() {
               {darkMode?"☀️":"🌙"}
             </button>); })()}
             {!navCompact && <div style={{width:1,height:20,background:T.headerBgMd,margin:"0 4px"}}/>}
+            {!isMobile && <NavMenu testId="nav-admin" align="right" arrow={false} ariaLabel="Settings and Audit Trail" active={["settings","audit"].includes(atab)}
+              label={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>}
+              items={[["settings","Site Settings"],["audit","Audit Trail & backup"]]} current={atab} onPick={setAtab}
+              btnStyle={{background:["settings","audit"].includes(atab)?"rgba(245,158,11,0.14)":T.overlay,border:`1px solid ${["settings","audit"].includes(atab)?T.gold:T.borderMd}`,borderRadius:8,padding:"6px 9px",color:["settings","audit"].includes(atab)?T.gold:T.muted,cursor:"pointer",fontFamily:font}} Z={T} font={font}/>}
             <button type="button" onClick={()=>setAtab(atab==="account"?"users":"account")}
               title={`My Account (${user.name})`} aria-label={`My Account (${user.name})`}
               style={{display:"flex",alignItems:"center",gap:7,cursor:"pointer",padding:"4px 8px 4px 4px",borderRadius:10,transition:"background .15s",background:atab==="account"?T.overlay:"transparent",border:atab==="account"?`1px solid ${T.borderMd}`:"1px solid transparent",fontFamily:font,color:"inherit"}}
@@ -4686,25 +4708,25 @@ export default function App() {
             {[
               ["dashboard", E("🏠 ","")+"Dashboard"],
               ["users", E("👥 ","")+"Staff"],
+              ["machinery","🔧 Machinery Competence"],
               ["assign", E("📋 ","")+"Assign Training"],
               ["modules", E("📚 ","")+"Training Library"],
               ["create","➕ Create Module"],
-              ["reports", E("📊 ","")+"Reports"],
-              ["firesafety", E("🔥 ","")+"Fire Safety"],
-              ["firstaid","First Aid Register"],
               ["incidents", E("⚠️ ","")+"Incidents"],
               ["ra","🔍 Risk Assessments"],
-              ["inspections","🏗️ Inspections"],
-              ["contractors","🪪 Contractors"],
-              ["permits", E("📋 ","")+"Permits"],
-              ...(loneSettings.enabled ? [["lone", E("🧍 ","")+"Lone Working"]] : []),
-              ["documents","📄 H&S Documents"],
               ["coshh","🧪 COSHH Register"],
-              ["audit", E("🕘 ","")+"Audit Trail"],
-              ["settings", E("⚙ ","")+"Site Settings"],
-              ["machinery","🔧 Machinery Competence"],
-              ["equipment","📦 Equipment Register"],
+              ["inspections","🏗️ Inspections"],
+              ["permits", E("📋 ","")+"Permits to Work"],
+              ["firesafety", E("🔥 ","")+"Fire Safety"],
+              ["firstaid","First Aid"],
+              ...(loneSettings.enabled ? [["lone", E("🧍 ","")+"Lone Working"]] : []),
               ["ppe", E("🦺 ","")+"PPE Register"],
+              ["equipment","📦 Equipment Register"],
+              ["contractors","🪪 Contractors"],
+              ["documents","📄 H&S Documents"],
+              ["reports", E("📊 ","")+"Reports"],
+              ["settings", E("⚙ ","")+"Site Settings"],
+              ["audit", E("🕘 ","")+"Audit Trail & backup"],
               ["account","👤 My Account"],
             ].map(([id,label])=>(
               <button key={id} onClick={()=>{setAtab(id);setMobileMenuOpen(false);}}

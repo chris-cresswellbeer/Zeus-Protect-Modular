@@ -1,8 +1,8 @@
 import React from "react";
 
 /**
- * NavMenu — a drop-down in the admin top bar (Training ▼, Contractors ▼, Documents ▼,
- * Machinery & Equipment ▼). Works with:
+ * NavMenu — a drop-down in the admin top bar (Staff ▼, Training ▼, Risk ▼, Site Safety ▼,
+ * and the ⚙ menu by your name). Works with:
  *   mouse     — opens when you point at it (as before) and on click
  *   touch     — tap to open, tap an item (or anywhere else) to close
  *   keyboard  — Tab to it, Enter / Space / ↓ opens and moves into the list,
@@ -17,7 +17,7 @@ import React from "react";
 
 let closeOthers = null;   // only one menu open at a time
 
-export function NavMenu({ label, active, items, current, onPick, btnStyle, Z, font, testId }) {
+export function NavMenu({ label, active, items, current, onPick, btnStyle, Z, font, testId, align = "left", ariaLabel, arrow = true }) {
   const [open, setOpen] = React.useState(false);
   const wrapRef = React.useRef(null);
   const btnRef = React.useRef(null);
@@ -68,7 +68,7 @@ export function NavMenu({ label, active, items, current, onPick, btnStyle, Z, fo
     <div ref={wrapRef} style={{ position: "relative", display: "inline-block" }} data-testid={testId}
       onMouseEnter={() => { clearTimeout(hoverTimer.current); if (!open) { how.current = { by: "hover", at: Date.now() }; show(); } }}
       onMouseLeave={() => { clearTimeout(hoverTimer.current); if (how.current.by === "hover") hoverTimer.current = setTimeout(() => setOpen(false), 180); }}>
-      <button ref={btnRef} type="button" aria-expanded={open} aria-controls={menuId}
+      <button ref={btnRef} type="button" aria-expanded={open} aria-controls={menuId} aria-label={ariaLabel}
         onClick={() => {
           // the pointer arriving opened it a moment ago: this click means "keep it open"
           if (open && how.current.by === "hover" && Date.now() - how.current.at < 600) { how.current = { by: "click", at: Date.now() }; return; }
@@ -76,11 +76,11 @@ export function NavMenu({ label, active, items, current, onPick, btnStyle, Z, fo
           how.current = { by: "click", at: Date.now() }; show();
         }} onKeyDown={onBtnKey}
         style={{ ...btnStyle, display: "flex", alignItems: "center", gap: 5 }}>
-        {label}<span style={{ fontSize: 9, opacity: .7, marginTop: 1, transform: open ? "rotate(180deg)" : "none", transition: "transform .15s" }}>▼</span>
+        {label}{arrow && <span style={{ fontSize: 9, opacity: .7, marginTop: 1, transform: open ? "rotate(180deg)" : "none", transition: "transform .15s" }}>▼</span>}
       </button>
       {open && (
-        <div id={menuId} aria-label={typeof label === "string" ? label : undefined}
-          style={{ position: "absolute", top: "100%", left: 0, zIndex: 200, minWidth: 190, background: `linear-gradient(135deg,${Z.navyDk},${Z.navyMd})`, border: `1px solid ${Z.borderMd}`, borderRadius: 10, boxShadow: "0 8px 32px rgba(0,0,0,0.4)", overflow: "hidden", padding: "4px 0" }}>
+        <div id={menuId} aria-label={typeof label === "string" ? label : ariaLabel}
+          style={{ position: "absolute", top: "100%", ...(align === "right" ? { right: 0 } : { left: 0 }), zIndex: 200, minWidth: 190, background: `linear-gradient(135deg,${Z.navyDk},${Z.navyMd})`, border: `1px solid ${Z.borderMd}`, borderRadius: 10, boxShadow: "0 8px 32px rgba(0,0,0,0.4)", overflow: "hidden", padding: "4px 0" }}>
           {items.map(([itemId, itemLabel], i) => (
             <button key={itemId} ref={el => { itemRefs.current[i] = el; }} type="button"
               aria-current={current === itemId ? "page" : undefined}

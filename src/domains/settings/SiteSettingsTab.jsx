@@ -11,7 +11,7 @@ import { LoneWorkingSettings } from "./LoneWorkingSettings";
 import { SettingsSection, SettingsTabs } from "./SettingsSection";
 
 /**
- * SiteSettingsTab — Documents ▼ → Site Settings (admins).
+ * SiteSettingsTab — ⚙ → Site Settings (admins).
  * The lists that differ from site to site, kept in the database (lib/siteLists.js):
  * first aid zones, first aid shifts and the hazard report locations; and the
  * certificate settings (CertificateSettings.jsx); email reminder settings
@@ -148,7 +148,7 @@ function SiteSettingsTab({ Z, font, superAdmin = false, user = null }) {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))", gap: 14 }}>
           {LISTS.map(l => <ListEditor key={l.key} list={l} items={form[l.key]} onChange={v => setForm(f => ({ ...f, [l.key]: v }))} Z={Z} font={font}/>)}
         </div>
-        <p style={{ fontSize: 12, color: Z.muted, margin: "14px 0 0" }}>The COSHH substances are kept in the COSHH Register (Documents ▼ → COSHH Register), and machine types under Machinery Competence → Machine types.</p>
+        <p style={{ fontSize: 12, color: Z.muted, margin: "14px 0 0" }}>The COSHH substances are kept in the COSHH Register (Risk ▼ → COSHH Register), and machine types under Machinery Competence → Machine types.</p>
       </>)}
       {wrap("certificates", <CertificateSettings Z={Z} font={font} user={user} embedded onStatus={report("certificates")}/>)}
       {wrap("email", <EmailSettings Z={Z} font={font} embedded onStatus={report("email")}/>)}

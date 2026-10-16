@@ -3,7 +3,7 @@
  * backup.js — download a full copy of the portal's records (admins only)
  * ═══════════════════════════════════════════════════════════════════════════
  * Supabase's free plan keeps no backups you can download, so an admin can save
- * one here (Documents ▼ → Audit Trail → Download full backup). The download is a
+ * one here (⚙ → Audit Trail → Download full backup). The download is a
  * .zip holding:
  *   • zeus-protect-backup.json  every row of every table, exactly as stored —
  *                               the copy to restore from if records are ever lost

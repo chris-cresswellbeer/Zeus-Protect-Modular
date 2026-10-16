@@ -53,7 +53,7 @@ export function LoneWorkingSettings({ Z, font, onStatus, onSaved }) {
       </div>
       <label style={{ display: "flex", gap: 10, alignItems: "flex-start", marginTop: 12, cursor: "pointer" }}>
         <input type="checkbox" checked={f.enabled} onChange={e => set("enabled", e.target.checked)} data-testid="lone-set-enabled" style={{ width: 18, height: 18, marginTop: 1, accentColor: Z.accent }}/>
-        <span><span style={{ fontSize: 13, fontWeight: 700, color: Z.white }}>Lone working check-ins are on</span><span style={{ ...hint, display: "block", marginTop: 1 }}>Everyone gets <b>Lone working</b> in the phone app (More). Admins see who's working alone under Contractors ▼ → Lone Working.</span></span>
+        <span><span style={{ fontSize: 13, fontWeight: 700, color: Z.white }}>Lone working check-ins are on</span><span style={{ ...hint, display: "block", marginTop: 1 }}>Everyone gets <b>Lone working</b> in the phone app (More). Admins see who's working alone under Site Safety ▼ → Lone Working.</span></span>
       </label>
       <span style={lbl}>Check-in intervals staff can choose</span>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{CHOICES.map(m => <button key={m} type="button" style={chip(f.intervals.includes(m))} aria-pressed={f.intervals.includes(m)} onClick={() => toggle(m)} data-testid={`lone-set-int-${m}`}>{dur(m)}</button>)}</div>

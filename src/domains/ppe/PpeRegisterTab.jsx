@@ -1,5 +1,5 @@
 /**
- * PpeRegisterTab — the PPE Register (Machinery & Equipment ▼ → PPE Register, or quick search
+ * PpeRegisterTab — the PPE Register (Site Safety ▼ → PPE Register, or quick search
  * "ppe"; line managers see their team's under My PPE → My team).
  *   Totals     issued in the last 12 months, due for replacement, overdue, waiting for a
  *              signature, problems reported — each one filters the list
@@ -115,7 +115,7 @@ export function PpeRegisterTab({ me, people, scope, isAdmin, embedded = false, f
 
       <div style={{ background: Z.navy, border: `1px solid ${Z.border}`, borderRadius: 16, overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 980 }}>
-          <thead><tr style={{ background: Z.navyMd }}><th style={th}>Person</th><th style={th}>Item</th><th style={th}>Size</th><th style={th}>Issued</th><th style={th}>Replace by</th><th style={th}>Signed</th><th style={th}>Status</th><th style={th}></th></tr></thead>
+          <thead><tr style={{ background: Z.navyMd }}><th style={th}>Person</th><th style={th}>Item</th><th style={th}>Size</th><th style={th}>Issued</th><th style={th}>Replace by</th><th style={th}>Signed</th><th style={th}>Status</th><th style={th}><span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }}>Actions</span></th></tr></thead>
           <tbody>
             {!list.length && <tr><td colSpan={8} style={{ ...td, color: Z.muted, padding: 18 }}>{rows.length ? "Nothing matches these filters." : "No PPE recorded yet. Use + Issue PPE to record the first issue."}</td></tr>}
             {list.slice(0, limit).map(({ r, s, p }) => { const d = r.data || {}; return (

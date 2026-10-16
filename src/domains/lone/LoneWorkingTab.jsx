@@ -1,5 +1,5 @@
 /**
- * LoneWorkingTab — admin "Lone Working" page (Contractors ▼ → Lone Working, or quick search).
+ * LoneWorkingTab — admin "Lone Working" page (Site Safety ▼ → Lone Working, or quick search).
  *   Working alone now   everyone with a session running: where, since when, next check-in,
  *                       and any alert or help call, with Respond (shared/LoneRespond.jsx) and
  *                       End (for a session someone forgot to finish)

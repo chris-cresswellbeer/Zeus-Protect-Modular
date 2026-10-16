@@ -920,7 +920,7 @@ function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDel
                     {on?"✓ ":""}{z}
                   </button>); })}
               </div>
-            ) : <div style={{fontSize:12,color:Z.muted}}>No areas set up yet: add them in Documents ▼ → Site Settings (first aid zones). You can type one below.</div>}
+            ) : <div style={{fontSize:12,color:Z.muted}}>No areas set up yet: add them in ⚙ → Site Settings (first aid zones). You can type one below.</div>}
             <div style={{display:"flex",gap:8,marginTop:8}}>
               <input aria-label="Add another area" value={wForm.zoneText} onChange={e=>wSet({zoneText:e.target.value})} placeholder="Another area…" style={{...inp,marginBottom:0,flex:1}}
                 onKeyDown={e=>{ if(e.key==="Enter"){ e.preventDefault(); const v=wForm.zoneText.trim(); if(v&&!wForm.zones.includes(v)) wSet({zones:[...wForm.zones,v],zoneText:""}); } }}/>

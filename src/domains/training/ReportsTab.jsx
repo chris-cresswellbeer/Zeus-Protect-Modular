@@ -22,7 +22,7 @@ import { getBrand, brandHtml, fileShort } from "../../lib/brandCore";
 import { trainingCompliance, complianceBand, staffTraining, PRINT_COLOR, moduleState, isInDateState } from "./compliance";
 
 /**
- * ReportsTab — admin "Training → Reports" area. One component, many report views,
+ * ReportsTab — admin "Reports" area. One component, many report views,
  * selected by `reportView` (state lives in App.jsx as adminReportView so other
  * screens — dashboard cards, notifications — can deep-link to a view):
  *

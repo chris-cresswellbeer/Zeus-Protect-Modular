@@ -16,6 +16,7 @@
  */
 import React from "react";
 import { sb } from "./supabase";
+import { createChangeTracker } from "./changes";
 import { PPE_SETTINGS_ID, normalisePpeSettings } from "./ppe";
 
 let settings = normalisePpeSettings(null), settingsLoaded = false;
@@ -41,6 +42,7 @@ export function usePpeSettings(enabled = true) {
   return settings;
 }
 
+const tracker = createChangeTracker();   // only re-read ppe_issues when it changed (lib/changes.js)
 let rows = [], loaded = false, pending = null, missing = false;
 const subs = new Set();
 const emit = () => subs.forEach(f => f());
@@ -51,6 +53,9 @@ export async function loadPpeIssues({ fresh = false } = {}) {
   if (loaded && !fresh) return rows;
   if (pending) return pending;
   pending = (async () => {
+    // nothing changed since the last read: keep what we have (lib/changes.js)
+    const tr = await tracker.check(["ppe_issues"]);
+    if (loaded && !missing && !tr.has("ppe_issues")) { pending = null; return rows; }
     const out = []; let ok = true;
     for (let offset = 0; offset < 50000; offset += 1000) {
       const r = await sb.from("ppe_issues").query(`select=*&order=created_at.desc&limit=1000&offset=${offset}`);
@@ -58,7 +63,7 @@ export async function loadPpeIssues({ fresh = false } = {}) {
       out.push(...r.data);
       if (r.data.length < 1000) break;
     }
-    if (ok) { rows = out.map(x => ({ ...x, data: x.data || {} })); missing = false; } else missing = true;
+    if (ok) { rows = out.map(x => ({ ...x, data: x.data || {} })); missing = false; tr.mark("ppe_issues"); } else missing = true;
     loaded = true; pending = null; emit();
     return rows;
   })();

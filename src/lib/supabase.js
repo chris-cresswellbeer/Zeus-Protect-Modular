@@ -256,6 +256,9 @@ async function dbWrite(promise, label, opts = {}) {
   const { error } = await promise;
   if (error) {
     console.error(`[dbWrite] Save failed${label ? ` [${label}]` : ""}:`, error);
+    // the screen may now show something the database doesn't have: the next refresh
+    // re-reads everything instead of only what changed (lib/changes.js listens for this)
+    try { window.dispatchEvent(new Event("zp-write-failed")); } catch { /* not in a browser */ }
     if (opts.alertOnError) {
       notify(`Failed to save${label ? ` ${label}` : ""}. Your changes may not have been saved.\n${error}`, { kind: "error" });
     }

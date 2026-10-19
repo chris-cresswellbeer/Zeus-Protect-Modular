@@ -63,7 +63,11 @@ import { EXT_CERT_TYPES } from "./data/seedExtCerts";
 import { INSP_TYPES } from "./data/seedInspections";
 import { PERMIT_TYPES } from "./data/seedPermits";
 import { isWarehouseWorker, hasMachineryAccess, MACHINERY_TYPES, machineState, compsFor } from "./data/seedMachinery";
-import { TRAINING_MODULES } from "./data/seedTraining";
+// The built-in training modules (data/seedTraining.js, ~100 KB of slides and questions) aren't
+// needed for the sign-in screen, so they download alongside it and are ready by sign-in.
+let builtInModulesPromise = null;
+const loadBuiltInModules = () => builtInModulesPromise || (builtInModulesPromise =
+  import("./data/seedTraining").then(m => m.TRAINING_MODULES, e => { builtInModulesPromise = null; throw e; }));
 // ── Domain tabs. `React.lazy` = the tab's code is only downloaded the first time it is
 // opened (code-splitting). Each lazy tab must be rendered inside <React.Suspense>.
 // The `.then(m => ({ default: m.X }))` adapts a NAMED export to what React.lazy expects.
@@ -99,19 +103,28 @@ const LazyContractorsTab = lazyFresh(() => import("./domains/contractors/Contrac
 const LazyMyTeamTab = lazyFresh(() => import("./domains/manager/MyTeamTab").then(m => ({ default: m.MyTeamTab })));
 const LazyAuditTrailTab = lazyFresh(() => import("./domains/audit/AuditTrailTab").then(m => ({ default: m.AuditTrailTab })));
 const LazyCoshhTab = lazyFresh(() => import("./domains/coshh/CoshhTab").then(m => ({ default: m.CoshhTab })));
-import { DocCard } from "./domains/documents/DocCard";
+// Opened by fewer people, or only on their own page (Oct 2026: moved out of the first download)
+const DocCard = lazyPart(() => import("./domains/documents/DocCard").then(m => ({ default: m.DocCard })), null);
+const ExternalCertsSection = lazyPart(() => import("./domains/documents/ExternalCertsSection").then(m => ({ default: m.ExternalCertsSection })), LAZY_BLOCK);
+const PreviewModal = lazyPart(() => import("./domains/documents/PreviewModal").then(m => ({ default: m.PreviewModal })), null);
+const LoneWorkingTab = lazyPart(() => import("./domains/lone/LoneWorkingTab").then(m => ({ default: m.LoneWorkingTab })), LAZY_BLOCK);
+const PpeRegisterTab = lazyPart(() => import("./domains/ppe/PpeRegisterTab").then(m => ({ default: m.PpeRegisterTab })), LAZY_BLOCK);
+const MyPpeTab = lazyPart(() => import("./domains/ppe/MyPpeTab").then(m => ({ default: m.MyPpeTab })), LAZY_BLOCK);
+const RackBay = lazyPart(() => import("./shared/RackBay").then(m => ({ default: m.RackBay })), LAZY_BLOCK);
+const RackingTab = lazyPart(() => import("./domains/racking/RackingTab").then(m => ({ default: m.RackingTab })), LAZY_BLOCK);
+const EquipmentPage = lazyPart(() => import("./domains/racking/RackingTab").then(m => ({ default: m.EquipmentPage })), LAZY_BLOCK);
+const EvidenceLinks = lazyPart(() => import("./domains/training/TrainingEvidence").then(m => ({ default: m.EvidenceLinks })), null);
+const AttachEvidenceModal = lazyPart(() => import("./domains/training/TrainingEvidence").then(m => ({ default: m.AttachEvidenceModal })), null);
+const SessionsModal = lazyPart(() => import("./domains/training/TrainingEvidence").then(m => ({ default: m.SessionsModal })), null);
 import { SlideVideo } from "./shared/SlideVideo";
 import { parseRoute, routeHash, routeAllowed } from "./lib/router";
 import { notify, ask, notifyAfterReload, setFeedbackTheme } from "./shared/Feedback";
 import { confirmLeave, unsavedLabels, setDraftUser, clearDrafts } from "./lib/unsaved";
 import { mapBundleRows, bundleRow, addAssignments, removeAssignments, bundlesFor, bundleNamesOf, withoutDoc, withoutMember } from "./domains/documents/bundles";
-import { ExternalCertsSection } from "./domains/documents/ExternalCertsSection";
-import { PreviewModal } from "./domains/documents/PreviewModal";
 import { openFile } from "./lib/fileAccess";
 import { ScrollNav } from "./shared/ScrollNav";
 import { BackupPanel, BACKUP_DUE_DAYS } from "./domains/audit/BackupPanel";
 import { lastBackupAt } from "./lib/backup";
-import { EvidenceLinks, AttachEvidenceModal, SessionsModal } from "./domains/training/TrainingEvidence";
 import { uploadEvidence, listSessions, sessionKey, evidenceLabel } from "./domains/training/evidence";
 import { teamOf } from "./domains/manager/team";
 import { isPassed, scoreText, recordedText, passMarkOf, PASS_MARK } from "./domains/training/completion";
@@ -164,6 +177,12 @@ import { applyLightThemeFix, isLightTheme } from "./lib/lightThemeFix";
 import { mergeInvestigation, changedSince } from "./domains/incidents/investigationMerge";
 import { QuickSearch } from "./shared/QuickSearch";
 import { createKeyed, primeKeyed, saveKeyed, diffKeyed, mergeKeyed, savedCopy, markSaved } from "./lib/keyedSync";
+import { createChangeTracker } from "./lib/changes";
+// "Has anything changed?" for the tables the 30-second refresh re-reads (lib/changes.js).
+const sharedTracker = createChangeTracker();
+const TRACKED = ["incidents", "investigations", "training_completions", "doc_acknowledgements", "training_assigns", "training_completion_history",
+  "doc_assignments", "doc_bundles", "equipment", "custom_machine_types", "site_inspections", "custom_modules", "first_aid_register",
+  "fire_wardens", "fire_drills", "fire_alarm_tests", "fire_extinguishers", "fire_emerg_lighting", "fire_fra_reviews"];
 import { NewVersionModal } from "./shared/NewVersionModal";   // also used by DocCard, so it can't load separately
 import { ticksFrom, Tick, TickAll, BulkBar } from "./shared/BulkBar";
 import { NavMenu } from "./shared/NavMenu";
@@ -183,15 +202,10 @@ import { useSiteSignins, signinsOnSite, signinsToReview } from "./lib/siteSignin
 import { useLoneSettings, useLoneSessions } from "./lib/loneClient";
 import { LONE_ALARM } from "./lib/loneWorking";
 import { LoneAlertBar } from "./shared/LoneRespond";
-import { LoneWorkingTab } from "./domains/lone/LoneWorkingTab";
 import { usePpeSettings, usePpeIssues } from "./lib/ppeClient";
 import { ppeState } from "./lib/ppe";
-import { PpeRegisterTab } from "./domains/ppe/PpeRegisterTab";
-import { MyPpeTab } from "./domains/ppe/MyPpeTab";
 import { useRacking } from "./lib/rackClient";
 import { rackingSummary } from "./lib/racking";
-import { RackingTab, EquipmentPage } from "./domains/racking/RackingTab";
-import { RackBay } from "./shared/RackBay";
 import { bayName } from "./lib/racking";
 
 
@@ -480,15 +494,17 @@ export default function App() {
   const [fireSafety, setFireSafety] = useState({ wardens:[], drills:[], alarmTests:[], extinguishers:[], emergLighting:[], fraReviews:[] });
   const [firstAidData, setFirstAidData] = useState({ aiders:[], kits:[], assessment:{} });
   // ── Module merge model ─────────────────────────────────────────────────────
-  // Built-in modules live in data/seedTraining.js (TRAINING_MODULES, read-only code).
+  // Built-in modules live in data/seedTraining.js (TRAINING_MODULES, read-only code; loaded as builtInModules).
   // Admin changes are stored in the custom_modules table as customModules:
   //   _custom:true               → admin-created (or edited) module
   //   _custom:true,_override:true→ replaces the built-in module with the SAME id
   //   _hidden:true               → soft-deleted (hidden from assignment lists)
-  // Always read modules via `allModules`, never TRAINING_MODULES directly.
+  // Always read modules via `allModules`, never builtInModules / TRAINING_MODULES directly.
   // allModules: custom overrides replace built-in modules with same id
+  const [builtInModules, setBuiltInModules] = useState([]);   // data/seedTraining.js, loaded just after the page (see loadBuiltInModules)
+  useEffect(() => { loadBuiltInModules().then(setBuiltInModules, e => console.error("Built-in modules didn't load:", e)); }, []);
   const allModules = [
-    ...TRAINING_MODULES.map(m => customModules.find(c=>c.id===m.id&&c._override) || m),
+    ...builtInModules.map(m => customModules.find(c=>c.id===m.id&&c._override) || m),
     ...customModules.filter(c=>!c._override),
   ].map(withCompany);   // "{company}" in built-in training text → the company's name (branding)
   // What the signed-in person sees in their own training: their language where an up-to-date
@@ -685,6 +701,8 @@ export default function App() {
         // Promise.all) is used deliberately: if one table fails to load
         // (network blip, permissions issue, etc.) the other 34 should
         // still populate rather than the whole load silently aborting.
+        // signatures first: what we're about to read counts as "seen" by the refresh (lib/changes.js)
+        const pre = await sharedTracker.check(TRACKED.filter(t => t !== "training_completion_history"));
         const [
           aRes, cRes, iRes, invRes, ackRes, daRes, docRes, dseRes, resRes,
           llRes, usersRes, upRes, ecRes, qfRes, conRes, conIndRes,
@@ -741,6 +759,11 @@ export default function App() {
         // rows" (data: null) rather than letting it throw and abort
         // everything else's processing below.
         const rows = (res) => (res.status === "fulfilled" ? (res.value?.data ?? null) : null);
+        const readOk = res => res.status === "fulfilled" && res.value && !res.value.error && Array.isArray(res.value.data);
+        Object.entries({ training_assigns: aRes, training_completions: cRes, incidents: iRes, investigations: invRes, doc_acknowledgements: ackRes,
+          doc_assignments: daRes, custom_modules: cmRes, equipment: eqRes, site_inspections: siRes, fire_wardens: fwRes, fire_drills: fdRes,
+          fire_alarm_tests: fatRes, fire_extinguishers: fexRes, fire_emerg_lighting: felRes, fire_fra_reviews: ffrRes, first_aid_register: faRes,
+          custom_machine_types: cmtRes, doc_bundles: bdRes }).forEach(([t, r]) => { if (readOk(r)) pre.mark(t); });
         if (usersRes.status === "rejected") console.error("Supabase load error (users):", usersRes.reason);
         [aRes,cRes,iRes,invRes,ackRes,daRes,docRes,dseRes,resRes,llRes,upRes,ecRes,qfRes,conRes,conIndRes,conCertRes,conVisitRes,permitRes,raRes,cmRes,mcRes,eqRes,siRes,msdsRes,ccRes,fwRes,fdRes,fatRes,fexRes,felRes,ffrRes,faRes,cmtRes,dlRes,caRes,dahRes,chRes,mvRes,bdRes]
           .forEach(r => { if (r.status === "rejected") console.error("Supabase load error:", r.reason); });
@@ -1004,13 +1027,14 @@ export default function App() {
     // module versions). They only grow, aren't needed for the first screen, and on a busy
     // site are the biggest tables. Anything added in this browser meanwhile is kept.
     async function loadHistory() {
+      const pre = await sharedTracker.check(["training_completion_history"]);
       const [dah, ch, mv] = await Promise.all([
         sb.from("doc_ack_history").select("*"), sb.from("training_completion_history").select("*"), sb.from("module_versions").select("*"),
       ]);
       const ok = r => r && !r.error && Array.isArray(r.data);
       const keep = (fresh, cur, key) => { const have = new Set(fresh.map(key)); return [...fresh, ...cur.filter(x => !have.has(key(x)))]; };
       if (ok(dah)) setDocAckHistory(cur => keep(dah.data, cur, h => `${h.user_id}|${h.doc_id}|${h.version}|${h.date}`));
-      if (ok(ch)) { setCompHistory(cur => keep(ch.data, cur, h => `${h.user_id}|${h.module_id}|${h.date}|${h.score}`)); historyIdsRef.current = idsKey(ch.data); }
+      if (ok(ch)) { setCompHistory(cur => keep(ch.data, cur, h => `${h.user_id}|${h.module_id}|${h.date}|${h.score}`)); historyIdsRef.current = idsKey(ch.data); pre.mark("training_completion_history"); }
       if (ok(mv)) setModuleVersions(cur => keep(mv.data, cur, v => String(v.id)));
       historyReadyRef.current = true;
     }
@@ -1154,22 +1178,25 @@ export default function App() {
   // Registers people edit on their own pages (equipment, inspections, fire safety, first aid,
   // custom modules, machine types): take in other people's changes. Only for those who can
   // edit them; records with an unsaved or in-flight change here are left alone (lib/keyedSync.js).
-  async function refreshRegisters() {
+  // tr: the "has it changed?" check made by refreshSharedRecords (lib/changes.js); tables that
+  // haven't changed since the last read aren't read again.
+  async function refreshRegisters(tr) {
     // only the people who edit registers take in other people's changes
     const admin = !!user && user.role === "admin", machinery = !!user && hasMachineryAccess(user);
     if (!machinery) return;
     const R = regRef.current;
     const ok = r => r && !r.error && Array.isArray(r.data);
     const data = r => r.data.map(x => x.data).filter(Boolean);
-    const reads = { equipment: sb.from("equipment").select("*"), machineTypes: sb.from("custom_machine_types").select("*") };
+    const rd = changedRead(tr);
+    const reads = { equipment: ["equipment", () => sb.from("equipment").select("*")], machineTypes: ["custom_machine_types", () => sb.from("custom_machine_types").select("*")] };
     if (admin) {
-      Object.assign(reads, { inspections: sb.from("site_inspections").select("*"), modules: sb.from("custom_modules").select("*"),
-        firstAid: sb.from("first_aid_register").select("*").eq("id", "singleton") });
-      Object.entries(FIRE_TABLES).forEach(([k, table]) => { reads[`fire.${k}`] = sb.from(table).select("*"); });
+      Object.assign(reads, { inspections: ["site_inspections", () => sb.from("site_inspections").select("*")], modules: ["custom_modules", () => sb.from("custom_modules").select("*")],
+        firstAid: ["first_aid_register", () => sb.from("first_aid_register").select("*").eq("id", "singleton")] });
+      Object.entries(FIRE_TABLES).forEach(([k, table]) => { reads[`fire.${k}`] = [table, () => sb.from(table).select("*")]; });
     }
     const keys = Object.keys(reads);
     const readAt = Date.now();   // anything this browser saves after this moment is newer than what comes back
-    const res = Object.fromEntries((await Promise.all(keys.map(k => reads[k]))).map((r, i) => [keys[i], r]));
+    const res = Object.fromEntries((await Promise.all(keys.map(k => rd(...reads[k])))).map((r, i) => [keys[i], r]));
     if (ok(res.equipment)) { const fresh = data(res.equipment); setEquipment(cur => mergeKeyed(R.equipment, cur, fresh, readAt)); }
     if (ok(res.machineTypes)) { const fresh = data(res.machineTypes); setCustomMachineTypes(cur => mergeKeyed(R.machineTypes, cur, fresh, readAt)); }
     if (!admin) return;
@@ -1199,27 +1226,38 @@ export default function App() {
     }
   }
 
+  // Read a table only if it may have changed (or we can't tell); otherwise answer "unchanged",
+  // which every reader below treats like a failed read: keep what's on screen.
+  const changedRead = tr => (table, query) => (tr && !tr.has(table))
+    ? Promise.resolve({ data: null, error: "unchanged" })
+    : Promise.resolve(query()).then(r => { if (tr && r && !r.error && Array.isArray(r.data)) tr.mark(table); return r; });
+
   async function refreshSharedRecords() {
     if (!_ready.current || refreshBusyRef.current) return;
     refreshBusyRef.current = true;
     try {
-      const registers = refreshRegisters().catch(e => console.error("Register refresh failed:", e));   // awaited below
+      // One small request first: which of these tables changed since we last read them?
+      const tr = await sharedTracker.check(TRACKED);
+      const rd = changedRead(tr);
+      const registers = refreshRegisters(tr).catch(e => console.error("Register refresh failed:", e));   // awaited below
       // Training history only grows, and can be the biggest table: read just its row ids,
       // and the full rows only when they changed (or the table has no ids to compare).
       const historyRead = async () => {
         if (!historyReadyRef.current) return { data: null, error: "not loaded yet" };
+        if (!tr.has("training_completion_history")) return { data: null, error: "unchanged" };
         const ids = await sb.from("training_completion_history").select("id,recorded");   // every page; recorded = evidence, which can change
         if (!ids.error && Array.isArray(ids.data)) {
           const k = idsKey(ids.data);
-          if (k !== null && k === historyIdsRef.current) return { data: null, error: "unchanged" };
+          if (k !== null && k === historyIdsRef.current) { tr.mark("training_completion_history"); return { data: null, error: "unchanged" }; }
         }
         const full = await sb.from("training_completion_history").select("*");
-        if (!full.error && Array.isArray(full.data)) historyIdsRef.current = idsKey(full.data);
+        if (!full.error && Array.isArray(full.data)) { historyIdsRef.current = idsKey(full.data); tr.mark("training_completion_history"); }
         return full;
       };
-      const [iRes, invRes, cRes, ackRes, aRes, hRes, daRes, bdRes] = await Promise.all([sb.from("incidents").select("*"), sb.from("investigations").select("*"),
-        sb.from("training_completions").select("*"), sb.from("doc_acknowledgements").select("*"), sb.from("training_assigns").select("*"),
-        historyRead(), sb.from("doc_assignments").select("*"), sb.from("doc_bundles").select("*")]);
+      const [iRes, invRes, cRes, ackRes, aRes, hRes, daRes, bdRes] = await Promise.all([rd("incidents", () => sb.from("incidents").select("*")),
+        rd("investigations", () => sb.from("investigations").select("*")), rd("training_completions", () => sb.from("training_completions").select("*")),
+        rd("doc_acknowledgements", () => sb.from("doc_acknowledgements").select("*")), rd("training_assigns", () => sb.from("training_assigns").select("*")),
+        historyRead(), rd("doc_assignments", () => sb.from("doc_assignments").select("*")), rd("doc_bundles", () => sb.from("doc_bundles").select("*"))]);
       // Training completions, assignments and document confirmations made elsewhere
       // (a member of staff finishing a module, a manager assigning one) appear here
       // without a reload.
@@ -1456,6 +1494,7 @@ export default function App() {
       failed.forEach(f => recentWriteRef.current.delete(`a:${f.uid}`));   // let the next refresh show what is really stored
       const names = [...new Set(failed.map(f => auditNameOf(f.uid)))].join(", ");
       notify(`Training assignments for ${names} could not be saved.\n${String(failed[0].error).slice(0, 300)}\nIf this mentions "out of range for type integer", run user_id_text_columns.sql in the Supabase SQL Editor.`, { kind: "error" });
+      sharedTracker.forget("training_assigns");   // read it again even though nothing in it changed
       refreshSharedRecords();
     }
     return failed.length === 0;
@@ -2562,6 +2601,7 @@ export default function App() {
     if (!su) { setSigningIn(false); await signOut(); setErr("Your sign-in isn't linked to a staff record. Please contact your administrator."); return; }
     if ((su.status||"active") === "leaver") { setSigningIn(false); await signOut(); setErr("This account is no longer active. Please contact your administrator."); return; }
     if (loadAllRef.current) await loadAllRef.current();
+    try { setBuiltInModules(await loadBuiltInModules()); } catch { /* shown as missing; the stale-page check reloads if a release replaced the file */ }
     setSigningIn(false);
     setMustChangePw(!!m.must_change_password);
     finishLogin(su);

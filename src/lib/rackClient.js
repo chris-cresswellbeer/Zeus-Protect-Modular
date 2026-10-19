@@ -20,6 +20,9 @@ import React from "react";
 import { sb, bearer } from "./supabase";
 import { RACKING_SETTINGS_ID, normaliseRackingSettings } from "./racking";
 import { compressToDataUrl, PHOTO_BUCKET } from "./photos";
+import { createChangeTracker } from "./changes";
+
+const tracker = createChangeTracker();   // only re-read racking tables that changed (lib/changes.js)
 
 let state = { settings: normaliseRackingSettings(null), locations: [], damage: [], checks: [], loaded: false, missing: false };
 let pending = null;
@@ -41,17 +44,19 @@ export async function loadRacking({ fresh = false, checks = false } = {}) {
   if (state.loaded && !fresh) return state;
   if (pending) return pending;
   pending = (async () => {
+    const tr = await tracker.check(["racking_locations", "racking_damage", ...(checks ? ["racking_checks"] : [])]);
+    const read = (t, q) => (tr.has(t) ? all(t, q).then(r => { if (!r.error) tr.mark(t); return r; }) : Promise.resolve({ unchanged: true }));
     const [s, l, d, c] = await Promise.all([
       sb.from("app_settings").select("*").eq("id", RACKING_SETTINGS_ID),
-      all("racking_locations", "select=*&order=aisle.asc,bay.asc"),
-      all("racking_damage", "select=*&order=created_at.desc"),
-      checks ? all("racking_checks", "select=*&order=created_at.desc") : Promise.resolve({ data: state.checks }),
+      read("racking_locations", "select=*&order=aisle.asc,bay.asc"),
+      read("racking_damage", "select=*&order=created_at.desc"),
+      checks ? read("racking_checks", "select=*&order=created_at.desc") : Promise.resolve({ unchanged: true }),
     ]);
     state.settings = normaliseRackingSettings(s && !s.error && s.data && s.data[0] ? s.data[0].data : null);
     state.missing = !!(l.error || d.error);
-    if (!l.error) state.locations = l.data.map(x => ({ ...x, data: x.data || {} }));
-    if (!d.error) state.damage = d.data.map(x => ({ ...x, data: x.data || {} }));
-    if (!c.error) state.checks = (c.data || []).map(x => ({ ...x, data: x.data || {} }));
+    if (!l.error && !l.unchanged) state.locations = l.data.map(x => ({ ...x, data: x.data || {} }));
+    if (!d.error && !d.unchanged) state.damage = d.data.map(x => ({ ...x, data: x.data || {} }));
+    if (!c.error && !c.unchanged) state.checks = (c.data || []).map(x => ({ ...x, data: x.data || {} }));
     state.loaded = true; pending = null; emit();
     return state;
   })();

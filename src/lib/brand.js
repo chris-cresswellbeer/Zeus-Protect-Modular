@@ -16,7 +16,6 @@ import React from "react";
 import { sb, SUPABASE_URL, SUPABASE_ANON } from "./supabase";
 import { getBrand, setBrand, onBrand, normaliseBrand } from "./brandCore";
 import { applyBrandColours } from "../theme/tokens";
-import { AUTH_MODE } from "./auth";
 
 const KEY = "zp_brand_v1";
 const ROW = "brand";
@@ -42,15 +41,6 @@ export async function loadBrand() {
       headers: { apikey: SUPABASE_ANON, Authorization: `Bearer ${SUPABASE_ANON}`, "Content-Type": "application/json" }, body: "{}" });
     if (res.ok) { const j = await res.json(); if (j && typeof j === "object" && !Array.isArray(j)) { data = j; found = true; } else if (j === null) found = true; }
   } catch { /* offline: keep what we have */ }
-  // the function isn't there (the old sign-in, or a project without db_rules.sql/branding.sql):
-  // read the table — only with the old sign-in, where the table is open (with the new sign-in
-  // the database rules would refuse it anyway)
-  if (!found && AUTH_MODE !== "supabase") {
-    try {
-      const r = await sb.from("app_settings").select("*").eq("id", ROW);
-      if (!r.error && Array.isArray(r.data)) { data = r.data[0] ? r.data[0].data : null; found = true; }
-    } catch { /* keep */ }
-  }
   if (found) { setBrand(data || null); remember(data || null); }
   return getBrand();
 }

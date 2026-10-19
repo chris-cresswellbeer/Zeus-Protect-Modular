@@ -192,8 +192,8 @@ async function toStoredPhotos(photos, incidentId) {
   return out;
 }
 
-// Supabase Storage bucket for all captured photos. Public with the old sign-in; private
-// with the new one (links are swapped for signed links on screen — lib/fileAccess.js).
+// Supabase Storage bucket for all captured photos. Private: links are swapped for
+// signed links on screen (lib/fileAccess.js).
 // Renaming it here without migrating files will break existing photo links.
 const PHOTO_BUCKET = "incident-photos";
 

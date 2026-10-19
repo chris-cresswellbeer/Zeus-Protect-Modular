@@ -1,8 +1,8 @@
 /**
  * ═══════════════════════════════════════════════════════════════════════════
- * fileAccess.js — private files (new sign-in only, VITE_AUTH_MODE=supabase)
+ * fileAccess.js — private files: short-lived signed links
  * ═══════════════════════════════════════════════════════════════════════════
- * With the new sign-in, the "documents", "fire-safety" and "incident-photos"
+ * The "documents", "fire-safety" and "incident-photos"
  * buckets are PRIVATE: their old ".../object/public/..." links no longer open
  * for anyone. A signed-in person gets a short-lived SIGNED link instead, and
  * only for files the database rules let them read (db_rules.sql, section 4).
@@ -24,24 +24,21 @@
  *                        are copied INTO the file (so they still show later,
  *                        offline); other private links become signed links.
  *
- * With the old sign-in (legacy) all of these do nothing — buckets are public.
  * Only links to THIS project's storage are touched, so the staging copy's links
  * to live files are left alone.
  * ═══════════════════════════════════════════════════════════════════════════
  */
 import React from "react";
 import { SUPABASE_URL, SUPABASE_ANON, bearer } from "./supabase";
-import { AUTH_MODE } from "./auth";
 
 export const PRIVATE_BUCKETS = ["documents", "fire-safety", "incident-photos"];
-const ON = AUTH_MODE === "supabase";
 const PUBLIC_PREFIX = `${SUPABASE_URL}/storage/v1/object/public/`;
 const LIFETIME = 3600;                 // seconds a signed link works for
 const REUSE_MS = (LIFETIME - 600) * 1000;   // re-sign when less than 10 minutes left
 
 /** {bucket, path} for a link to one of our private files, otherwise null. */
 export function parsePrivateUrl(u) {
-  if (!ON || typeof u !== "string" || !u.startsWith(PUBLIC_PREFIX)) return null;
+  if (typeof u !== "string" || !u.startsWith(PUBLIC_PREFIX)) return null;
   const rest = u.slice(PUBLIC_PREFIX.length).split(/[?#]/)[0];
   const slash = rest.indexOf("/");
   if (slash < 1) return null;
@@ -151,7 +148,7 @@ function scan(root) {
 
 let started = false;
 export function startPrivateFiles() {
-  if (!ON || started || typeof document === "undefined") return;
+  if (started || typeof document === "undefined") return;
   started = true;
 
   // React sets src/href (as an attribute or a property). Catch private links there, BEFORE the
@@ -219,7 +216,7 @@ const blobToDataUrl = b => new Promise((ok, bad) => { const r = new FileReader()
 
 /** Copy private images into an HTML string (as data URLs); sign other private links. */
 export async function embedFiles(html) {
-  if (!ON || typeof html !== "string") return html;
+  if (typeof html !== "string") return html;
   const esc = PUBLIC_PREFIX.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
   const found = [...new Set(html.match(new RegExp(`${esc}[^"'\\s<>)]+`, "g")) || [])].filter(isPrivateUrl);
   const swaps = await Promise.all(found.map(async u => {

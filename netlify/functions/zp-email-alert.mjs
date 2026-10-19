@@ -11,8 +11,7 @@
  * every alert goes once (email_keys + a fixed Resend Idempotency-Key), so the worst an
  * unwanted call can do is make it check again. Still:
  *   • it only answers requests for our own site's address
- *   • with the individual sign-ins (VITE_AUTH_MODE=supabase in Netlify) the caller must be
- *     signed in; before the changeover there are no sign-ins to check, so it doesn't ask
+ *   • the caller must be signed in (their token is checked with Supabase Auth)
  *
  * Works on staging too (test mode: everything goes to EMAIL_TEST_TO), and the 15-minute
  * job (zp-email-run) catches anything missed on the live site.
@@ -38,7 +37,7 @@ export const handler = async (event) => {
   if (event.httpMethod !== "POST") return reply(405, { ok: false });
   const site = siteOf(event);
   if (!site.ours) return reply(403, { ok: false });
-  if (String(process.env.VITE_AUTH_MODE || "").trim().toLowerCase() === "supabase" && !(await signedIn(event))) return reply(401, { ok: false });
+  if (!(await signedIn(event))) return reply(401, { ok: false });
   try {
     const r = await runEmailJob({ mode: "incident", portalUrl: site.portalUrl, forceTest: !site.isLive });
     if (r.sent || !r.ok) console.log(`[zp-email-alert] ${r.message || ""}`);

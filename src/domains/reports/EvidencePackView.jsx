@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { E } from "../../lib/emoji";
 import { brandLightLogo } from "../../shared/Logo";
 import { brandCompany } from "../../lib/brandCore";
@@ -6,6 +6,9 @@ import { todayISO } from "../../lib/dates";
 import { getSiteLists } from "../../lib/siteLists";
 import { buildEvidencePack, renderEvidencePackHtml } from "./evidencePack";
 import { openMonthlyReport } from "./monthlyReport";
+import { loadPpeIssues, loadPpeSettings } from "../../lib/ppeClient";
+import { loadLoneSessionsBetween, loadLoneSettings } from "../../lib/loneClient";
+import { loadRacking } from "../../lib/rackClient";
 
 /**
  * EvidencePackView — Reports → "Evidence Pack".
@@ -14,7 +17,10 @@ import { openMonthlyReport } from "./monthlyReport";
  * browser saves as a PDF. Summary figures only: no names, no injury details, so it can
  * go to customers, insurers and auditors.
  *
- * data = everything the pack reads (App.jsx passes it through ReportsTab).
+ * data = everything the pack reads (App.jsx passes it through ReportsTab). PPE, lone
+ * working and racking keep their own stores (lib/*Client.js), so they're read here, fresh,
+ * when the view opens (lone working again when the period changes). A part that can't be
+ * read (table not there yet) is simply left out of the pack.
  */
 const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 function presets(today) {
@@ -37,16 +43,42 @@ export function EvidencePackView({ data, userName, Z, font }) {
   const [incList, setIncList] = useState(true);
   const [blocked, setBlocked] = useState(false);
   const ok = /^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to) && from <= to;
+  // PPE, lone working and racking: read once when the view opens
+  const [extra, setExtra] = useState(null);
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      const safe = p => p.then(v => v, () => null);
+      const [ppeIssues, ppeSettings, loneSettings, rk] = await Promise.all([
+        safe(loadPpeIssues({ fresh: true })), safe(loadPpeSettings()), safe(loadLoneSettings()), safe(loadRacking({ fresh: true, checks: true })),
+      ]);
+      if (!live) return;
+      setExtra({ ppeIssues: Array.isArray(ppeIssues) ? ppeIssues : null, ppeSettings, loneSettings,
+        racking: rk && !rk.missing ? { settings: rk.settings, locations: rk.locations, damage: rk.damage, checks: rk.checks } : null });
+    })();
+    return () => { live = false; };
+  }, []);
+  // lone working sessions for the chosen period (only sessions in the period are read)
+  const [lone, setLone] = useState(null);
+  useEffect(() => {
+    if (!ok) return undefined;
+    let live = true;
+    const t = setTimeout(() => { loadLoneSessionsBetween(from, to).then(r => { if (live) setLone({ from, to, rows: r }); }, () => { if (live) setLone({ from, to, rows: null }); }); }, 250);
+    return () => { live = false; clearTimeout(t); };
+  }, [from, to, ok]);
+  const loneReady = !!lone && lone.from === from && lone.to === to;
+  const ready = !!extra && loneReady;
 
   const pack = useMemo(() => {
     if (!ok) return null;
     const lists = getSiteLists() || {};
-    return buildEvidencePack({ ...data, zones: lists.firstAidZones || [], shifts: lists.firstAidShifts || [], companyName: brandCompany(), today },
+    return buildEvidencePack({ ...data, ...(extra || {}), loneSessions: loneReady ? lone.rows : null,
+        zones: lists.firstAidZones || [], shifts: lists.firstAidShifts || [], companyName: brandCompany(), today },
       { from, to, preparedBy: preparedBy.trim(), preparedFor: preparedFor.trim(), includeIncidentList: incList });
-  }, [data, from, to, preparedBy, preparedFor, incList, ok, today]);
+  }, [data, extra, lone, loneReady, from, to, preparedBy, preparedFor, incList, ok, today]);
 
   function generate() {
-    if (!pack) return;
+    if (!pack || !ready) return;
     const html = renderEvidencePackHtml(pack, { logoSrc: brandLightLogo() });
     setBlocked(!openMonthlyReport(html, `HS_Evidence_Pack_${from}_to_${to}.html`));
   }
@@ -65,7 +97,7 @@ export function EvidencePackView({ data, userName, Z, font }) {
       <div style={{ background: Z.overlay, border: `1px solid ${Z.borderMd}`, borderRadius: 14, padding: "18px 20px", marginBottom: 16 }}>
         <div style={{ fontSize: 16, fontWeight: 800, color: Z.white }}>{E("📦 ", "")}H&amp;S audit evidence pack</div>
         <div style={{ fontSize: 12.5, color: Z.muted, marginTop: 3, lineHeight: 1.5, maxWidth: 760 }}>
-          One document for customer supplier audits, insurers, BRCGS or ISO auditors and contractor schemes such as CHAS. Any period, set out under ISO 45001 headings: policy and documents, risk assessment and COSHH, training and competence, permits, equipment and contractors, fire and first aid, incidents, inspections and corrective actions. <b>Summary figures only:</b> it names no staff, contractors or injured people.
+          One document for customer supplier audits, insurers, BRCGS or ISO auditors and contractor schemes such as CHAS. Any period, set out under ISO 45001 headings: policy and documents, risk assessment and COSHH, training and competence, permits, equipment, contractors, PPE and lone working, fire and first aid, incidents, inspections and racking, and corrective actions. <b>Summary figures only:</b> it names no staff, contractors or injured people.
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14 }}>
           {pre.map(p => <button key={p.id} type="button" style={chip(from === p.from && to === p.to)} onClick={() => { setFrom(p.from); setTo(p.to); }} data-testid={`ep-preset-${p.id}`}>{p.label}</button>)}
@@ -81,9 +113,9 @@ export function EvidencePackView({ data, userName, Z, font }) {
           Include a list of incidents (date, type, location, RIDDOR and status only: no descriptions or names)
         </label>
         <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: 14 }}>
-          <button type="button" onClick={generate} disabled={!ok} data-testid="ep-generate"
-            style={{ background: `linear-gradient(135deg,${Z.accent},${Z.blue})`, color: "#fff", border: "none", borderRadius: 10, padding: "10px 20px", fontWeight: 800, cursor: ok ? "pointer" : "default", fontFamily: font, fontSize: 13, opacity: ok ? 1 : .5 }}>
-            {E("📄 ", "")}Generate evidence pack (PDF)
+          <button type="button" onClick={generate} disabled={!ok || !ready} data-testid="ep-generate"
+            style={{ background: `linear-gradient(135deg,${Z.accent},${Z.blue})`, color: "#fff", border: "none", borderRadius: 10, padding: "10px 20px", fontWeight: 800, cursor: ok && ready ? "pointer" : "default", fontFamily: font, fontSize: 13, opacity: ok && ready ? 1 : .5 }}>
+            {E("📄 ", "")}{ok && !ready ? "Reading PPE, lone working and racking…" : "Generate evidence pack (PDF)"}
           </button>
           {!ok && <span role="alert" style={{ fontSize: 12, color: Z.amber, fontWeight: 700 }}>Choose a start date on or before the end date.</span>}
         </div>

@@ -2,8 +2,7 @@
  * netlify/functions/zp-racking.mjs — send red racking alerts now.
  * Called by the portal / phone straight after a red damage report (or a rating changed to
  * red). Takes no input: the database decides what's due, and each alert goes once.
- * Only answers our own site's address, and with the individual sign-ins the caller must
- * be signed in. The 2-minute zp-lone-run job does the same as a back-up.
+ * Only answers our own site's address, and the caller must be signed in. The 2-minute zp-lone-run job does the same as a back-up.
  */
 import { cfg, siteOf } from "../shared/emailJob.mjs";
 import { runRackingJob } from "../shared/rackingJob.mjs";
@@ -26,7 +25,7 @@ export const handler = async (event) => {
   if (event.httpMethod !== "POST") return reply(405, { ok: false });
   const site = siteOf(event);
   if (!site.ours) return reply(403, { ok: false });
-  if (String(process.env.VITE_AUTH_MODE || "").trim().toLowerCase() === "supabase" && !(await signedIn(event))) return reply(401, { ok: false });
+  if (!(await signedIn(event))) return reply(401, { ok: false });
   try {
     const r = await runRackingJob({ portalUrl: site.portalUrl, forceTest: !site.isLive });
     if (r.alerted || !r.ok) console.log(`[zp-racking] ${r.alerted || 0} alerted, ${r.emailed || 0} emailed ${r.message || ""}`);

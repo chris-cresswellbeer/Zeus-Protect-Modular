@@ -28,9 +28,8 @@ import { startBrand } from "./lib/brand";
 import { watchStaleBuild } from "./lib/staleBuild";
 import { UpdateBar } from "./shared/UpdateBar";
 
-// New sign-in only: swap links to private files (documents, fire safety,
-// incident photos) for short-lived signed links as they appear on screen.
-// Does nothing with the old sign-in. See lib/fileAccess.js.
+// Swap links to private files (documents, fire safety, incident photos) for
+// short-lived signed links as they appear on screen. See lib/fileAccess.js.
 startPrivateFiles();
 
 // Offline copy of the portal for phones (public/sw.js): opens with no signal, keeps

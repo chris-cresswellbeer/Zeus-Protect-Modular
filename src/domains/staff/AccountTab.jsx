@@ -2,7 +2,6 @@ import React, { useState } from "react";
 import { useWindowWidth } from "../../shared/hooks";
 import { Avatar } from "../../shared/primitives";
 import ThemePicker from "../../shared/ThemePicker";
-import { hashPassword, DEFAULT_HASH } from "../../lib/supabase";
 import { isSuperAdmin } from "../../lib/brandCore";
 
 /**
@@ -12,14 +11,13 @@ import { isSuperAdmin } from "../../lib/brandCore";
  * emoji on/off. Preferences are saved via onSaveTheme / onSaveEmojiMode
  * (→ user_profiles in App.jsx).
  *
- * Password change: verifies the current password (hash OR legacy plain text), enforces
- * ≥6 chars, then saves the new SHA-256 hash for this user only via onSetPassword
- * (App.jsx savePasswordFor → user_passwords).
- * Strength meter is length-only: <6 too short, 6–7 weak, 8–11 good, 12+ strong.
+ * Password change: through Supabase Auth (onChangeOwnPassword → lib/auth.js), which
+ * checks the current password and stores the new one; at least 8 characters.
+ * Strength meter is length-only: <8 too short, 8–11 good, 12+ strong.
  */
 import { t } from "../../lib/i18n";
 import { LanguageChooser } from "../../shared/LanguageBits";
-function AccountTab({ user, passwords, onSetPassword, authMode, onChangeOwnPassword, darkMode, setDarkMode, theme, setTheme, onSaveTheme, emojiMode, onSaveEmojiMode, language, onChangeLanguage, Z, font }) {
+function AccountTab({ user, onChangeOwnPassword, darkMode, setDarkMode, theme, setTheme, onSaveTheme, emojiMode, onSaveEmojiMode, language, onChangeLanguage, Z, font }) {
   const isMobile = useWindowWidth() <= 1024;
   const [oldPw,    setOldPw]    = useState("");
   const [newPw,    setNewPw]    = useState("");
@@ -29,34 +27,17 @@ function AccountTab({ user, passwords, onSetPassword, authMode, onChangeOwnPassw
   const [showNew,  setShowNew]  = useState(false);
   const [showConf, setShowConf] = useState(false);
 
-  const currentPassword = passwords[user.id] || DEFAULT_HASH;
-  const strength = newPw.length >= 12 ? 3 : newPw.length >= 8 ? 2 : newPw.length >= 6 ? 1 : 0;
+  const strength = newPw.length >= 12 ? 3 : newPw.length >= 8 ? 2 : 0;
   const strengthLabels = ["Too short","Weak","Good","Strong"];
   const strengthColors = ["#ef4444","#f59e0b",Z.accentLt,Z.green];
 
   const changePassword = async () => {
-    // Supabase sign-in mode: Supabase checks the current password and stores the new one.
-    if (authMode === "supabase" && onChangeOwnPassword) {
-      if (newPw.length < 8) { setPwMsg({type:"error", text:"New password must be at least 8 characters."}); return; }
-      if (newPw !== confirmPw) { setPwMsg({type:"error", text:"New passwords do not match."}); return; }
-      if (newPw === oldPw) { setPwMsg({type:"error", text:"New password must differ from your current password."}); return; }
-      const r = await onChangeOwnPassword(oldPw, newPw);
-      if (!r.ok) { setPwMsg({type:"error", text:r.error || "Couldn't change your password."}); return; }
-      setOldPw(""); setNewPw(""); setConfirmPw("");
-      setPwMsg({type:"success", text:"Password changed successfully."});
-      return;
-    }
-    const oldHash = await hashPassword(oldPw);
-    // Support both plain-text (legacy) and hashed comparison
-    if (oldHash !== currentPassword && oldPw !== currentPassword) {
-      setPwMsg({type:"error", text:"Current password is incorrect."}); return;
-    }
-    if (newPw.length < 6) { setPwMsg({type:"error", text:"New password must be at least 6 characters."}); return; }
+    // Supabase checks the current password and stores the new one.
+    if (newPw.length < 8) { setPwMsg({type:"error", text:"New password must be at least 8 characters."}); return; }
     if (newPw !== confirmPw) { setPwMsg({type:"error", text:"New passwords do not match."}); return; }
     if (newPw === oldPw) { setPwMsg({type:"error", text:"New password must differ from your current password."}); return; }
-    const newHash = await hashPassword(newPw);
-    // Saves this user's password only (App.jsx savePasswordFor).
-    await onSetPassword(user.id, newHash);
+    const r = await onChangeOwnPassword(oldPw, newPw);
+    if (!r.ok) { setPwMsg({type:"error", text:r.error || "Couldn't change your password."}); return; }
     setOldPw(""); setNewPw(""); setConfirmPw("");
     setPwMsg({type:"success", text:"Password changed successfully."});
   };

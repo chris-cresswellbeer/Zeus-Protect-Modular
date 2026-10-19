@@ -157,7 +157,7 @@ function MobileApp({
   const loneSessions = useLoneSessions(loneSettings.enabled, { every: 20000 });
   const myLone = loneSessions.find((r) => String(r.user_id) === String(user.id) && LONE_OPEN.includes(r.status)) || null;
   // the database rules already limit this to the team (managers) or everyone (admins); the
-  // same check here keeps the old sign-in (no database rules) from showing staff other people's
+  // same check here is a second line of defence against showing staff other people's
   const norm = (x) => String(x || "").toLowerCase().replace(/\s+/g, " ").trim();
   const myTeam = (r) => isAdmin || (user.role === "manager" && allUsers.some((u) => String(u.id) === String(r.user_id) && norm(u.manager) === norm(user.name)));
   const otherAlarms = loneSessions.filter((r) => String(r.user_id) !== String(user.id) && LONE_ALARM.includes(r.status) && myTeam(r));

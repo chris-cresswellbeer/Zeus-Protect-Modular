@@ -2,15 +2,10 @@
  * ═══════════════════════════════════════════════════════════════════════════
  * lib/auth.js — sign-in with Supabase Auth, and admin account management
  * ═══════════════════════════════════════════════════════════════════════════
- * TWO MODES, chosen per Netlify site with the environment variable VITE_AUTH_MODE:
- *
- *   "legacy"   (default) – the original sign-in: passwords are SHA-256 hashes in the
- *                          user_passwords table, checked in the browser. The live
- *                          portal stays in this mode until changeover day.
- *   "supabase"           – real sign-in through Supabase Auth. The password is checked
- *                          by Supabase, which returns a signed token; every database
- *                          request then carries that token (lib/supabase.js), so the
- *                          database knows who is asking.
+ * Sign-in is through Supabase Auth: the password is checked by Supabase, which returns
+ * a signed token; every database request then carries that token (lib/supabase.js), so
+ * the database knows who is asking and its rules (database/rules/db_rules.sql) apply.
+ * (The original browser-checked passwords, "legacy" mode, were removed in Oct 2026.)
  *
  * HOW A SIGN-IN ACCOUNT IS LINKED TO A STAFF RECORD
  *   Each Supabase Auth user carries app_metadata (only the server can set it):
@@ -26,8 +21,6 @@
  */
 import { SUPABASE_URL, SUPABASE_ANON, setAccessToken } from "./supabase";
 
-const ENV = (typeof import.meta !== "undefined" && import.meta.env) || {};
-const AUTH_MODE = ENV.VITE_AUTH_MODE === "supabase" ? "supabase" : "legacy";
 const ADMIN_FN = "/.netlify/functions/zp-admin";
 const EMAIL_FN = "/.netlify/functions/zp-email";   // email reminders (netlify/functions/zp-email.mjs)
 const TRANSLATE_FN = "/.netlify/functions/zp-translate";   // module translation (netlify/functions/zp-translate.mjs)
@@ -147,4 +140,4 @@ function makeTempPassword() {
   return `${pick(4)}-${pick(4)}-${pick(4)}`;
 }
 
-export { AUTH_MODE, signIn, signOut, checkPassword, changeOwnPassword, currentAuthUser, meta, adminCall, emailCall, translateCall, makeTempPassword };
+export { signIn, signOut, checkPassword, changeOwnPassword, currentAuthUser, meta, adminCall, emailCall, translateCall, makeTempPassword };

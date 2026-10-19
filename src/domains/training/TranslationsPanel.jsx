@@ -16,7 +16,7 @@
  */
 import React from "react";
 import { LANGUAGES } from "../../lib/i18n";
-import { translateCall, AUTH_MODE } from "../../lib/auth";
+import { translateCall } from "../../lib/auth";
 import { moduleTexts, flattenTexts, rebuildTexts, sourceHash, translationState, translationKey } from "../../lib/moduleTranslate";
 import { sanitizeHtml } from "../../lib/sanitizeHtml";
 import { isHtmlContent } from "./slideTextUtils";
@@ -54,14 +54,11 @@ export function TranslationsPanel({ m: given, allModules = [], translations = {}
   const [status, setStatus] = React.useState(null);    // translation service status
   const [compare, setCompare] = React.useState(null);  // lang being compared
   const [showAll, setShowAll] = React.useState(false); // languages nobody uses, folded away
-  const supa = AUTH_MODE === "supabase";
-
   React.useEffect(() => {
-    if (!supa) return;
     let on = true;
     translateCall("status").then(r => { if (on) setStatus(r); });
     return () => { on = false; };
-  }, [supa]);
+  }, []);
 
   const rowOf = lang => translations[translationKey(m.id, lang)];
   const stateOf = lang => translationState(m, rowOf(lang));
@@ -118,12 +115,11 @@ export function TranslationsPanel({ m: given, allModules = [], translations = {}
         The English stays the official version. Machine translations should be read by a bilingual member of staff
         and marked as checked — safety wording matters.
       </p>
-      {!supa && <Note T={T} col="#f59e0b">Translation needs the new sign-in (Supabase sign-in mode).</Note>}
-      {supa && status && !status.ok && <Note T={T} col="#ef4444">{status.error}</Note>}
-      {supa && status && status.ok && !status.configured && (
+      {status && !status.ok && <Note T={T} col="#ef4444">{status.error}</Note>}
+      {status && status.ok && !status.configured && (
         <Note T={T} col="#f59e0b">Translation isn't set up yet. Add <b>DEEPL_API_KEY</b> in Netlify (Site configuration → Environment variables), then redeploy. See INSTALL.txt.</Note>
       )}
-      {supa && status && status.ok && status.configured && status.limit > 0 && (
+      {status && status.ok && status.configured && status.limit > 0 && (
         <div style={{ fontSize: 11.5, color: T.muted, marginBottom: 12 }} data-testid="deepl-usage">
           DeepL ({status.plan}): {Number(status.used).toLocaleString("en-GB")} of {Number(status.limit).toLocaleString("en-GB")} characters used this month.
         </div>
@@ -147,7 +143,7 @@ export function TranslationsPanel({ m: given, allModules = [], translations = {}
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                 {row && <button style={btn(false)} disabled={!!busy} onClick={() => setCompare(l.code)}>Compare</button>}
                 {st === "machine" && <button style={btn(false)} disabled={!!busy} onClick={() => markChecked(l.code)} data-testid={`check-${l.code}`}>✓ Mark as checked</button>}
-                <button style={btn(st === "none" || st === "stale")} disabled={!!busy || !supa} onClick={() => run(l.code)} data-testid={`translate-${l.code}`}>
+                <button style={btn(st === "none" || st === "stale")} disabled={!!busy} onClick={() => run(l.code)} data-testid={`translate-${l.code}`}>
                   {busy === l.code ? "Translating…" : st === "none" ? "Translate" : "Translate again"}
                 </button>
                 {row && <button style={btn(false, true)} disabled={!!busy} onClick={() => remove(l.code)}>Remove</button>}
@@ -162,12 +158,12 @@ export function TranslationsPanel({ m: given, allModules = [], translations = {}
           {showAll ? "▾ Hide languages nobody uses" : `▸ ${folded.length} more languages nobody uses yet`}
         </button>
       )}
-      {needAll > 1 && supa && (
+      {needAll > 1 && (
         <button style={{ ...btn(true), marginTop: 12 }} disabled={!!busy} onClick={runAll} data-testid="translate-all">
           Translate into all {needAll} languages in use that need it
         </button>
       )}
-      <BulkTranslate allModules={allModules} translations={translations} onSave={onSave} supa={supa} inUse={inUse} T={T} font={font} btn={btn} />
+      <BulkTranslate allModules={allModules} translations={translations} onSave={onSave} inUse={inUse} T={T} font={font} btn={btn} />
     </div>
   );
 }
@@ -179,7 +175,7 @@ function Note({ T, col, children }) {
 }
 
 /** Every module at once: translate whatever is missing or out of date, in every language staff use. */
-function BulkTranslate({ allModules, translations, onSave, supa, inUse, T, font, btn }) {
+function BulkTranslate({ allModules, translations, onSave, inUse, T, font, btn }) {
   const [prog, setProg] = React.useState(null);   // { done, total, failed }
   const visible = allModules.filter(x => !x._hidden);
   const jobs = [];
@@ -187,7 +183,7 @@ function BulkTranslate({ allModules, translations, onSave, supa, inUse, T, font,
     const st = translationState(mod, translations[translationKey(mod.id, l.code)]);
     if (st === "none" || st === "stale") jobs.push({ mod, lang: l.code });
   }));
-  if (!supa || (!jobs.length && !prog)) return null;
+  if (!jobs.length && !prog) return null;
   async function go() {
     if (!(await ask({ title: "Translate all training?", message: `${jobs.length} translation${jobs.length !== 1 ? "s" : ""} (modules × languages) are missing or out of date. They'll be machine translated now and marked "not yet checked". This can take a few minutes.`, ok: "Translate all" }))) return;
     let done = 0, failed = 0;

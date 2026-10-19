@@ -3,8 +3,7 @@
  * Called by the phone straight after "I need help", and by the portal's Lone working
  * screen while it's open (so staging, which has no schedule, works too). Takes no input:
  * the database decides what's due, and each alert goes once (idempotency keys).
- * Only answers our own site's address, and with the individual sign-ins the caller must
- * be signed in.
+ * Only answers our own site's address, and the caller must be signed in.
  */
 import { cfg, siteOf } from "../shared/emailJob.mjs";
 import { runLoneJob } from "../shared/loneJob.mjs";
@@ -27,7 +26,7 @@ export const handler = async (event) => {
   if (event.httpMethod !== "POST") return reply(405, { ok: false });
   const site = siteOf(event);
   if (!site.ours) return reply(403, { ok: false });
-  if (String(process.env.VITE_AUTH_MODE || "").trim().toLowerCase() === "supabase" && !(await signedIn(event))) return reply(401, { ok: false });
+  if (!(await signedIn(event))) return reply(401, { ok: false });
   try {
     const r = await runLoneJob({ portalUrl: site.portalUrl, forceTest: !site.isLive });
     if (r.changed || !r.ok) console.log(`[zp-lone] ${r.changed || 0} changed, ${r.emailed || 0} emailed ${r.message || ""}`);

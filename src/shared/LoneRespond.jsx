@@ -71,7 +71,7 @@ export function LoneRespond({ row, people = [], byName, onDone, onCancel, Z, fon
 /** Desktop: red bar for open alerts, and the respond window. focusId: from an alert email's link. */
 export function LoneAlertBar({ sessions, people, me, focusId, onFocusDone, Z, font }) {
   const norm = x => String(x || "").toLowerCase().replace(/\s+/g, " ").trim();
-  // admins: everyone; line managers: their team (the database rules do this too; this covers the old sign-in)
+  // admins: everyone; line managers: their team (the database rules do this too)
   const mine = r => me.role === "admin" || (people || []).some(u => String(u.id) === String(r.user_id) && norm(u.manager) === norm(me.name));
   const alarms = (sessions || []).filter(r => LONE_ALARM.includes(r.status) && String(r.user_id) !== String(me.id) && mine(r));
   const [openId, setOpenId] = React.useState(null);

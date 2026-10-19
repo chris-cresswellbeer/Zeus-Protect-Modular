@@ -12,6 +12,8 @@
  *   useLoneSessions(enabled, opts)   React: open sessions + the last 30 days (whatever this
  *                                    person may see), refreshed every 30 seconds
  *   loadLoneSessions({ fresh })
+ *   loadLoneSessionsBetween(from, to) every session started between two dates (YYYY-MM-DD),
+ *                                    for the evidence pack; doesn't touch the shared copy
  *   freshLoneSession(id)             the latest copy of one session
  *   saveLoneSession(row, {isNew})    insert a new session / update an existing one
  *   pingLone()                       ask the server to check now (after "I need help", and
@@ -61,6 +63,19 @@ export async function loadLoneSessions({ fresh = false } = {}) {
     return rows;
   })();
   return pending;
+}
+
+/** Sessions started between two dates (inclusive), for reports. null if the table can't be read. */
+export async function loadLoneSessionsBetween(from, to) {
+  const out = [];
+  const start = encodeURIComponent(`${from}T00:00:00Z`), end = encodeURIComponent(`${to}T23:59:59Z`);
+  for (let offset = 0; offset < 50000; offset += 1000) {
+    const r = await sb.from("lone_working").query(`select=*&created_at=gte.${start}&created_at=lte.${end}&order=created_at.asc&limit=1000&offset=${offset}`);
+    if (!r || r.error || !Array.isArray(r.data)) return null;
+    out.push(...r.data.map(x => ({ ...x, data: x.data || {} })));
+    if (r.data.length < 1000) break;
+  }
+  return out;
 }
 
 /** every: also ask the server to run its check (admin screen open → staging works too). */

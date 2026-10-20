@@ -24,8 +24,13 @@ export const passMarkOf = m => { const n = Number(m && m.passMark); return n >= 
  */
 export const isPassed = (c, m) => !!c && (!!c.recorded || !!c.certId || Number(c.score) >= passMarkOf(m));
 
-/** "85%" for a quiz result, "Recorded" for a recorded completion. */
-export const scoreText = c => !c ? "—" : c.recorded ? "Recorded" : `${c.score}%`;
+/** A signed declaration with no quiz (quizEngine.js attemptRecord with no questions). Kept here,
+ *  not in quizEngine.js, so the main bundle doesn't need the quiz engine. */
+export const isSignOnly = c => !!(c && c.answers && c.answers.v === 2 && !c.answers.drawn && c.answers.signoff);
+
+/** "85%" for a quiz result, "Recorded" for a recorded completion, "Signed" for a signed
+ *  declaration with no quiz (quizEngine.js isSignOnly). */
+export const scoreText = c => !c ? "—" : c.recorded ? "Recorded" : isSignOnly(c) ? "Signed" : `${c.score}%`;
 
 /** One-line description of who recorded it, for tooltips and detail lines. */
 export const recordedText = c => {

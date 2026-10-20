@@ -8,7 +8,10 @@
  * App.jsx in October 2026 without changing what it shows.
  * ═══════════════════════════════════════════════════════════════════════════
  */
+import { useEffect } from "react";
 import { passMarkOf } from "../../domains/training/completion";
+import { allAnswered, drawQuiz, initialAnswers, markAttempt, quizSettings, speakText } from "../../domains/training/quizEngine";
+import { QuestionView, ReviewCard, SignoffPanel, SlideCheck } from "../../domains/training/QuizBits";
 import { isHtmlContent } from "../../domains/training/slideTextUtils";
 import { todayISO } from "../../lib/dates";
 import { t, tNodes } from "../../lib/i18n";
@@ -25,11 +28,15 @@ import { CertificateModal, HotspotActivity } from "../lazyParts";
 //   0 = intro card, 1..totalSlides = content slides, quizStep (= totalSlides+1) = quiz.
 // Slides may contain: heading, images[] (or legacy single `image`), video, text
 // (plain text or sanitised HTML), and hotspots (click-the-hazard activity).
-// Hotspot slides block "Next" until HotspotActivity reports completion.
+// Hotspot slides block "Next" until HotspotActivity reports completion, and a slide with a
+// knowledge check (slide.check) until it has been answered right (QuizBits.jsx SlideCheck).
+// The quiz step shows the sign-off declaration first when the module has one (module.signoff);
+// a module with a declaration and no questions is complete once it is signed. The questions
+// asked are drawn for each attempt (qdraw — quizEngine.js drawQuiz: a question bank and/or shuffled).
 export function ModulePlayerScreen() {
   const {
     cert, comps, darkMode, font, hotspotComplete, lightboxSrc, lightboxZoomed, mod, moduleTrans, playEnglish,
-    pmod, qans, qsub, quizStep, setCert, setHotspotComplete, setLightboxSrc, setLightboxZoomed, setMod,
+    pmod, qans, qdraw, qextra, qsub, quizStep, setQdraw, setQextra, setCert, setHotspotComplete, setLightboxSrc, setLightboxZoomed, setMod,
     setPlayEnglish, setQans, setQsub, setShowCelebration, setStep, showCelebration, step, submitQuiz, T,
     totalSlides, user, userLang
   } = useApp();
@@ -43,10 +50,23 @@ export function ModulePlayerScreen() {
   // picture sized to fit the screen height. Hotspot slides keep the normal layout.
   const isDeck  = !!(slide && (slide.images||[])[0] && slide.images[0].deck && !(slide.hotspots&&slide.hotspots.length>0));
 
-  let qScore=0, qPct=0, passed=false;
+  const hasQuiz  = (mod.quiz||[]).length>0;
+  const needSign = !!(mod.signoff && mod.signoff.text);
+  const signed   = !!(qextra && qextra.signoff);
+  const checks   = (qextra && qextra.checks) || {};
+  const draw     = qdraw || [];
+  const signOnly = !hasQuiz && needSign;
+  // A new set of questions each attempt (and "put in order" questions start as shown).
+  useEffect(() => {
+    if (isQuiz && !qsub && !qdraw && hasQuiz) { const d = drawQuiz(mod); setQdraw(d); setQans(initialAnswers(mod, d)); }
+  }, [isQuiz, qsub, qdraw, hasQuiz, mod]); // eslint-disable-line react-hooks/exhaustive-deps
+  const slideCheckDone = slide && slide.check ? checks[step-1] != null : true;
+  const retake = () => { setStep(1); setQans({}); setQsub(false); setQdraw(null); setQextra({ checks: {}, signoff: null }); window.scrollTo({top:0,behavior:"smooth"}); };
+
+  let qScore=0, qPct=0, passed=false, qTotal=0, qItems=[];
   if (qsub) {
-    mod.quiz.forEach((q,i)=>{ if(qans[i]===q.answer) qScore++; });
-    qPct = Math.round(qScore/mod.quiz.length*100);
+    const m = markAttempt(mod, draw, qans);
+    qScore = m.correct; qPct = m.pct; qTotal = m.total; qItems = m.items;
     passed = qPct>=passMarkOf(mod);
   }
 
@@ -139,7 +159,7 @@ export function ModulePlayerScreen() {
               <div style={{fontSize:13,color:"rgba(255,255,255,0.5)",marginBottom:16}}>{t("has successfully completed")}</div>
               <div style={{background:"rgba(245,158,11,0.1)",border:"1px solid rgba(245,158,11,0.3)",borderRadius:10,padding:"12px 20px",marginBottom:20}}>
                 <div style={{fontSize:18,fontWeight:800,color:"#f59e0b"}}>{pmod?.title}</div>
-                <div style={{fontSize:13,color:"rgba(255,255,255,0.5)",marginTop:4}}>{tNodes("Score: {pct}", { pct: <span style={{color:"#10b981",fontWeight:700}}>{qPct}%</span> })}</div>
+                <div style={{fontSize:13,color:"rgba(255,255,255,0.5)",marginTop:4}}>{signOnly ? <span style={{color:"#10b981",fontWeight:700}}>✍ {t("Signed")}</span> : tNodes("Score: {pct}", { pct: <span style={{color:"#10b981",fontWeight:700}}>{qPct}%</span> })}</div>
               </div>
 
               <div style={{display:"flex",gap:10,justifyContent:"center"}}>
@@ -185,10 +205,10 @@ export function ModulePlayerScreen() {
           <div style={{textAlign:"center"}}>
             <div style={{fontSize:72,marginBottom:16}}>{mod.icon}</div>
             <h1 style={{fontSize:32,fontWeight:900,letterSpacing:-1,marginBottom:6}}>{pmod.title}</h1>
-            <p style={{color:T.muted,fontSize:15,marginBottom:28}}>{t(mod.category)} · {t(mod.duration)} · <span style={{color:mod.level==="Mandatory"?"#f87171":T.accentLt}}>{t(mod.level)}</span> · {t("{n} slides", { n: totalSlides })} · {t("{n} quiz questions", { n: mod.quiz.length })}</p>
+            <p style={{color:T.muted,fontSize:15,marginBottom:28}}>{t(mod.category)} · {t(mod.duration)} · <span style={{color:mod.level==="Mandatory"?"#f87171":T.accentLt}}>{t(mod.level)}</span> · {t("{n} slides", { n: totalSlides })}{hasQuiz && <> · {t("{n} quiz questions", { n: quizSettings(mod).draw })}</>}{needSign && <> · ✍ {t("Signed declaration")}</>}</p>
             {translated && <TranslationNote status={pmod._trans.status} Z={T} font={font} style={{marginBottom:16,textAlign:"left"}}/>}
             <div style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:16,padding:28,textAlign:"left",border:`1px solid ${T.border}`}}>
-              <p style={{margin:0,color:T.slate,lineHeight:1.8,fontSize:15}}>{tNodes("Read through each slide carefully, then complete the knowledge check. A score of {pct} is required to pass and receive your certificate.", { pct: <strong style={{color:T.green}}>{t("{n}% or above", { n: passMarkOf(mod) })}</strong> })}</p>
+              <p style={{margin:0,color:T.slate,lineHeight:1.8,fontSize:15}}>{signOnly ? t("Read through each slide carefully, then sign the declaration at the end to complete the module.") : tNodes("Read through each slide carefully, then complete the knowledge check. A score of {pct} is required to pass and receive your certificate.", { pct: <strong style={{color:T.green}}>{t("{n}% or above", { n: passMarkOf(mod) })}</strong> })}</p>
             </div>
             {(()=>{ const p = getProgress(user.id, mod); if (!p) return null; return (
               <div style={{marginTop:28,display:"flex",gap:12,justifyContent:"center",flexWrap:"wrap",alignItems:"center"}} data-testid="resume">
@@ -277,39 +297,49 @@ export function ModulePlayerScreen() {
                   Z={T} font={font}
                 />
               )}
+              {slide.check && (
+                <SlideCheck key={`${step}-${playEnglish?"en":"x"}`} q={slide.check} passed={checks[step-1]!=null}
+                  onPassed={n=>setQextra(e=>({...e,checks:{...(e.checks||{}),[step-1]:n}}))} Z={T} font={font}/>
+              )}
             </div>
             <div style={{display:"flex",justifyContent:"space-between",marginTop:24,gap:12}}>
               <button onClick={()=>{setStep(s=>s-1);window.scrollTo({top:0,behavior:"smooth"});}} disabled={step===1}
                 style={{background:T.headerBgMd,border:`1px solid ${T.borderMd}`,borderRadius:10,padding:"10px 28px",color:T.muted,cursor:"pointer",fontWeight:700,fontFamily:font,opacity:step===1?.4:1}}>← {t("Previous")}</button>
               <button onClick={()=>{setStep(s=>s+1);window.scrollTo({top:0,behavior:"smooth"});}}
-                disabled={slide.hotspots&&slide.hotspots.length>0&&!hotspotComplete[step]}
-                style={{background:`linear-gradient(135deg,${T.accent},${T.blue})`,border:"none",borderRadius:10,padding:"10px 28px",color:T.white,cursor:"pointer",fontWeight:800,fontFamily:font,boxShadow:`0 4px 16px ${T.accent}44`,opacity:(slide.hotspots&&slide.hotspots.length>0&&!hotspotComplete[step])?.4:1}}>
-                {step===totalSlides?t("Take Quiz →"):t("Next Slide →")}
+                disabled={(slide.hotspots&&slide.hotspots.length>0&&!hotspotComplete[step]) || !slideCheckDone} data-testid="next-slide"
+                style={{background:`linear-gradient(135deg,${T.accent},${T.blue})`,border:"none",borderRadius:10,padding:"10px 28px",color:T.white,cursor:"pointer",fontWeight:800,fontFamily:font,boxShadow:`0 4px 16px ${T.accent}44`,opacity:((slide.hotspots&&slide.hotspots.length>0&&!hotspotComplete[step]) || !slideCheckDone)?.4:1}}>
+                {step===totalSlides?(needSign&&!signed?t("Next: the declaration →"):t("Take Quiz →")):t("Next Slide →")}
               </button>
             </div>
           </div>
         )}
 
-        {isQuiz && !qsub && (
+        {isQuiz && !qsub && needSign && !signed && (
+          <div>
+            <h2 style={{fontSize:24,fontWeight:900,marginBottom:4,letterSpacing:-.5}}>{t("Sign the declaration")}</h2>
+            <p style={{color:T.muted,marginBottom:20,fontSize:14}}>{hasQuiz ? t("Sign to confirm, then take the quiz.") : t("Sign to confirm and complete the module.")}</p>
+            <SignoffPanel text={(pmod.signoff||mod.signoff).text} english={mod.signoff.text} userName={user.name}
+              buttonLabel={hasQuiz ? t("Sign and go to the quiz →") : t("Sign and finish")}
+              onSign={s=>{ setQextra(e=>({...e,signoff:s})); if(!hasQuiz) submitQuiz({ signoff: s }); window.scrollTo({top:0,behavior:"smooth"}); }}
+              Z={T} font={font}/>
+          </div>
+        )}
+
+        {isQuiz && !qsub && hasQuiz && (!needSign || signed) && (
           <div>
             <h2 style={{fontSize:24,fontWeight:900,marginBottom:4,letterSpacing:-.5}}>{t("Knowledge Check")}</h2>
-            <p style={{color:T.muted,marginBottom:28,fontSize:14}}>{t("{n} questions · {pct}% needed to pass", { n: pmod.quiz.length, pct: passMarkOf(mod) })}</p>
-            {pmod.quiz.map((q,qi)=>(
-              <div key={qi} style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:16,padding:24,marginBottom:14,border:`1px solid ${T.border}`}}>
-                <div style={{display:"flex",gap:10,alignItems:"flex-start",justifyContent:"space-between",marginBottom:16}}>
-                  <p style={{fontWeight:700,margin:0,fontSize:15}}><span style={{color:T.accentLt}}>Q{qi+1}.</span> {q.q}</p>
-                  <ReadAloud text={[q.q, ...q.options.map((o,oi)=>`${"ABCDEF"[oi]}. ${o}`)].join(". \n")} lang={translated ? userLang : "en"} Z={T} font={font} compact/>
+            <p style={{color:T.muted,marginBottom:28,fontSize:14}}>{t("{n} questions · {pct}% needed to pass", { n: draw.length, pct: passMarkOf(mod) })}</p>
+            {draw.map((d,k)=>{ const q = pmod.quiz[d.qi]; return (
+              <div key={d.qi} data-testid="quiz-q" style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:16,padding:24,marginBottom:14,border:`1px solid ${T.border}`}}>
+                <div style={{display:"flex",gap:10,alignItems:"flex-start",justifyContent:"space-between"}}>
+                  <p style={{fontWeight:700,margin:0,fontSize:15}}><span style={{color:T.accentLt}}>Q{k+1}.</span> {q.q}</p>
+                  <ReadAloud text={speakText(q, d.order)} lang={translated ? userLang : "en"} Z={T} font={font} compact/>
                 </div>
-                {q.options.map((opt,oi)=>(
-                  <div key={oi} onClick={()=>setQans(a=>({...a,[qi]:oi}))}
-                    style={{padding:"11px 16px",borderRadius:10,marginBottom:8,cursor:"pointer",border:`2px solid ${qans[qi]===oi?T.accent:T.border}`,background:qans[qi]===oi?`rgba(37,99,235,0.2)`:"transparent",transition:"all .2s",fontWeight:qans[qi]===oi?700:400,fontSize:14}}>
-                    {opt}
-                  </div>
-                ))}
+                <QuestionView q={q} order={d.order} value={qans[d.qi]} onChange={v=>setQans(a=>({...a,[d.qi]:v}))} Z={T} font={font} hideTitle/>
               </div>
-            ))}
-            <button onClick={submitQuiz} disabled={Object.keys(qans).length<mod.quiz.length}
-              style={{width:"100%",marginTop:8,background:`linear-gradient(135deg,${T.accent},${T.blue})`,color:T.white,border:"none",borderRadius:12,padding:"14px",fontWeight:800,fontSize:16,cursor:"pointer",fontFamily:font,opacity:Object.keys(qans).length<mod.quiz.length?.45:1,boxShadow:`0 4px 20px ${T.accent}44`}}>
+            ); })}
+            <button onClick={()=>submitQuiz()} disabled={!draw.length || !allAnswered(mod, draw, qans)} data-testid="submit-quiz"
+              style={{width:"100%",marginTop:8,background:`linear-gradient(135deg,${T.accent},${T.blue})`,color:T.white,border:"none",borderRadius:12,padding:"14px",fontWeight:800,fontSize:16,cursor:"pointer",fontFamily:font,opacity:!draw.length || !allAnswered(mod, draw, qans)?.45:1,boxShadow:`0 4px 20px ${T.accent}44`}}>
               {t("Submit Quiz")}
             </button>
           </div>
@@ -319,9 +349,9 @@ export function ModulePlayerScreen() {
           <div>
             <div style={{textAlign:"center",marginBottom:32}}>
               <div style={{fontSize:72,marginBottom:16}}>{passed?"🏆":"📖"}</div>
-              <h2 style={{fontSize:36,fontWeight:900,color:passed?T.green:T.amber,letterSpacing:-1}}>{passed?t("Passed!"):t("Not Quite")}</h2>
-              <div style={{fontSize:60,fontWeight:900,color:T.white,margin:"8px 0",fontFamily:"'Barlow Condensed',sans-serif"}}>{qPct}%</div>
-              <p style={{color:T.muted}}>{t("{n} of {of} correct", { n: qScore, of: mod.quiz.length })}</p>
+              <h2 style={{fontSize:36,fontWeight:900,color:passed?T.green:T.amber,letterSpacing:-1}}>{signOnly?t("Signed — thank you"):passed?t("Passed!"):t("Not Quite")}</h2>
+              {!signOnly && <div style={{fontSize:60,fontWeight:900,color:T.white,margin:"8px 0",fontFamily:"'Barlow Condensed',sans-serif"}}>{qPct}%</div>}
+              {!signOnly && <p style={{color:T.muted}}>{t("{n} of {of} correct", { n: qScore, of: qTotal })}</p>}
               {!passed && <p style={{color:T.amber,marginTop:6}}>{t("You need {pct}% to pass. Review the slides and try again.", { pct: passMarkOf(mod) })}</p>}
               <div style={{display:"flex",gap:12,justifyContent:"center",marginTop:28,flexWrap:"wrap"}}>
                 {passed && (
@@ -331,7 +361,7 @@ export function ModulePlayerScreen() {
                   </button>
                 )}
                 {!passed && (
-                  <button onClick={()=>{setStep(1);setQans({});setQsub(false);window.scrollTo({top:0,behavior:"smooth"});}}
+                  <button onClick={retake} data-testid="retake"
                     style={{background:`linear-gradient(135deg,${T.accent},${T.blue})`,color:T.white,border:"none",borderRadius:12,padding:"12px 28px",fontWeight:800,cursor:"pointer",fontFamily:font}}>
                     {t("Retake Module")}
                   </button>
@@ -341,44 +371,15 @@ export function ModulePlayerScreen() {
                 </button>
               </div>
             </div>
-            {/* Answer review */}
+            {/* Answer review: this attempt's questions, in the order they were asked (QuizBits.jsx ReviewCard) */}
+            {qItems.length>0 && (
             <div>
               <h3 style={{fontSize:14,fontWeight:800,letterSpacing:.5,color:T.muted,textTransform:"uppercase",marginBottom:16}}>{t("Answer Review")}</h3>
-              {pmod.quiz.map((q,qi)=>{
-                const chosen = qans[qi];
-                const correct = q.answer;
-                const isRight = chosen === correct;
-                return (
-                  <div key={qi} style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:14,padding:20,marginBottom:12,border:`1px solid ${isRight?"rgba(16,185,129,0.35)":"rgba(239,68,68,0.35)"}`}}>
-                    <div style={{display:"flex",gap:10,alignItems:"flex-start",marginBottom:14}}>
-                      <div style={{width:24,height:24,borderRadius:99,background:isRight?"rgba(16,185,129,0.2)":"rgba(239,68,68,0.2)",border:`1px solid ${isRight?T.green:"#ef4444"}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,flexShrink:0,marginTop:1}}>{isRight?"✓":"✗"}</div>
-                      <p style={{margin:0,fontWeight:700,fontSize:14,color:T.white,lineHeight:1.5}}>{q.q}</p>
-                    </div>
-                    <div style={{display:"grid",gap:6,marginBottom:12}}>
-                      {q.options.map((opt,oi)=>{
-                        const isCorrect = oi===correct;
-                        const isChosen = oi===chosen;
-                        let bg = "transparent"; let border = T.border; let col = T.muted;
-                        if (isCorrect) { bg="rgba(16,185,129,0.15)"; border="rgba(16,185,129,0.5)"; col=T.green; }
-                        else if (isChosen && !isCorrect) { bg="rgba(239,68,68,0.12)"; border="rgba(239,68,68,0.4)"; col="#f87171"; }
-                        return (
-                          <div key={oi} style={{padding:"9px 14px",borderRadius:10,background:bg,border:`1px solid ${border}`,fontSize:13,color:col,fontWeight:isCorrect||isChosen?700:400,display:"flex",alignItems:"center",gap:8}}>
-                            {isCorrect && <span>✓</span>}{isChosen&&!isCorrect && <span>✗</span>}
-                            {opt}
-                            {isCorrect && <span style={{marginLeft:"auto",fontSize:11,color:T.green,fontWeight:700}}>{t("Correct answer")}</span>}
-                          </div>
-                        );
-                      })}
-                    </div>
-                    {!isRight && (
-                      <div style={{padding:"10px 14px",background:"rgba(37,99,235,0.1)",borderRadius:10,border:"1px solid rgba(37,99,235,0.25)",fontSize:12,color:T.accentLt,lineHeight:1.6}}>
-                        💡 {tNodes("{label} The correct answer is {answer}. Review the relevant slide for more detail.", { label: <strong>{t("Explanation:")}</strong>, answer: <em>"{q.options[correct]}"</em> })}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+              {qItems.map((it,k)=>(
+                <ReviewCard key={it.qi} q={pmod.quiz[it.qi]} given={it.given} ok={it.ok} number={k+1} Z={T} font={font}/>
+              ))}
             </div>
+            )}
           </div>
         )}
       </div>

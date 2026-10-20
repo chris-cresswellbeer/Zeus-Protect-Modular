@@ -1,6 +1,8 @@
 // src/mobile/screens/ModulePlayer.jsx
 //
-// The training loop: intro → slides → one-question-at-a-time quiz → result.
+// The training loop: intro → slides → (sign-off declaration) → one-question-at-a-time quiz → result.
+// Every question type, slide knowledge checks and the declaration use the same parts as the
+// computer (domains/training/QuizBits.jsx) and the same marking (quizEngine.js).
 //
 // The single meaningful departure from the desktop player (app/screens/ModulePlayerScreen.jsx) is the
 // quiz: the desktop stacks every question on one scroll, which does not survive
@@ -23,6 +25,8 @@ import { todayISO } from "../../lib/dates";
 import { certNumber } from "../../lib/brandCore";
 import { t, tNodes } from "../../lib/i18n";
 import { ReadAloud, TranslationNote } from "../../shared/LanguageBits";
+import { allAnswered, attemptRecord, drawQuiz, initialAnswers, isAnswered, markAttempt, quizSettings, speakText } from "../../domains/training/quizEngine";
+import { QuestionView, ReviewCard, SignoffPanel, SlideCheck } from "../../domains/training/QuizBits";
 function ModulePlayer({
   mod: shownMod, user, initialSlide = 0, offline, language = "en",
   onExit, onProgress, onComplete,
@@ -37,13 +41,18 @@ function ModulePlayer({
   const slides = mod.content || [];
   const quiz = mod.quiz || [];
   const passMark = passMarkOf(mod);   // this module's pass mark (default 70%)
+  const hasQuiz = quiz.length > 0;
+  const needSign = !!(mod.signoff && mod.signoff.text);
+  const signOnly = !hasQuiz && needSign;
 
-  // stage: "intro" | "slide" | "quiz" | "result"
+  // stage: "intro" | "slide" | "signoff" | "quiz" | "result"
   const [stage, setStage] = React.useState(initialSlide > 0 ? "slide" : "intro");
   const [slide, setSlide] = React.useState(Math.max(1, initialSlide));
   const [qIdx, setQIdx] = React.useState(0);
-  const [answers, setAnswers] = React.useState({});
-  const [picked, setPicked] = React.useState(null);
+  const [answers, setAnswers] = React.useState({});   // { [qi]: answer } for this attempt
+  const [draw, setDraw] = React.useState(null);       // this attempt's questions (quizEngine drawQuiz)
+  const [checks, setChecks] = React.useState({});     // { [slide index]: tries } knowledge checks answered right
+  const [signoff, setSignoff] = React.useState(null); // { name, at, text } once signed
   const [result, setResult] = React.useState(null);
   // Hotspot slides gate the Next button until the hazards have been found,
   // same as the desktop player. Keyed by slide number.
@@ -53,44 +62,55 @@ function ModulePlayer({
   React.useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = 0;
   }, [stage, slide, qIdx]);
+  const cur = draw && draw[qIdx];
+  const curQ = cur ? quiz[cur.qi] : null;
 
   React.useEffect(() => {
     if (stage === "slide") onProgress(mod.id, slide);
   }, [stage, slide, mod.id]);
 
-  // Records the picked option; on the last question scores the quiz and reports the
-  // result via onComplete (MobileApp only saves PASSED results).
-  function submitAnswer() {
-    if (picked === null) return;
-    const next = { ...answers, [qIdx]: picked };
-    setAnswers(next);
-    if (qIdx === quiz.length - 1) {
-      let correct = 0;
-      quiz.forEach((q, i) => { if (next[i] === q.answer) correct++; });
-      const pct = Math.round((correct / quiz.length) * 100);
-      const passed = pct >= passMark;
-      const record = {
-        moduleId: mod.id,
-        score: pct,
-        correct,
-        total: quiz.length,
-        passed,
-        date: todayISO(),
-        certId: passed ? makeCertId(user.id, mod.id) : null,
-        // the language it was done in (shown on the person's training record)
-        ...(translated ? { lang: shownMod._trans.lang, translation: { hash: shownMod._trans.hash, status: shownMod._trans.status } } : {}),
-      };
-      setResult(record);
-      setStage("result");
-      onComplete(record);
-    } else {
-      setQIdx(qIdx + 1);
-      setPicked(null);
-    }
+  // After the last slide: the declaration (if there is one and it isn't signed), then the quiz.
+  function afterSlides(signed = signoff) {
+    if (needSign && !signed) { setStage("signoff"); return; }
+    if (!hasQuiz) return;
+    const d = drawQuiz(mod);   // a new set of questions each attempt
+    setDraw(d); setAnswers(initialAnswers(mod, d)); setQIdx(0); setStage("quiz");
+  }
+
+  // Scores the attempt and reports it via onComplete (MobileApp saves a pass as the result and
+  // logs a fail for the admins, both with the answers). No questions = a signed declaration (100%).
+  function finish(d, ans, signed) {
+    const mark = markAttempt(mod, d, ans);
+    const pct = mark.pct;
+    const passed = pct >= passMark;
+    const record = {
+      moduleId: mod.id,
+      moduleVersion: mod.version || 1,
+      score: pct,
+      correct: mark.correct,
+      total: mark.total,
+      items: mark.items,
+      passed,
+      signOnly: !d.length,
+      answers: attemptRecord(mod, mark, { checks, signoff: signed }),
+      date: todayISO(),
+      certId: passed ? makeCertId(user.id, mod.id) : null,
+      // the language it was done in (shown on the person's training record)
+      ...(translated ? { lang: shownMod._trans.lang, translation: { hash: shownMod._trans.hash, status: shownMod._trans.status } } : {}),
+    };
+    setResult(record);
+    setStage("result");
+    onComplete(record);
+  }
+
+  function nextQuestion() {
+    if (!curQ || !isAnswered(curQ, answers[cur.qi])) return;
+    if (qIdx === draw.length - 1) { if (allAnswered(mod, draw, answers)) finish(draw, answers, signoff); }
+    else setQIdx(qIdx + 1);
   }
 
   function retake() {
-    setAnswers({}); setPicked(null); setQIdx(0); setResult(null);
+    setAnswers({}); setQIdx(0); setResult(null); setDraw(null); setChecks({}); setSignoff(null);
     setSlide(1); setStage("slide");
   }
 
@@ -106,7 +126,7 @@ function ModulePlayer({
             <p style={{ color: Z.muted, fontSize: 13, margin: "0 0 20px" }}>
               {t(mod.category)} · {t(mod.duration)} ·{" "}
               <span style={{ color: mod.level === "Mandatory" ? "#f87171" : Z.accentLt }}>{t(mod.level)}</span>
-              {" "}· {t("{n} slides", { n: slides.length })} · {t("{n} questions", { n: quiz.length })}
+              {" "}· {t("{n} slides", { n: slides.length })}{hasQuiz && <> · {t("{n} questions", { n: quizSettings(mod).draw })}</>}{needSign && <> · ✍ {t("Signed declaration")}</>}
             </p>
             {shownMod._trans && (
               <div style={{ marginBottom: 14, textAlign: "left" }}>
@@ -119,7 +139,7 @@ function ModulePlayer({
               padding: 18, textAlign: "left", border: `1px solid ${Z.border}`, marginBottom: 14,
             }}>
               <p style={{ margin: 0, color: Z.slate, lineHeight: 1.7, fontSize: 13.5 }}>
-                {tNodes("Take your time — each slide saves as you go. You need {pct} on the knowledge check to earn your certificate, and you can retake it as many times as you need.", {
+                {signOnly ? t("Read through each slide carefully, then sign the declaration at the end to complete the module.") : tNodes("Take your time — each slide saves as you go. You need {pct} on the knowledge check to earn your certificate, and you can retake it as many times as you need.", {
                   pct: <strong style={{ color: Z.green }}>{t("{n}% or above", { n: passMark })}</strong> })}
               </p>
             </div>
@@ -170,6 +190,10 @@ function ModulePlayer({
               slide={slides[slide - 1]} Z={Z} font={font}
               onHotspotStatus={(done) => setHotspotDone((p) => (p[slide] === done ? p : { ...p, [slide]: done }))}
             />
+            {slides[slide - 1] && slides[slide - 1].check && (
+              <SlideCheck key={`${slide}-${showEnglish ? "en" : "x"}`} q={slides[slide - 1].check} passed={checks[slide - 1] != null} phone
+                onPassed={(n) => setChecks((p) => ({ ...p, [slide - 1]: n }))} Z={Z} font={font} />
+            )}
           </div>
           <div style={{ padding: "18px 18px 0", display: "flex", gap: 11 }}>
             <GhostButton
@@ -181,70 +205,50 @@ function ModulePlayer({
             </GhostButton>
             <PrimaryButton
               Z={Z} font={font}
-              disabled={hotspotGated(slides[slide - 1], hotspotDone[slide])}
-              onClick={() => (slide === slides.length ? setStage("quiz") : setSlide(slide + 1))}
+              disabled={hotspotGated(slides[slide - 1], hotspotDone[slide]) || !!(slides[slide - 1] && slides[slide - 1].check && checks[slide - 1] == null)}
+              onClick={() => (slide === slides.length ? afterSlides() : setSlide(slide + 1))}
               style={{ flex: 1, minHeight: 50, padding: 15, fontSize: 15, borderRadius: 14 }}
             >
-              {slide === slides.length ? t("Take the quiz →") : t("Next slide →")}
+              {slide === slides.length ? (needSign && !signoff ? t("Next: the declaration →") : t("Take the quiz →")) : t("Next slide →")}
             </PrimaryButton>
           </div>
         </div>
       )}
 
-      {stage === "quiz" && (
+      {stage === "signoff" && (
+        <Screen Z={Z} pad={18}>
+          <SignoffPanel text={(shownMod.signoff && !showEnglish ? shownMod.signoff : mod.signoff).text} english={(shownMod._en || shownMod).signoff.text}
+            userName={user.name} phone buttonLabel={hasQuiz ? t("Sign and go to the quiz →") : t("Sign and finish")}
+            onSign={(sg) => { setSignoff(sg); if (hasQuiz) afterSlides(sg); else finish([], {}, sg); }} Z={Z} font={font} />
+          <div style={{ marginTop: 12 }}>
+            <GhostButton Z={Z} font={font} onClick={() => setStage("slide")}>← {t("Back to the slides")}</GhostButton>
+          </div>
+        </Screen>
+      )}
+
+      {stage === "quiz" && curQ && (
         <div style={{ paddingBottom: 20 }}>
           <div style={{ height: 4, background: Z.overlay }}>
             <div style={{
-              height: "100%", width: `${((qIdx + 1) / Math.max(1, quiz.length)) * 100}%`,
+              height: "100%", width: `${((qIdx + 1) / Math.max(1, draw.length)) * 100}%`,
               background: "linear-gradient(90deg,#f59e0b,#fbbf24)", transition: "width .35s",
             }} />
           </div>
           <div style={{ padding: "20px 18px 0" }}>
             <div style={{ color: Z.gold, fontSize: 10.5, fontWeight: 800, letterSpacing: 1.8, marginBottom: 6 }}>
-              {t("KNOWLEDGE CHECK · {n} OF {of}", { n: qIdx + 1, of: quiz.length })}
+              {t("KNOWLEDGE CHECK · {n} OF {of}", { n: qIdx + 1, of: draw.length })}
             </div>
             <div style={{ marginBottom: 10 }}>
-              <ReadAloud text={[quiz[qIdx].q, ...quiz[qIdx].options.map((o, i) => `${"ABCDEF"[i]}. ${o}`)].join(". \n")} lang={speechLang} Z={Z} font={font} />
+              <ReadAloud text={speakText(curQ, cur.order)} lang={speechLang} Z={Z} font={font} />
             </div>
-            <h2 style={{ fontSize: 20, fontWeight: 800, color: Z.white, margin: "0 0 18px", lineHeight: 1.35, letterSpacing: -0.2 }}>
-              {quiz[qIdx].q}
-            </h2>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {quiz[qIdx].options.map((opt, i) => {
-                const on = picked === i;
-                return (
-                  <button
-                    key={i}
-                    onClick={() => setPicked(i)}
-                    style={{
-                      width: "100%", textAlign: "left", padding: 16, borderRadius: 14,
-                      cursor: "pointer", minHeight: 56, display: "flex", alignItems: "center", gap: 12,
-                      border: `2px solid ${on ? Z.accent : Z.borderMd}`,
-                      background: on ? "rgba(37,99,235,0.2)" : Z.overlaySm,
-                      color: Z.white, fontFamily: font, fontSize: 14.5,
-                      fontWeight: on ? 700 : 500, lineHeight: 1.4, transition: "all .15s",
-                    }}
-                  >
-                    <span style={{
-                      width: 26, height: 26, flexShrink: 0, borderRadius: "50%",
-                      border: `2px solid ${on ? Z.accent : "rgba(255,255,255,0.2)"}`,
-                      background: on ? Z.accent : "transparent",
-                      color: on ? "#fff" : Z.muted,
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      fontSize: 12, fontWeight: 800,
-                    }}>
-                      {"ABCDEF"[i]}
-                    </span>
-                    <span style={{ flex: 1 }}>{opt}</span>
-                  </button>
-                );
-              })}
-            </div>
-            <div style={{ marginTop: 18 }}>
-              <PrimaryButton onClick={submitAnswer} disabled={picked === null} Z={Z} font={font}>
-                {picked === null
+            <QuestionView key={cur.qi} q={curQ} order={cur.order} value={answers[cur.qi]} phone testId="quiz-q"
+              onChange={(v) => setAnswers((p) => ({ ...p, [cur.qi]: v }))} Z={Z} font={font} />
+            <div style={{ marginTop: 8, display: "flex", gap: 11 }}>
+              {qIdx > 0 && <GhostButton Z={Z} font={font} onClick={() => setQIdx(qIdx - 1)} style={{ flex: "0 0 auto" }}>←</GhostButton>}
+              <PrimaryButton onClick={nextQuestion} disabled={!isAnswered(curQ, answers[cur.qi])} Z={Z} font={font} style={{ flex: 1 }}>
+                {!isAnswered(curQ, answers[cur.qi])
                   ? t("Pick an answer")
-                  : qIdx === quiz.length - 1 ? t("Finish quiz") : t("Next question →")}
+                  : qIdx === draw.length - 1 ? t("Finish quiz") : t("Next question →")}
               </PrimaryButton>
             </div>
           </div>
@@ -259,20 +263,20 @@ function ModulePlayer({
               fontSize: 28, fontWeight: 900, letterSpacing: -0.8, margin: 0,
               color: result.passed ? Z.green : Z.amber,
             }}>
-              {result.passed ? t("Nicely done, {name}", { name: (user.name || "").split(" ")[0] }) : t("Not quite yet")}
+              {result.signOnly ? t("Signed — thank you") : result.passed ? t("Nicely done, {name}", { name: (user.name || "").split(" ")[0] }) : t("Not quite yet")}
             </h2>
-            <div style={{
+            {!result.signOnly && <div style={{
               fontSize: 56, fontWeight: 900, color: Z.white, margin: "2px 0",
               fontFamily: "'Barlow Condensed',sans-serif", lineHeight: 1,
             }}>
               {result.score}%
-            </div>
-            <p style={{ color: Z.muted, margin: "0 0 20px", fontSize: 13.5 }}>
+            </div>}
+            {result.signOnly ? <div style={{ height: 16 }} /> : <p style={{ color: Z.muted, margin: "0 0 20px", fontSize: 13.5 }}>
               {t("{n} of {of} correct", { n: result.correct, of: result.total })}
               {result.passed
                 ? ` — ${t("comfortably above the {pct}% pass mark.", { pct: passMark })}`
                 : ` — ${t("you need {pct}% to pass. Have another go whenever you're ready.", { pct: passMark })}`}
-            </p>
+            </p>}
 
             {result.passed && (
               <Certificate mod={mod} user={user} result={result} Z={Z} />
@@ -304,7 +308,7 @@ function ModulePlayer({
               </PrimaryButton>
             </div>
 
-            <AnswerReview quiz={quiz} answers={answers} Z={Z} />
+            {result.items.length > 0 && <AnswerReview quiz={quiz} items={result.items} Z={Z} font={font} />}
           </div>
         </Screen>
       )}
@@ -690,14 +694,15 @@ function Certificate({ mod, user, result, Z }) {
       }}>
         <div style={{ fontSize: 15, fontWeight: 800, color: "#f59e0b" }}>{mod.title}</div>
         <div style={{ fontSize: 11.5, color: "rgba(255,255,255,0.5)", marginTop: 3 }}>
-          {result.certId} · {t("scored {n}%", { n: result.score })}
+          {result.certId} · {result.signOnly ? `✍ ${t("Signed")}` : t("scored {n}%", { n: result.score })}
         </div>
       </div>
     </div>
   );
 }
 
-function AnswerReview({ quiz, answers, Z }) {
+// This attempt's questions in the order asked, with the right answer and the "why" line.
+function AnswerReview({ quiz, items, Z, font }) {
   return (
     <div style={{ textAlign: "left", marginTop: 28 }}>
       <div style={{
@@ -706,36 +711,9 @@ function AnswerReview({ quiz, answers, Z }) {
       }}>
         {t("Answer review")}
       </div>
-      {quiz.map((q, qi) => {
-        const right = answers[qi] === q.answer;
-        return (
-          <div key={qi} style={{
-            background: `linear-gradient(135deg,${Z.navyMd},${Z.navy})`, borderRadius: 14,
-            padding: 16, marginBottom: 10,
-            border: `1px solid ${right ? "rgba(16,185,129,0.35)" : "rgba(239,68,68,0.35)"}`,
-          }}>
-            <div style={{ display: "flex", gap: 10, alignItems: "flex-start", marginBottom: 10 }}>
-              <span style={{
-                width: 22, height: 22, borderRadius: 99, flexShrink: 0, marginTop: 1,
-                background: right ? "rgba(16,185,129,0.2)" : "rgba(239,68,68,0.2)",
-                border: `1px solid ${right ? Z.green : "#ef4444"}`,
-                display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12,
-              }}>
-                {right ? "✓" : "✗"}
-              </span>
-              <p style={{ margin: 0, fontWeight: 700, fontSize: 13.5, color: Z.white, lineHeight: 1.5 }}>{q.q}</p>
-            </div>
-            {!right && (
-              <div style={{
-                padding: "10px 12px", background: "rgba(37,99,235,0.1)", borderRadius: 10,
-                border: "1px solid rgba(37,99,235,0.25)", fontSize: 12, color: Z.accentLt, lineHeight: 1.6,
-              }}>
-                {tNodes("The correct answer is {answer}.", { answer: <em>&ldquo;{q.options[q.answer]}&rdquo;</em> })}
-              </div>
-            )}
-          </div>
-        );
-      })}
+      {items.map((it, k) => (
+        <ReviewCard key={it.qi} q={quiz[it.qi]} given={it.given} ok={it.ok} number={k + 1} phone Z={Z} font={font} />
+      ))}
     </div>
   );
 }

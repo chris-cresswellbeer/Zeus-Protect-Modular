@@ -320,7 +320,7 @@ export function AdminPortal() {
         {atab==="create" && (
           <React.Suspense fallback={<div style={{padding:40,textAlign:"center",color:T.muted}}>Loading…</div>}>
           <LazyCreateModuleTab
-            editingModule={editingModule}
+            editingModule={editingModule} userId={user && user.id}
             onSave={m=>{
               // Editing an existing module = a new VERSION: ask minor/major first
               // (NewVersionModal → saveModuleVersion). A brand-new module is version 1.

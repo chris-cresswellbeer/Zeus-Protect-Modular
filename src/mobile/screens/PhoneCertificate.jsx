@@ -43,7 +43,7 @@ export default function PhoneCertificate({ cert, holder, jobTitle, onClose, font
           <div style={{ marginTop: 16, width: "100%", display: "grid", gridTemplateColumns: "1fr 1fr", borderTop: "1px solid #d6dbe6", borderBottom: "1px solid #d6dbe6" }}>
             {cell("COMPLETED", f.completed)}
             {cell("VALID UNTIL", f.validUntil || "No renewal required", { borderLeft: "1px solid #d6dbe6" })}
-            {cell("SCORE", f.score != null ? <>{f.score}% <span style={{ fontSize: 12, fontWeight: 500, color: grey }}>(pass {f.passMark}%)</span></> : "Recorded", { borderTop: "1px solid #d6dbe6" })}
+            {cell(f.signed ? "COMPLETED BY" : "SCORE", f.signed ? "Signed declaration" : f.score != null ? <>{f.score}% <span style={{ fontSize: 12, fontWeight: 500, color: grey }}>(pass {f.passMark}%)</span></> : "Recorded", { borderTop: "1px solid #d6dbe6" })}
             {cell(f.version ? "MODULE VERSION" : "CERTIFICATE ID", f.version ? `v${f.version}` : (f.certId || "—"), { borderTop: "1px solid #d6dbe6", borderLeft: "1px solid #d6dbe6" })}
           </div>
 

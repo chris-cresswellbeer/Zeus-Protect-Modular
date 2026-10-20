@@ -19,7 +19,7 @@ import { dbWrite, sb } from "../../lib/supabase";
 
 export function useMobileWrites(app) {
   const {
-    dbAcknowledgeDoc, dbCompleteAction, dbSaveCompletion, dbSaveDseReport, dbSaveIncident,
+    dbAcknowledgeDoc, dbCompleteAction, dbSaveCompletion, dbSaveDseReport, dbSaveIncident, dbSaveQuizFailure, setQuizFailures,
     dbSaveInvestigation, dbSavePermit, dbSaveTheme, docs, dseReports, incidents, investigations, markWrite,
     permits, regRef, setComps, setDocAcknowledgements, setDseReports, setIncidents, setInvestigations,
     setPermits, setPreviewDoc, setSiteInspections, user
@@ -66,6 +66,8 @@ export function useMobileWrites(app) {
   // update local state first so the UI never waits on a network round-trip.
   const mobileDb = React.useMemo(() => ({
     saveCompletion: (userId, moduleId, rec) => dbSaveCompletion(userId, moduleId, rec),
+    // a failed quiz attempt from the phone (quiz_failures — Reports → Quiz Failures)
+    saveQuizFailure: (rec) => (setQuizFailures(p => (p.some(f => f.id === rec.id) ? p : [...p, rec])), dbSaveQuizFailure(rec)),
     acknowledgeDoc: (userId, docId, date)   => dbAcknowledgeDoc(userId, docId, date),
     saveIncident:   (rec)                   => dbSaveIncident(rec),
     saveTheme:      (userId, key)           => dbSaveTheme(userId, key),
@@ -79,7 +81,7 @@ export function useMobileWrites(app) {
 
     optimisticCompletion: (userId, r) => setComps(p => ({
       ...p,
-      [userId]: { ...(p[userId] || {}), [r.moduleId]: { score: r.score, date: r.date, certId: r.certId } },
+      [userId]: { ...(p[userId] || {}), [r.moduleId]: { score: r.score, date: r.date, certId: r.certId, ...(r.answers ? { answers: r.answers } : {}) } },
     })),
     optimisticDocAck: (userId, docId, date) => (markWrite(`k:${userId}:${docId}`), setDocAcknowledgements(p => ({
       ...p,

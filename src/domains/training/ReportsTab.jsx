@@ -11,6 +11,8 @@ import { isWarehouseWorker, machineExpiryStatus, machineState, compsFor } from "
 import { EXT_CERT_TYPES } from "../../data/seedExtCerts";
 import { ManagerRow } from "./ManagerRow";
 import { isPassed, scoreText, recordedText } from "./completion";
+import { savedItems, answerText, correctText } from "./quizEngine";
+import { QuestionReport } from "./QuestionReport";
 import { AdminDSETab } from "../dse/AdminDSETab";
 import { TrainingMatrixView } from "./TrainingMatrixView";
 import { MonthlyReportView } from "../reports/MonthlyReportView";
@@ -233,6 +235,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
           {tabBtn("documents", E("📄 ","")+"Document Read Status")}
           {tabBtn("expiry",    E("⏰ ","")+"Training Expiry")}
           {tabBtn("failures",  E("❌ ","")+"Quiz Failures", (quizFailures||[]).filter(f=>!f.acknowledged).length)}
+          {tabBtn("questions", E("🎯 ","")+"Question Results")}
           {tabBtn("trends",    E("📊 ","")+"Incident Trends")}
           {tabBtn("actions",   E("🔧 ","")+"Overdue Actions")}
           <div style={{width:1,height:28,background:Z.borderMd,margin:"0 4px"}}/>
@@ -525,10 +528,13 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
                                   const result = userComps[m.id];
                                   const modKey = `${u.id}_${m.id}`;
                                   const isModOpen = expandedModule === modKey;
-                                  const savedAnswers = result.answers || {};
-                                  const incorrectQs = m.quiz.map((q,qi)=>({...q,qi,given:savedAnswers[qi]})).filter(q=>q.given!==q.answer);
-                                  const correctCount = m.quiz.length - incorrectQs.length;
-                                  const hasAnswers = Object.keys(savedAnswers).length > 0;
+                                  // quizEngine.js savedItems: this result's questions (all of them for older results,
+                                  // the ones drawn for a question bank), matched to the module as it is now
+                                  const items = savedItems(m, result.answers).filter(it=>it.q);
+                                  const incorrectQs = items.filter(it=>!it.ok);
+                                  const correctCount = items.length - incorrectQs.length;
+                                  const hasAnswers = items.length > 0;
+                                  const signed = result.answers && result.answers.signoff;
                                   const certId = result.certId || null;
                                   return (
                                     <div key={m.id} style={{borderRadius:12,overflow:"hidden",border:`1px solid ${isPassed(result)?"rgba(16,185,129,0.25)":"rgba(245,158,11,0.25)"}`}}>
@@ -541,6 +547,7 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
                                             <span title={recordedText(result)||undefined} style={{color:isPassed(result)?Z.green:Z.amber,fontWeight:700}}>{scoreText(result)}</span>
                                             <span style={{color:Z.muted}}>{ukDate(result.date)}</span>
                                             {hasAnswers && <span style={{color:incorrectQs.length>0?"#f87171":Z.green}}>{incorrectQs.length>0?`${incorrectQs.length} wrong`:"All correct ✓"}</span>}
+                                            {signed && <span data-testid="signed-chip" title={`"${signed.text||""}"`} style={{color:Z.accentLt,fontSize:10.5}}>✍ Signed by {signed.name} {ukDate(String(signed.at||"").slice(0,10))}</span>}
                                             {m.renewalMonths && (() => {
                                               const ex = getExpiryStatus(result.date, m.renewalMonths);
                                               if (!ex) return null;
@@ -566,23 +573,23 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
                                         <div style={{background:Z.overlay,borderTop:`1px solid ${Z.border}`,padding:"14px 16px"}}>
                                           {incorrectQs.length === 0 ? (
                                             <div style={{display:"flex",alignItems:"center",gap:8,color:Z.green,fontWeight:700,fontSize:13}}>
-                                              <span>🎉</span> All {m.quiz.length} questions answered correctly!
+                                              <span>🎉</span> All {items.length} questions answered correctly!
                                             </div>
                                           ) : (
                                             <>
-                                              <p style={{fontSize:10,fontWeight:700,letterSpacing:1,color:Z.muted,margin:"0 0 10px",textTransform:"uppercase"}}>{incorrectQs.length} incorrect · {correctCount}/{m.quiz.length} correct</p>
+                                              <p style={{fontSize:10,fontWeight:700,letterSpacing:1,color:Z.muted,margin:"0 0 10px",textTransform:"uppercase"}}>{incorrectQs.length} incorrect · {correctCount}/{items.length} correct</p>
                                               <div style={{display:"grid",gap:8}}>
                                                 {incorrectQs.map((q,idx)=>(
                                                   <div key={idx} style={{background:"rgba(239,68,68,0.07)",border:"1px solid rgba(239,68,68,0.18)",borderRadius:10,padding:"12px 14px"}}>
-                                                    <p style={{fontWeight:700,fontSize:12,color:Z.white,margin:"0 0 8px",lineHeight:1.5}}><span style={{color:Z.muted,marginRight:6}}>Q{q.qi+1}.</span>{q.q}</p>
+                                                    <p style={{fontWeight:700,fontSize:12,color:Z.white,margin:"0 0 8px",lineHeight:1.5}}><span style={{color:Z.muted,marginRight:6}}>Q{q.qi+1}.</span>{q.q.q}</p>
                                                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
                                                       <div style={{background:"rgba(239,68,68,0.12)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:8,padding:"7px 10px"}}>
                                                         <div style={{fontSize:9,fontWeight:700,letterSpacing:.5,color:"#f87171",marginBottom:3}}>THEIR ANSWER</div>
-                                                        <div style={{fontSize:12,color:"#fca5a5"}}>{q.given!==undefined?q.options[q.given]:"Not answered"}</div>
+                                                        <div style={{fontSize:12,color:"#fca5a5"}}>{answerText(q.q, q.given)}</div>
                                                       </div>
                                                       <div style={{background:"rgba(16,185,129,0.1)",border:"1px solid rgba(16,185,129,0.3)",borderRadius:8,padding:"7px 10px"}}>
                                                         <div style={{fontSize:9,fontWeight:700,letterSpacing:.5,color:Z.green,marginBottom:3}}>CORRECT ANSWER</div>
-                                                        <div style={{fontSize:12,color:"#6ee7b7"}}>{q.options[q.answer]}</div>
+                                                        <div style={{fontSize:12,color:"#6ee7b7"}}>{correctText(q.q)}</div>
                                                       </div>
                                                     </div>
                                                   </div>
@@ -748,6 +755,11 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
             </div>
           )}
         </div>
+      )}
+
+      {/* ── QUESTION RESULTS: which questions people get wrong (QuestionReport.jsx) ── */}
+      {reportView === "questions" && (
+        <QuestionReport modules={allModules} staff={staff} comps={comps} quizFailures={quizFailures} Z={Z} font={font}/>
       )}
 
       {/* ── INCIDENT TRENDS: hand-drawn SVG/div charts (no chart library). Types come from incident.type. ── */}

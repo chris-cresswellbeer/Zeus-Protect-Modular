@@ -60,6 +60,10 @@ export function useAppState() {
   const [step,    setStep]    = useState(0);
   const [qans,    setQans]    = useState({});
   const [qsub,    setQsub]    = useState(false);
+  // This attempt's questions (quizEngine.js drawQuiz: [{qi, order}], null until the quiz opens — a
+  // new draw every attempt) and the rest of the attempt: { checks:{[slide]:tries}, signoff }.
+  const [qdraw,   setQdraw]   = useState(null);
+  const [qextra,  setQextra]  = useState({ checks: {}, signoff: null });
   const [hotspotComplete, setHotspotComplete] = useState({}); // { [step]: boolean } — gates "Next Slide" for hotspot activity slides
   const [playEnglish, setPlayEnglish] = useState(false);       // "Show in English" in the module player (translated modules)
   // ── Languages (lib/i18n.js, lib/moduleTranslate.js) ──
@@ -356,7 +360,7 @@ export function useAppState() {
   return {
     brand, theme, setTheme, T, darkMode, setDarkMode, user, setUser, signedIn, view, setViewRaw, allUsers,
     setAllUsers, assigns, setAssigns, comps, setComps, email, setEmail, pass, setPass, err, setErr, mod,
-    setMod, step, setStep, qans, setQans, qsub, setQsub, hotspotComplete, setHotspotComplete, playEnglish,
+    setMod, step, setStep, qans, setQans, qsub, setQsub, qdraw, setQdraw, qextra, setQextra, hotspotComplete, setHotspotComplete, playEnglish,
     setPlayEnglish, moduleTrans, setModuleTrans, userLang, setUserLang, profilesTick, setProfilesTick,
     showCelebration, setShowCelebration, lightboxSrc, setLightboxSrc, lightboxZoomed, setLightboxZoomed,
     atab, setAtabRaw, dashboardLayouts, setDashboardLayouts, adminReportView, setAdminReportView,

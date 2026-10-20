@@ -13,10 +13,11 @@ import { certNumber } from "../../lib/brandCore";
 import { todayISO } from "../../lib/dates";
 import { clearProgress } from "../../lib/moduleProgress";
 import { localiseModule, translationKey } from "../../lib/moduleTranslate";
+import { attemptRecord, drawQuiz, markAttempt } from "../../domains/training/quizEngine";
 
 export function createPlayerActions(app) {
   const {
-    dbSaveCompletion, dbSaveQuizFailure, mod, moduleTrans, playEnglish, qans, setComps, setQsub,
+    dbSaveCompletion, dbSaveQuizFailure, mod, moduleTrans, playEnglish, qans, qdraw, qextra, setComps, setQsub,
     setQuizFailures, setShowCelebration, user, userLang
   } = app;
 
@@ -25,33 +26,44 @@ export function createPlayerActions(app) {
   // A pass creates a certificate id "<prefix>-XXXXXXXX" (prefix: branding) and becomes their result. A fail
   // is logged to quiz_failures only — it never replaces an earlier pass, and it
   // doesn't count as completed.
-  function submitQuiz() {
-    let score=0;
-    mod.quiz.forEach((q,i)=>{ if(qans[i]===q.answer) score++; });
-    const pct=Math.round(score/mod.quiz.length*100);
-    const mark = passMarkOf(mod);
+  // Marks THIS attempt's questions (qdraw — a question bank asks only some of them) with
+  // quizEngine.js, so every question type is marked the same way on the computer and the phone.
+  // What is saved with the result: which questions were asked, what was answered, slide
+  // knowledge-check tries and the signed declaration (attemptRecord). A module with only a
+  // declaration and no questions scores 100% once it is signed.
+  // `extra` lets the sign-off panel pass the signature straight in (state updates aren't
+  // visible to this function until the next render).
+  function submitQuiz(extra) {
+    const att = { ...(qextra || {}), ...(extra || {}) };
+    const draw = qdraw || drawQuiz(mod);
+    const mark = markAttempt(mod, draw, qans);
+    const pct = mark.pct;
+    const answers = attemptRecord(mod, mark, att);
+    const mark_ = passMarkOf(mod);
     setQsub(true);
-    const certId = pct>=mark ? certNumber((user.id.toString(36) + mod.id + Date.now().toString(36)).toUpperCase().slice(-8)) : null;   // prefix from the branding
-    if (pct>=mark) {
+    const certId = pct>=mark_ ? certNumber((user.id.toString(36) + mod.id + Date.now().toString(36)).toUpperCase().slice(-8)) : null;   // prefix from the branding
+    if (pct>=mark_) {
       clearProgress(user.id, mod);   // passed: no place to carry on from (lib/moduleProgress.js)
       setShowCelebration(true);
-      const rec = {score:pct, date:todayISO(), answers:{...qans}, certId, moduleVersion: mod.version||1,
+      const rec = {score:pct, date:todayISO(), answers, certId, moduleVersion: mod.version||1,
         ...(pmod && pmod._trans ? { lang: pmod._trans.lang, translation: { hash: pmod._trans.hash, status: pmod._trans.status } } : {})};
       setComps(p=>({...p,[user.id]:{...p[user.id],[mod.id]:rec}}));
       dbSaveCompletion(user.id, mod.id, rec);
     }
-    // Record failure for admin visibility
-    if (pct < mark) {
+    // Record failure for admin visibility (with the answers, for the question report)
+    if (pct < mark_) {
       const failure = {
         id: "qf_" + Date.now(),
         userId: user.id,
         userName: user.name,
         moduleId: mod.id,
         moduleTitle: mod.title,
+        moduleVersion: mod.version || 1,
         score: pct,
         date: todayISO(),
         acknowledged: false,
-        passMark: mark,
+        passMark: mark_,
+        answers,
       };
       setQuizFailures(p=>[...p, failure]);
       dbSaveQuizFailure(failure);
@@ -62,7 +74,7 @@ export function createPlayerActions(app) {
   // The module as shown in the player: in the person's language unless they chose "Show in English".
   // Marking always uses the English module's answers (same order in every language).
   const pmod = mod && !playEnglish ? localiseModule(mod, userLang, moduleTrans[translationKey(mod.id, userLang)]) : mod;
-  const quizStep = totalSlides+1;
+  const quizStep = totalSlides+1;   // the quiz (and the sign-off declaration, if the module has one)
 
   return {
     submitQuiz, totalSlides, pmod, quizStep

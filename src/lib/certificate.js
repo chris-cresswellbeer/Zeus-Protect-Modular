@@ -117,6 +117,8 @@ export function certFacts({ cert, user, settings, origin = "", brand = getBrand(
     validUntilISO: ex ? ex.expiryDate : "",
     expired: !!(ex && ex.status === "expired"),
     score,
+    // a module with a signed declaration and no quiz (quizEngine.js): "Signed declaration", no score
+    signed: !((mod.quiz || []).length) && !!(mod.signoff && mod.signoff.text) && score != null,
     passMark: passMarkOf(mod),
     version: cert && Number(cert.moduleVersion) > 0 ? Number(cert.moduleVersion) : null,
     certId,
@@ -145,7 +147,7 @@ export function certificateHtml(f) {
   const cells = [
     cell("COMPLETED", e(f.completed), true),
     cell("VALID UNTIL", f.validUntil ? e(f.validUntil) : `<span style="font-size:15px">No renewal required</span>`),
-    cell("SCORE", f.score != null ? `${e(f.score)}% <span style="font-size:13px;font-weight:500;color:${grey}">(pass ${e(f.passMark)}%)</span>` : "Recorded"),
+    cell(f.signed ? "COMPLETED BY" : "SCORE", f.signed ? "Signed declaration" : f.score != null ? `${e(f.score)}% <span style="font-size:13px;font-weight:500;color:${grey}">(pass ${e(f.passMark)}%)</span>` : "Recorded"),
     ...(f.version ? [cell("MODULE VERSION", `v${e(f.version)}`)] : []),
   ];
   const logo = f.logo

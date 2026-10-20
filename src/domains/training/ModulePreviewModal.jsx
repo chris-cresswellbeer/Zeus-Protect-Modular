@@ -8,6 +8,39 @@ import { isPassed, scoreText, recordedText, passMarkOf } from "./completion";
 import { TranslationsPanel } from "./TranslationsPanel";
 import { langInfo } from "../../lib/i18n";
 import { ukDate } from "../../lib/dates";
+import { QTYPES, qType, correctOf, quizSummary, LETTERS } from "./quizEngine";
+
+// One question with its right answer marked (admin preview, Create Module's preview).
+export function AnswerKey({ q, n, T, label }) {
+  const ty = qType(q), right = correctOf(q);
+  const tl = (QTYPES.find(x => x.id === ty) || {}).label;
+  return (
+    <div data-testid="answer-key" style={{background:T.overlay,borderRadius:12,padding:"16px 18px",border:`1px solid ${T.border}`}}>
+      <div style={{display:"flex",gap:8,alignItems:"baseline",justifyContent:"space-between",marginBottom:12}}>
+        <div style={{fontSize:13,fontWeight:700,color:T.white}}>{label || `Q${n}.`} {q.q}</div>
+        <span style={{fontSize:10,fontWeight:700,color:T.muted,whiteSpace:"nowrap",textTransform:"uppercase",letterSpacing:.5}}>{tl}</span>
+      </div>
+      {ty === "image" ? (
+        <div style={{display:"grid",gridTemplateColumns:`repeat(${Math.min(4,(q.options||[]).length)},minmax(0,1fr))`,gap:8}}>
+          {(q.options||[]).map((o,oi)=>{ const ok=right.includes(oi); const im=(q.images||[])[oi]; return (
+            <div key={oi} style={{padding:4,borderRadius:8,border:`2px solid ${ok?T.green:T.border}`}}>
+              {im && <img src={im.url||im.data} alt={o||`Picture ${oi+1}`} style={{width:"100%",height:70,objectFit:"contain",background:"#fff",borderRadius:6,display:"block"}}/>}
+              <div style={{fontSize:11,textAlign:"center",marginTop:3,color:ok?T.green:T.muted,fontWeight:ok?700:400}}>{ok?"✓ ":""}{o||`Picture ${oi+1}`}</div>
+            </div>); })}
+        </div>
+      ) : (
+        <div style={{display:"flex",flexDirection:"column",gap:7}}>
+          {(q.options||[]).map((opt,oi)=>{ const ok = ty==="order" || right.includes(oi); return (
+            <div key={oi} style={{padding:"8px 12px",borderRadius:8,fontSize:12,background:ok&&ty!=="order"?"rgba(16,185,129,0.12)":T.overlaySm,border:`1px solid ${ok&&ty!=="order"?"rgba(16,185,129,0.35)":T.border}`,color:ok&&ty!=="order"?T.green:T.muted,fontWeight:ok&&ty!=="order"?700:400}}>
+              {ty==="order" ? `${oi+1}. ` : ok ? "✓ " : `${LETTERS[oi]}. `}{opt}
+            </div>); })}
+          {ty==="order" && <div style={{fontSize:11,color:T.muted,fontStyle:"italic"}}>Shown in this order here — staff see it shuffled and put it back in order.</div>}
+        </div>
+      )}
+      {q.why && <div style={{marginTop:10,fontSize:12,color:T.accentLt,lineHeight:1.5}}>💡 Why: {q.why}</div>}
+    </div>
+  );
+}
 
 /**
  * ModulePreviewModal — admin read-only preview of a training module
@@ -42,7 +75,7 @@ function ModulePreviewModal({ m, staff, assigns, comps, compHistory = [], module
               {m._custom && <Pill label="Custom" col="amber"/>}
               <Pill label={`v${m.version||1}`} col="navy"/>
             </div>
-            <p style={{margin:"3px 0 0",fontSize:12,color:T.muted}}>{m.category} · {m.duration} · {quiz.length} questions · {m.renewalMonths?`Renews every ${m.renewalMonths} months`:"No renewal"}</p>
+            <p style={{margin:"3px 0 0",fontSize:12,color:T.muted}}>{m.category} · {m.duration} · {quizSummary(m)}{m.signoff&&m.signoff.text&&quiz.length?" · signed declaration":""} · {m.renewalMonths?`Renews every ${m.renewalMonths} months`:"No renewal"}</p>
           </div>
           <button onClick={onClose} style={{background:T.overlay,border:`1px solid ${T.borderMd}`,borderRadius:10,padding:"8px 14px",color:T.muted,cursor:"pointer",fontFamily:font,fontSize:13,fontWeight:700,flexShrink:0}}>✕ Close</button>
         </div>
@@ -64,7 +97,7 @@ function ModulePreviewModal({ m, staff, assigns, comps, compHistory = [], module
             <div>
               {m.description && <p style={{color:T.muted,fontSize:14,marginBottom:20,lineHeight:1.6}}>{m.description}</p>}
               <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:12,marginBottom:20}}>
-                {[{label:"Category",value:m.category||"—"},{label:"Duration",value:m.duration||"—"},{label:"Level",value:m.level||"—"},{label:"Pass Mark",value:`${passMarkOf(m)}%`},{label:"Renewal",value:m.renewalMonths?`Every ${m.renewalMonths} months`:"Not required"},{label:"Questions",value:`${quiz.length} multiple choice`}].map((row,i)=>(
+                {[{label:"Category",value:m.category||"—"},{label:"Duration",value:m.duration||"—"},{label:"Level",value:m.level||"—"},{label:"Pass Mark",value:`${passMarkOf(m)}%`},{label:"Renewal",value:m.renewalMonths?`Every ${m.renewalMonths} months`:"Not required"},{label:"Questions",value:quizSummary(m)},{label:"Declaration",value:m.signoff&&m.signoff.text?"Signed with their name":"None"}].map((row,i)=>(
                   <div key={i} style={{background:T.overlay,borderRadius:10,padding:"10px 14px",border:`1px solid ${T.border}`}}>
                     <div style={{fontSize:10,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:.5,marginBottom:3}}>{row.label}</div>
                     <div style={{fontSize:13,fontWeight:600,color:T.white}}>{row.value}</div>
@@ -111,6 +144,7 @@ function ModulePreviewModal({ m, staff, assigns, comps, compHistory = [], module
                   {slides[previewSlide].video
                     ? <SlideVideo video={slides[previewSlide].video} Z={T} style={{marginTop:12}}/>
                     : slides[previewSlide].videoUrl && <video controls style={{width:"100%",borderRadius:10,marginTop:12}}><source src={slides[previewSlide].videoUrl}/></video>}
+                  {slides[previewSlide].check && <div style={{marginTop:14}}><AnswerKey q={slides[previewSlide].check} label="Quick check:" T={T}/></div>}
                 </div>
                 <div style={{display:"flex",gap:6,marginTop:12,overflowX:"auto",paddingBottom:4}}>
                   {slides.map((_,i)=>(<button key={i} onClick={()=>setPreviewSlide(i)} style={{flexShrink:0,width:44,height:32,borderRadius:6,border:`2px solid ${previewSlide===i?T.accent:T.border}`,background:previewSlide===i?"rgba(37,99,235,0.15)":T.overlay,cursor:"pointer",fontSize:10,color:previewSlide===i?T.accentLt:T.muted,fontWeight:previewSlide===i?700:400}}>{i+1}</button>))}
@@ -163,17 +197,11 @@ function ModulePreviewModal({ m, staff, assigns, comps, compHistory = [], module
           })()}
           {previewTab==="quiz" && (
             <div>
-              {quiz.length===0 ? <div style={{textAlign:"center",padding:"32px 0",color:T.muted,fontSize:14}}>No quiz questions.</div> :
+              {quiz.length===0 ? <div style={{textAlign:"center",padding:"32px 0",color:T.muted,fontSize:14}}>No quiz questions.{m.signoff&&m.signoff.text?" Staff sign the declaration instead.":""}</div> :
                 <div style={{display:"flex",flexDirection:"column",gap:16}}>
                   <div style={{padding:"10px 14px",background:"rgba(245,158,11,0.08)",border:"1px solid rgba(245,158,11,0.2)",borderRadius:10,fontSize:12,color:T.gold}}>⚠ Admin preview — correct answers highlighted in green</div>
-                  {quiz.map((q,qi)=>(
-                    <div key={qi} style={{background:T.overlay,borderRadius:12,padding:"16px 18px",border:`1px solid ${T.border}`}}>
-                      <div style={{fontSize:13,fontWeight:700,color:T.white,marginBottom:12}}>Q{qi+1}. {q.q}</div>
-                      <div style={{display:"flex",flexDirection:"column",gap:7}}>
-                        {q.options.map((opt,oi)=>(<div key={oi} style={{padding:"8px 12px",borderRadius:8,fontSize:12,background:oi===q.answer?"rgba(16,185,129,0.12)":T.overlaySm,border:`1px solid ${oi===q.answer?"rgba(16,185,129,0.35)":T.border}`,color:oi===q.answer?T.green:T.muted,fontWeight:oi===q.answer?700:400}}>{oi===q.answer?"✓ ":""}{opt}</div>))}
-                      </div>
-                    </div>
-                  ))}
+                  <div style={{fontSize:12,color:T.muted}}>{quizSummary(m)}</div>
+                  {quiz.map((q,qi)=>(<AnswerKey key={qi} q={q} n={qi+1} T={T}/>))}
                 </div>
               }
             </div>

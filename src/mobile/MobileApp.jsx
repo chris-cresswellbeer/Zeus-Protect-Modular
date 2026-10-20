@@ -57,7 +57,7 @@ import { bundlesFor } from "../domains/documents/bundles";
 import { progressMap, saveProgress as saveModuleProgress, clearProgress } from "../lib/moduleProgress";
 import { dueInfo } from "../lib/dueDates";
 import { latestByKey } from "../domains/inspections/inspectionDue";
-import { isPassed } from "../domains/training/completion";
+import { isPassed, passMarkOf } from "../domains/training/completion";
 import { sameName } from "../lib/openActions";
 import { t, useLang } from "../lib/i18n";
 import { LanguageChooser } from "../shared/LanguageBits";
@@ -210,6 +210,7 @@ function MobileApp({
   const must = (fn) => async (p) => { const r = await fn(p); if (r === false) throw new Error("not saved"); return r; };
   const handlers = React.useMemo(() => ({
     completion: must((p) => db.saveCompletion(p.userId, p.moduleId, p.record)),
+    quizFailure: must((p) => db.saveQuizFailure(p.record)),
     docAck: must((p) => db.acknowledgeDoc(p.userId, p.docId, p.date)),
     incident: must((p) => db.saveIncident(p.record)),
     // dseReport / riddorReported kept only so writes queued by older builds still drain.
@@ -376,12 +377,24 @@ function MobileApp({
     setProgressTick((t) => t + 1);
   }
 
-  // Only PASSED attempts are recorded from mobile (failures are not logged to quiz_failures here).
+  // A pass becomes the person's result; a fail is logged for the admins (Reports → Quiz
+  // Failures), like the computer. Both carry the answers (quizEngine.js attemptRecord) for the
+  // per-question report, and both wait in the offline queue when there's no signal.
   function completeModule(record) {
-    if (!record.passed) return;
+    if (!record.passed) {
+      const m = activeModule || {};
+      write(
+        "quizFailure",
+        { record: { id: "qf_" + Date.now(), userId: user.id, userName: user.name, moduleId: record.moduleId, moduleTitle: m.title || record.moduleId,
+          moduleVersion: record.moduleVersion || 1, score: record.score, date: record.date, acknowledged: false, passMark: passMarkOf(m), answers: record.answers } },
+        `Quiz attempt · ${m.title || record.moduleId}`
+      );
+      return;
+    }
     write(
       "completion",
-      { userId: user.id, moduleId: record.moduleId, record: { score: record.score, date: record.date, certId: record.certId,
+      { userId: user.id, moduleId: record.moduleId, record: { score: record.score, date: record.date, certId: record.certId, answers: record.answers,
+        moduleVersion: record.moduleVersion,
         ...(record.lang ? { lang: record.lang, translation: record.translation } : {}) } },   // the language it was done in
       `Certificate · ${(activeModule || {}).title || record.moduleId}`,
       () => db.optimisticCompletion && db.optimisticCompletion(user.id, record)

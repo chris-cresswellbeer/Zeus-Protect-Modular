@@ -14,7 +14,9 @@ import { getExpiryStatus, localISO, todayISO, ukDate } from "../../../lib/dates"
 import { overdueByPerson } from "../../../lib/dueDates";
 import { E } from "../../../lib/emoji";
 import { getSiteLists } from "../../../lib/siteLists";
-import { signinsOnSite } from "../../../lib/siteSignins";
+import { ukNow } from "../../../lib/contractorSignin";
+import { setRemembered } from "../../../lib/remembered";
+import { onSiteCard, approvalCard, loneCard } from "./dashCards";
 import { dbWrite, sb } from "../../../lib/supabase";
 import { Avatar } from "../../../shared/primitives";
 import { useApp } from "../../AppContext";
@@ -22,12 +24,12 @@ import { LazySortableStatGrid } from "../../lazyParts";
 
 export function AdminDashboard({ staff }) {
   const {
-    allMachineTypes, allModules, assigns, comps, contractors, contractorVisits, dashboardLayouts,
+    allMachineTypes, allModules, assigns, comps, contractorCerts, contractors, contractorVisits, dashboardLayouts,
     docAcknowledgements, docAssignments, docs, dueDates, equipment, extCerts, fireSafety, firstAidData, font,
     incidents, isMobile, machineComps, quizFailures, ras, setAdminReportView, setAtab, setBulkTarget,
     setDashboardLayouts, setFocusIncidentId, setPagePreset, setShowAdminReportForm, setStaffFilterManager,
     setStaffFilterProgress, setStaffFilterSearch, setStaffGroupByTeam, setStaffStatusFilter, setTarget,
-    siteInspections, siteSignins, T, user
+    loneSessions, loneSettings, permits, signinSettings, siteInspections, siteSignins, T, user
   } = useApp();
   const today = todayISO();
 
@@ -155,19 +157,19 @@ export function AdminDashboard({ staff }) {
           { id:"outOfService", node: card(E("📋",""),"Out of Service",outOfService.length,"equipment items",null,false,()=>{setPagePreset({tab:"equipment",status:"inactive"});setAtab("equipment");}) },
           { id:"quizFailures", node: card(E("❌",""),"Quiz Failures",unreviewedFailures.length,"unreviewed",unreviewedFailures.length>0,false,()=>{setAtab("reports");setAdminReportView("failures");}) },
           { id:"reviewsOverdue", node: card(E("📅",""),"Reviews Overdue",overdueDocReviews.length+overdueRAReviews.length,"docs & RAs",overdueDocReviews.length+overdueRAReviews.length>0,false,()=>setAtab(overdueDocReviews.length||!overdueRAReviews.length?"documents":"ra")) },
+          // contractors and lone working: the figures are worked out in ./dashCards.js
           { id:"onSiteNow", node: (()=>{
-            const onSiteWorkers = [];
-            (contractors||[]).forEach(c=>{
-              const todayV=(contractorVisits[c.id]||[]).filter(v=>v.date===today);
-              todayV.forEach(v=>{
-                if(v.workers&&v.workers.length>0) v.workers.forEach(wid=>{const w=(c.workers||[]).find(x=>x.id===wid);if(w)onSiteWorkers.push(w.name);});
-                else onSiteWorkers.push(c.name);
-              });
-            });
-            signinsOnSite(siteSignins, today).forEach(s=>onSiteWorkers.push(s.data.workerName));
-            const uniqueOnSite=[...new Set(onSiteWorkers)];
-            return card(E("🪪",""),"On Site Now",uniqueOnSite.length,uniqueOnSite.length>0?uniqueOnSite.slice(0,2).join(", ")+(uniqueOnSite.length>2?` +${uniqueOnSite.length-2} more`:""):"No contractors today",null,false,()=>setAtab("contractors"));
+            const f = onSiteCard({ signins: siteSignins, contractors, visits: contractorVisits, contractorCerts, permits, settings: signinSettings, today, now: ukNow().time });
+            return card(E("🪪",""),"On Site Now",f.value,f.sub,f.amber,f.red,()=>setAtab("contractors"));
           })() },
+          { id:"contractorApproval", node: (()=>{
+            const f = approvalCard({ contractors, required: signinSettings.requiredDocs, today });
+            return card(E("✅",""),"Contractor Approval",f.value,f.sub,f.amber,f.red,()=>{ setRemembered("contractors.approval", f.red||f.amber ? "docs" : "all"); setAtab("contractors"); });
+          })() },
+          ...(loneSettings && loneSettings.enabled ? [{ id:"loneWorking", node: (()=>{
+            const f = loneCard({ sessions: loneSessions });
+            return card(E("🧍",""),"Lone Working",f.value,f.sub,f.amber,f.red,()=>setAtab("lone"));
+          })() }] : []),
           { id:"fireSafety", node: (()=>{
             // same rules as the Fire Safety screen (domains/fireSafety/fireLogic.js)
             const f = fireSummary({ fireSafety: fireSafety||{}, extCerts: extCerts||{}, staff: staffList, inspections: siteInspections||[], today: fireToday() });

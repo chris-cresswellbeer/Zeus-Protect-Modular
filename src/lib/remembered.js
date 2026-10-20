@@ -32,6 +32,11 @@ export function useRemembered(key, initial) {
   return [v, setV];
 }
 
+/** Set a remembered choice before opening a page (e.g. a dashboard card opening a filtered list). */
+export function setRemembered(key, value) {
+  try { sessionStorage.setItem(PREFIX + key, JSON.stringify(value)); } catch { /* not remembered */ }
+}
+
 /** Sign-out: forget every remembered choice in this tab. */
 export function clearRemembered() {
   try {

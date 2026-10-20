@@ -8,7 +8,7 @@ import { fileProduct } from "../../lib/brandCore";
 /**
  * BackupPanel — top of ⚙ → Audit Trail (admins). Downloads a full
  * backup of the portal's records (lib/backup.js) and shows when the last one
- * was taken. The notification bell reminds admins after 30 days (App.jsx).
+ * was taken. The notification bell reminds admins after 30 days (app/bell/adminNotifications.js).
  */
 export const BACKUP_DUE_DAYS = 30;
 const daysSince = iso => Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);

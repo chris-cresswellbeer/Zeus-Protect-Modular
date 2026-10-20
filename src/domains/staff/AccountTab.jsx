@@ -9,7 +9,7 @@ import { isSuperAdmin } from "../../lib/brandCore";
  * profile summary, change password (with strength meter), theme picker
  * (shared/ThemePicker.jsx — themes come from theme/tokens.js) and
  * emoji on/off. Preferences are saved via onSaveTheme / onSaveEmojiMode
- * (→ user_profiles in App.jsx).
+ * (→ user_profiles, app/actions/account.js).
  *
  * Password change: through Supabase Auth (onChangeOwnPassword → lib/auth.js), which
  * checks the current password and stores the new one; at least 8 characters.

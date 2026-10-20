@@ -281,7 +281,7 @@ function IncidentForm({ form, setF, err, saved, onSubmit, onCancel, isEdit, Z, f
           <input type="file" accept={ACCEPT_IMG_DOCS} multiple style={{display:"none"}}
             // All selected files are read first, then added in one go (so choosing several
             // at once keeps them all). Photos are shrunk to phone size; other files kept as-is.
-            // They're uploaded to storage when the report is saved (App.jsx → lib/photos.js).
+            // They're uploaded to storage when the report is saved (app/actions/incidents.js → lib/photos.js).
             onChange={async e=>{
               const files = Array.from(e.target.files||[]);
               e.target.value="";

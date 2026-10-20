@@ -11,7 +11,7 @@ import { brandHtml } from "../../lib/brandCore";
  * PermitsTab — admin Permit to Work register: list (filter by status/type), create/edit
  * (PermitForm), detail with activate (draft → active) / close (active → closed), and print.
  * Active permits appear on the mobile app, where operatives sign on/off against them
- * (App.jsx mobilePermits / mobileDb.savePermitSignOn|Off).
+ * (app/data/useMobileWrites.js mobilePermits / mobileDb.savePermitSignOn|Off).
  * Every change calls dbSavePermit directly (permits have no auto-sync effect).
  *
  * PERMIT SHAPE (permits table, JSON `data` per permit):

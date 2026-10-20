@@ -11,7 +11,7 @@ import { uploadEvidence } from "./evidence";
  * don't have to resit it. Two ways in, both on Assign Training:
  *   RecordCompletionModal     — one person, one module (Individual view)
  *   ImportPriorTrainingModal  — many at once from a CSV file (for the move)
- * Both call App.jsx recordCompletions(), which assigns the module if needed and
+ * Both call app/actions/training.js recordCompletions(), which assigns the module if needed and
  * never overwrites a result the person already has. See completion.js.
  */
 
@@ -87,7 +87,7 @@ function RecordCompletionModal({ person, module: m, onSave, onClose, byName, Z, 
 // ── CSV ──────────────────────────────────────────────────────────────────────
 /** Minimal CSV parser: commas or semicolons, "quoted, fields", "" escapes, CRLF. */
 export function parseCsv(text) {
-  const t = String(text || "").replace(/^﻿/, "");
+  const t = String(text || "").replace(/^\uFEFF/, "");
   const firstLine = t.split(/\r?\n/)[0] || "";
   const sep = (firstLine.match(/;/g) || []).length > (firstLine.match(/,/g) || []).length ? ";" : ",";
   const rows = []; let row = [], cur = "", q = false;

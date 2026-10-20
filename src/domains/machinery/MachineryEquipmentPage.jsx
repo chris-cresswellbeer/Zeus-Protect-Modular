@@ -6,7 +6,7 @@ import React, { useState } from "react";
  * managers): they are also the racking inspectors. Tabs over the SAME pages admins use:
  * Machinery Competence (AdminMachineryTab), Equipment Register (EquipmentTrackerTab) and
  * Racking (domains/racking/RackingTab.jsx), passed in ready-made
- * by App.jsx. No other admin pages are reachable from here.
+ * by the portal. No other admin pages are reachable from here.
  */
 export function MachineryEquipmentPage({ machinery, equipment, racking, initial = "machinery", Z, font }) {
   const [tab, setTab] = useState(["equipment", "racking"].includes(initial) ? initial : "machinery");

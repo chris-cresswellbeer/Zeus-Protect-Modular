@@ -6,7 +6,7 @@
  * Its only job is to mount the React tree into the <div id="root"> element.
  *
  * Everything else — login, data loading from Supabase, desktop vs. mobile
- * layout, navigation — lives in App.jsx (the "composition root").
+ * layout, navigation — lives in App.jsx and src/app/ (see src/app/README.md).
  *
  * NOTE ON StrictMode:
  *   In development (`npm run dev`) React.StrictMode deliberately mounts every

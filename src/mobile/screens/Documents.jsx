@@ -18,7 +18,7 @@ const EXT_ICONS = {
 
 // Props: docs (all documents), required (docs assigned to this user), acknowledgements
 // ({[docId]:{date}} for THIS user), onAcknowledge(doc) → queued write, onPreview(doc)
-// → opens the shared PreviewModal via App.jsx. The file-type icon comes from the file
+// → opens the shared PreviewModal via the portal. The file-type icon comes from the file
 // name's extension, falling back to doc.ext. bundles = the document bundles given to
 // this user (progress cards at the top, and a bundle label on each document in one).
 function Documents({ docs, required, acknowledgements, onAcknowledge, onPreview, bundles = [], userId, Z, font }) {

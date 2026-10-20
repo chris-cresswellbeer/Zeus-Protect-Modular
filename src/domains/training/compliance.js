@@ -83,7 +83,7 @@ export const STATUS_TEXT = { green: "Compliant", amber: "In Progress", red: "Ove
 
 /**
  * One person's training figure for staff lists, reports and exports.
- * @param modules  all modules (objects); assigns/comps as held in App.jsx
+ * @param modules  all modules (objects); assigns/comps as held in the app's shared state (app/useAppState.js)
  * @returns { pct, good, total, band, status }  pct is 0 (band "none") when nothing is assigned
  */
 export function staffTraining(userId, assigns, comps, modules) {

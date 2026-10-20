@@ -11,7 +11,7 @@
  *     done()    call after saving or cancelling: forgets the draft and the warning
  *
  * While a form has unsaved changes:
- *   • moving to another page asks first (confirmLeave(), used by App.jsx navigation);
+ *   • moving to another page asks first (confirmLeave(), used by the portal navigation, app/useAppState.js);
  *   • closing or reloading the tab asks first (the browser's own warning);
  *   • a draft is kept on this device (localStorage, per person and form), so the work
  *     can be restored after a sign-out for inactivity, a closed tab or a crash.

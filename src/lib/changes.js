@@ -2,7 +2,7 @@
  * ═══════════════════════════════════════════════════════════════════════════
  * lib/changes.js — "has anything changed?" before re-reading a table
  * ═══════════════════════════════════════════════════════════════════════════
- * The portal re-reads shared tables every 30 seconds (App.jsx refreshSharedRecords,
+ * The portal re-reads shared tables every 30 seconds (app/data/sync.js refreshSharedRecords,
  * and the racking / PPE screens every minute) so people see each other's changes.
  * Re-reading a whole table that hasn't changed wastes time and data, so first one small
  * request asks the database for a "signature" of each table (how many rows this person
@@ -16,7 +16,7 @@
  * Take the signature BEFORE reading: a change made in between is then seen next time.
  * If change_tracking.sql hasn't been run (or the check fails) every table counts as
  * changed, so the portal behaves exactly as it did before: nothing is ever missed.
- * Each tracker remembers its own reads (App.jsx and each client have their own). Everything is
+ * Each tracker remembers its own reads (app/data/sync.js and each client have their own). Everything is
  * read again anyway every 10 minutes, and after any save the database refused.
  * ═══════════════════════════════════════════════════════════════════════════
  */

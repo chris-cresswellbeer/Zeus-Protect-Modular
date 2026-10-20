@@ -4,7 +4,7 @@
  * part, photos, SEMA rating, note), "Seen it again", and for racking inspectors (admins and
  * Machinery & Equipment access) confirm the rating, mark offloaded, book and record the
  * repair, or close a report made by mistake. Used on the phone (mobile/MobileApp.jsx) and
- * in a window on the portal (domains/racking/RackingTab.jsx, App.jsx for ?rack= links).
+ * in a window on the portal (domains/racking/RackingTab.jsx, app/siteBars.jsx for ?rack= links).
  * Rules: lib/racking.js. Saving: lib/rackClient.js. A red report emails straight away.
  */
 import React from "react";

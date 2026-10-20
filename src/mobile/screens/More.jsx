@@ -243,7 +243,7 @@ function Certificates({ certificates, holder, holderJob = "", Z, font }) {
 // ─── Corrective actions ──────────────────────────────────────────────────────
 
 // The user's investigation actions (matched by owner name). "Mark complete" goes through
-// the offline queue → App.jsx dbCompleteAction.
+// the offline queue → app/actions/incidents.js dbCompleteAction.
 function CorrectiveActions({ open, closed, onComplete, onAddProof, Z, font }) {
   return (
     <Screen Z={Z}>

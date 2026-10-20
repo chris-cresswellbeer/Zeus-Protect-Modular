@@ -22,12 +22,12 @@ import { useTicks, Tick, TickAll, BulkBar } from "../../shared/BulkBar";
  * confirmation, RIDDOR "reported to HSE" tracking (date / HSE ref / by whom),
  * link to the investigation, Excel export, and a printable "Accident Book" view.
  *
- * Props (all from App.jsx): incidents/setIncidents, dbDeleteIncident, staff,
+ * Props (all from the app's shared state (src/app)): incidents/setIncidents, dbDeleteIncident, staff,
  * investigations/setInvestigations, onOpenInvestigation, equipment/setEquipment,
  * focusIncidentId/setFocusIncidentId (deep-link from the dashboard),
  * showAdminReportForm/setShowAdminReportForm (open the "new report" form), Z, font.
  *
- * Saving: changes go into `incidents` state and are persisted by App.jsx's
+ * Saving: changes go into `incidents` state and are persisted by the auto-sync in
  * auto-sync effect (see the dbSaveIncident warning about unsaved fields).
  */
 import { isIncompleteQuickReport } from "./quickReportStatus";

@@ -23,7 +23,7 @@
  *   conflicts: [{ label, mine, theirs }]   // fields BOTH changed differently
  * }
  * Pure functions, no React — used by InvestigationTab (with a prompt) and by
- * App.jsx's save (silently, for background saves like "action completed").
+ * the save in app/actions/incidents.js (silently, for background saves like "action completed").
  */
 
 function stable(v) {

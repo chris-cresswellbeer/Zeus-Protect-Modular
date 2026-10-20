@@ -7,7 +7,7 @@ import { todayISO } from "../../lib/dates";
  * QuickReportModal — 30-second "Report a Hazard" pop-up for staff (desktop).
  * Three questions: what, where (the site's report locations — Site Settings — or "Other"), urgency.
  * Produces a minimal incident record (id "qr_<timestamp>", quickReport:true) and
- * hands it to onSubmit — App.jsx adds it to incidents and saves it.
+ * hands it to onSubmit — the portal adds it to incidents and saves it.
  * Urgency "high" is filed as type "unsafe_condition", anything else as "near_miss".
  * (The mobile equivalent is mobile/screens/ReportHazard.jsx.)
  * NB: no email/push notification is sent — the report appears in the admin Incidents

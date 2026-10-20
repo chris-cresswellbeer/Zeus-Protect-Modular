@@ -3,12 +3,12 @@
 // The mobile shell: header, offline banner, screen router, tab bar.
 //
 // This component is intentionally a *view* over state that already lives in
-// App.jsx. It does not own the domain data and it does not talk to Supabase
+// the desktop portal (src/app). It does not own the domain data and it does not talk to Supabase
 // directly — every write goes out through the `db` prop, which is the existing
 // dbSave*/dbAcknowledge* functions, wrapped by the offline queue so nothing is
 // lost in a chill store.
 //
-// Mount it from App.jsx when the viewport is phone-sized:
+// Mount it from the app's shared state (src/app) when the viewport is phone-sized:
 //
 //   const winW = useWindowWidth();
 //   if (winW <= 700 && user) return <MobileApp … />;
@@ -113,10 +113,10 @@ const PARENT_TAB = {
 // DSE, incident triage and incident records live in the desktop portal.
 const MOBILE_INSP_TYPES = ["weekly_walk", "office_housekeeping", "warehouse_housekeeping", "fire_drill"];
 
-// PROPS: user, onSignOut, onSwitchToDesktop, the domain maps from App.jsx (allModules,
+// PROPS: user, onSignOut, onSwitchToDesktop, the domain maps from the app's shared state (src/app) (allModules,
 // assigns, comps, docs, docAssignments, docAcknowledgements, dseReports, incidents,
 // investigations, allUsers, siteInspections, permits = mobilePermits view model),
-// theme/setTheme/setDarkMode, and `db` = App.jsx's mobileDb object.
+// theme/setTheme/setDarkMode, and `db` = app/data/useMobileWrites.js's mobileDb object.
 // Optional db functions (optimistic*, previewDoc, addActionProof…) are always called
 // as `db.x && db.x(...)`, so a missing one is simply skipped. Currently mobileDb does
 // not provide optimisticInspection, optimisticPermitSignOn/Off or addActionProof.
@@ -126,15 +126,15 @@ const MOBILE_INSP_TYPES = ["weekly_walk", "office_housekeeping", "warehouse_hous
 function MobileApp({
   // identity
   user, onSignOut, onSwitchToDesktop, onCompleteQuickReport,
-  // domain state, straight from App.jsx
+  // domain state, straight from the app's shared state (src/app)
   allModules, assigns, comps, docs, docAssignments, docAcknowledgements, docBundles = [],
   dseReports, extCerts = {}, incidents, investigations, allUsers = [], dueDates = {},
   siteInspections = [], permits = [],
   // theme
   theme, setTheme, setDarkMode,
-  // language ("en" | "fr" | "pl" | "ro") and how to change it (App.jsx chooseLanguage)
+  // language ("en" | "fr" | "pl" | "ro") and how to change it (app/actions/account.js chooseLanguage)
   language = "en", onChangeLanguage,
-  // writes — the existing App.jsx functions
+  // writes — the desktop functions (src/app/actions)
   db,
 }) {
   const [online] = useOnline();
@@ -147,7 +147,7 @@ function MobileApp({
   // the person's saved one if it's that mode, else the last one they used in it.
   const effectiveTheme = followSystem ? themeForMode(systemDark ? "dark" : "light", theme) : theme;
   const T = getThemeTokens(effectiveTheme);
-  // Pale-text fix follows the theme actually on screen (App.jsx leaves this to us on phones).
+  // Pale-text fix follows the theme actually on screen (the desktop leaves this to us on phones).
   const brand = useBrand();   // re-render (and re-apply the theme) when the branding changes
   React.useEffect(() => { applyLightThemeFix(isLightTheme(effectiveTheme)); applyThemeVars(effectiveTheme); }, [effectiveTheme, brand]);
 
@@ -202,10 +202,10 @@ function MobileApp({
   const refreshQueue = React.useCallback(() => { listQueue().then(setQueue); }, []);
   React.useEffect(refreshQueue, [refreshQueue]);
 
-  // Queue item `type` → the App.jsx write that performs it. Adding a new offline-capable
+  // Queue item `type` → the desktop write (src/app/actions) that performs it. Adding a new offline-capable
   // write = add a handler here + call write("<type>", payload, label, optimistic).
   // Never rename an existing type: items already queued on phones would be dropped.
-  // must(): the App.jsx saves resolve false when the database didn't take the write (bad
+  // must(): the desktop saves (src/app/actions) resolve false when the database didn't take the write (bad
   // signal, server error) — that must count as FAILED, so the item stays queued and retries.
   const must = (fn) => async (p) => { const r = await fn(p); if (r === false) throw new Error("not saved"); return r; };
   const handlers = React.useMemo(() => ({

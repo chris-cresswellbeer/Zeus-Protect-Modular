@@ -10,7 +10,7 @@ import React from "react";
  *   lostTime   true | false | undefined (not known yet)
  *   daysLost   whole working days lost (number) or null
  *   backAtWork "YYYY-MM-DD" or "" (optional)
- * onChange(patch) merges the patch into the incident (App.jsx saves it).
+ * onChange(patch) merges the patch into the incident (app/data/useSyncEffects.js saves it).
  */
 export function LostTimeBox({ inc, onChange, Z, font }) {
   const [days, setDays] = React.useState(inc.daysLost == null ? "" : String(inc.daysLost));

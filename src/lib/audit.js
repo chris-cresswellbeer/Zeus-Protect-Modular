@@ -19,7 +19,7 @@
  *   WITHOUT logging, so loading data never creates entries.
  *
  * WHO
- *   setAuditUser(user) is called by App.jsx whenever the signed-in user changes.
+ *   setAuditUser(user) is called by app/effects/useSessionEffects.js whenever the signed-in user changes.
  *   ⚠ Logins are checked in the browser (see lib/supabase.js), so "who" is the
  *   account the portal says is signed in. The SQL makes the table insert-only for
  *   the app's key, so entries can't be edited or deleted from the portal.

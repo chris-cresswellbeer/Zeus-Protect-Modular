@@ -20,7 +20,7 @@ import { isActionDone, actionDoneDate } from "../../lib/actionStatus";
  *   • assign training modules to their own team members (add only)
  *   • sign off DSE issues as resolved, and sign off corrective actions
  * They cannot see anyone outside their team or reach any admin screen.
- * Every assignment and sign-off is written to the audit trail by App.jsx.
+ * Every assignment and sign-off is written to the audit trail by app/actions/manager.js.
  */
 
 const norm = normName;

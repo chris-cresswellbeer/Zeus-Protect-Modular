@@ -19,7 +19,7 @@ import { todayISO, ukDate } from "../../lib/dates";
  * kept (each version is uploaded to its own path, doc_<id>_v<n>_<name>) and listed in
  * d.history; everyone's earlier read confirmations stay in doc_ack_history.
  *
- * Props are mostly pass-throughs of App.jsx state + db helpers
+ * Props are mostly pass-throughs of the app's shared state (app/useAppState.js) + db helpers
  * (setDocs, dbSaveDoc, dbDeleteDoc, setDocAssignments, dbSaveDocAssignments,
  *  setDocAcknowledgements, setPreviewDoc…), plus pre-computed counts from the parent.
  */

@@ -26,14 +26,14 @@ import { isActionDone, actionDoneDate, completeAction, reopenAction } from "../.
  *          actions:[{ id, description, owner(NAME), dueDate, priority, status, notes?,
  *                     attachments?, completedDate?, completedBy?, chasedOn?,
  *                     managerSignOff?: { by, date, note } (line manager, My Team tab) }] } }
- * Saved by App.jsx's [investigations] auto-sync effect (whole object per incident).
+ * Saved by app/data/useSyncEffects.js [investigations] auto-sync effect (whole object per incident).
  *
  * EDITING MODEL: the detail view edits a local copy (`invForm`). Nothing is stored
  * until "Save Investigation" copies invForm into App state — navigating away first
  * discards changes (including added/edited actions).
  *
  * TWO PEOPLE AT ONCE: baseRef holds the version this person opened. On save the
- * database copy is re-read (fetchInvestigation, from App.jsx); if someone else has
+ * database copy is re-read (fetchInvestigation, from the app's shared state (src/app)); if someone else has
  * saved since, a prompt shows what they changed and offers: combine both sets of
  * changes / overwrite with mine / discard mine and load theirs / cancel.
  * A banner also appears while editing if the live refresh brings in their change.
@@ -109,7 +109,7 @@ function InvestigationTab({ userName = "", incidents, setIncidents, staff, inves
     changed: view === "detail" && !!invForm && changedSince(baseRef.current || { ...BLANK_INV, photos: [], actions: [] }, invForm) });
 
   // Commit a version into App state (→ auto-saved to Supabase). `theirs` is the
-  // database copy the person has now seen, so App.jsx won't merge it in again.
+  // database copy the person has now seen, so the save (app/actions/incidents.js) won't merge it in again.
   function commitInvestigation(data, theirs) {
     if (acceptInvestigationBase) acceptInvestigationBase(activeId, theirs);
     setInvestigations(p=>({...p,[activeId]:{...data}}));

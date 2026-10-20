@@ -17,7 +17,7 @@ import { loadRacking } from "../../lib/rackClient";
  * browser saves as a PDF. Summary figures only: no names, no injury details, so it can
  * go to customers, insurers and auditors.
  *
- * data = everything the pack reads (App.jsx passes it through ReportsTab). PPE, lone
+ * data = everything the pack reads (app/screens/AdminPortal.jsx passes it through ReportsTab). PPE, lone
  * working and racking keep their own stores (lib/*Client.js), so they're read here, fresh,
  * when the view opens (lone working again when the period changes). A part that can't be
  * read (table not there yet) is simply left out of the pack.

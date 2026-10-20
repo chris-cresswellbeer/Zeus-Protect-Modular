@@ -5,7 +5,7 @@ import { escHtml } from "../../lib/brandCore";
 
 /**
  * CertificateModal — the training certificate on screen, and printing it.
- * Opened by App.jsx whenever `cert` = { module, score, date, certId, moduleVersion } is
+ * Opened (app/screens/CertModal.jsx) whenever `cert` = { module, score, date, certId, moduleVersion } is
  * set: from My Training, History, and straight after passing in the module player.
  *
  * The certificate itself is lib/certificate.js (one HTML string, A4 landscape), shown

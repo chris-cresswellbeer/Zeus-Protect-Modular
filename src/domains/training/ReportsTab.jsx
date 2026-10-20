@@ -28,7 +28,7 @@ import { trainingCompliance, complianceBand, staffTraining, PRINT_COLOR, moduleS
 
 /**
  * ReportsTab — admin "Reports" area. One component, many report views,
- * selected by `reportView` (state lives in App.jsx as adminReportView so other
+ * selected by `reportView` (state lives in the app's shared state (app/useAppState.js) as adminReportView so other
  * screens — dashboard cards, notifications — can deep-link to a view):
  *
  *   "matrix"    – staff × module training matrix, coloured by status, Excel export (TrainingMatrixView)
@@ -51,7 +51,7 @@ import { trainingCompliance, complianceBand, staffTraining, PRINT_COLOR, moduleS
  *
  * DATA: read-only apart from quiz-failure acknowledgements and DSE responses.
  * All maps (assigns, comps, extCerts, machineComps…) are keyed by user id.
- * setAtab is passed from App.jsx so the "actions" view can jump to other admin tabs.
+ * setAtab is passed from the app's shared state (src/app) so the "actions" view can jump to other admin tabs.
  *
  * COMPLIANCE MATHS used throughout: completed assigned modules ÷ assigned modules,
  * capped at 100%. Bands: 100% green/"Compliant", ≥50% amber/"In Progress", else red/"Overdue".

@@ -105,7 +105,7 @@ function Permits({ permits, user, onOpenPermit, Z, font }) {
 
 // One permit: hazards/precautions/PPE (from the permit, or the permit type's defaults),
 // and Sign on / Sign off for the current user. Sign-on times are stored per user on the
-// permit (signOns/signOffs) — see App.jsx mobileDb.savePermitSignOn/Off.
+// permit (signOns/signOffs) — see app/data/useMobileWrites.js mobileDb.savePermitSignOn/Off.
 function PermitDetail({ permit, user, onSignOn, onSignOff, Z, font }) {
   const t = typeFor(permit.typeId);
   const precautions = permit.precautions || t.precautions;

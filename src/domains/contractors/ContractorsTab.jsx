@@ -16,7 +16,7 @@ import { localISO, todayISO, ukDate } from "../../lib/dates";
  * People who signed in with the reception QR code (lib/siteSignins.js) show in On Site
  * Right Now too, and new companies / workers from it under "New contractors to review".
  *
- * CONTRACTOR DATA MODEL (App.jsx state → Supabase table)
+ * CONTRACTOR DATA MODEL (the app's shared state (app/useAppState.js) → Supabase table)
  *   contractors          [ { id:"con_<ts>", name, type, status, email, phone, notes,
  *                            workers:[{ id:"w_<ts>", name, role, email, phone }] } ]   → contractors
  *   contractorVisits     { [companyId]: [ { id:"v_<ts>", date, timeIn, timeOut, purpose, areas,
@@ -33,7 +33,7 @@ function ContractorsTab({ contractors, setContractors, contractorInductions, set
   const [showForm, setShowForm] = React.useState(false);
   const [filterStatus, setFilterStatus] = useRemembered("contractors.status", "all");
   const [search, setSearch] = React.useState("");
-  // Quick search (App.jsx) asks for a particular contractor: open it, then clear the request.
+  // Quick search (app/quickSearch.js) asks for a particular contractor: open it, then clear the request.
   React.useEffect(() => {
     if (!focusContractorId) return;
     setSelected(focusContractorId); setView("detail");

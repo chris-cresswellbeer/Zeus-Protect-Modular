@@ -7,7 +7,7 @@
  *     style={{ background: Z.bgCard, color: Z.white, border: `1px solid ${Z.border}` }}
  *
  * HOW THE ACTIVE THEME REACHES COMPONENTS:
- *   App.jsx (and mobile/MobileApp.jsx) do `const T = getThemeTokens(theme)` and pass
+ *   app/useAppState.js (and mobile/MobileApp.jsx) do `const T = getThemeTokens(theme)` and pass
  *   `T` down as a PROP, usually called `Z` (e.g. <CoshhTab Z={T} .../>).
  *   ⚠ A component that instead does `import { Z } from "../theme/tokens"` ALWAYS
  *   gets the default DARK palette and will not follow the user's theme choice
@@ -317,7 +317,7 @@ function applyBrandColours(primary, accent) {
 // ─── The active theme as CSS variables ─────────────────────────────────────────
 // Small shared pieces that aren't handed the theme (shared/primitives.jsx Pill and Bar)
 // read these, so they follow whichever theme is chosen: var(--zp-overlay), var(--zp-green)…
-// Called whenever the theme changes (App.jsx on computers, MobileApp.jsx on phones).
+// Called whenever the theme changes (app/data/useMobileWrites.js on computers, Mobileapp/data/useMobileWrites.js on phones).
 const THEME_VARS = { overlay: "--zp-overlay", borderMd: "--zp-border-md", muted: "--zp-muted", white: "--zp-text",
   green: "--zp-green", amber: "--zp-amber", red: "--zp-red", accent: "--zp-accent", accentLt: "--zp-accent-lt", navyMd: "--zp-card" };
 function applyThemeVars(themeKey) {

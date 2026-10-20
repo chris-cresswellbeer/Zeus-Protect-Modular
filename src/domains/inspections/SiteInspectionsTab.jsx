@@ -35,9 +35,9 @@ import { brandHtml } from "../../lib/brandCore";
  *                          actionOwner, actionDue, actionStatus: open|complete, actionNote,
  *                          completedDate, completedBy (set when marked resolved, from Oct 2026) } ],
  *     status: open|closed (open while any NC action is open), overallScore, maxScore }
- * Inspections created on the mobile app arrive through App.jsx mobileDb.saveInspection.
+ * Inspections created on the mobile app arrive through app/data/useMobileWrites.js mobileDb.saveInspection.
  *
- * SAVING: setInspections → App.jsx [siteInspections] auto-sync → dbSaveSiteInspections
+ * SAVING: setInspections → app/data/useSyncEffects.js [siteInspections] auto-sync → dbSaveSiteInspections
  * (upsert-and-prune — so removing an inspection from this array deletes it in the DB).
  *
  * INLINE NC FLAGGING: answering Partial/Non-compliant on a checklist question offers

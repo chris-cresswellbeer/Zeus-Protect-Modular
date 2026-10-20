@@ -2,7 +2,7 @@
 //
 // The training loop: intro → slides → one-question-at-a-time quiz → result.
 //
-// The single meaningful departure from the desktop player in App.jsx is the
+// The single meaningful departure from the desktop player (app/screens/ModulePlayerScreen.jsx) is the
 // quiz: the desktop stacks every question on one scroll, which does not survive
 // a phone. Scoring uses the module's pass mark (70% unless set otherwise), unlimited retakes, answer review.
 //
@@ -16,7 +16,7 @@ import { isHtmlContent, ensureRteStyles } from "../../domains/training/slideText
 import { useFileUrl } from "../../lib/fileAccess";
 import { videoSource } from "../../lib/videoLink";
 
-// Must match the desktop pass mark in App.jsx submitQuiz (also 70).
+// Must match the desktop pass mark in app/actions/player.js submitQuiz (also 70).
 import { PASS_MARK, passMarkOf } from "../../domains/training/completion";
 
 import { todayISO } from "../../lib/dates";
@@ -743,7 +743,7 @@ function AnswerReview({ quiz, answers, Z }) {
 // Matches the ZSL-<user><module><random> shape already in the seed data.
 // Generated client-side so the certificate can be shown before it syncs; the
 // server should still enforce uniqueness.
-// NB: differs from the desktop format (App.jsx builds ZSL- + last 8 chars of a base-36
+// NB: differs from the desktop format (app/actions/player.js builds ZSL- + last 8 chars of a base-36
 // string). Both start with the branding prefix (e.g. "ZSL-"); nothing parses them, they're reference numbers only.
 function makeCertId(userId, moduleId) {
   const rand = Math.random().toString(36).toUpperCase().slice(2, 8);

@@ -11,7 +11,7 @@
  * Until a site has saved its own, the generic DEFAULTS below are used.
  * The Biggleswade lists were put in the database by site_content.sql.
  *
- *   loadSiteLists()        read once after sign-in (App.jsx)
+ *   loadSiteLists()        read once after sign-in (app/data/useLoadAll.js)
  *   useSiteLists()         hook → { firstAidZones, firstAidShifts, reportLocations, saved }
  *                          (re-reads the row when a screen opens, if 30 s have passed)
  *   saveSiteLists(lists)   admins; resolves to an error message or null

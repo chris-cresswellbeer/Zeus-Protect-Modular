@@ -4,7 +4,7 @@ import React from "react";
  * SessionTimeout — signs people out after 30 minutes without activity, with a
  * 2-minute warning that counts down and has a "Stay signed in" button.
  *
- *   startSession({ onExpire, onSignOut })   App.jsx, when someone signs in
+ *   startSession({ onExpire, onSignOut })   app/effects/useSessionEffects.js, when someone signs in
  *   stopSession()                           when they sign out
  *   <SessionWarningHost/>                   mounted once in main.jsx (desktop and phone)
  *

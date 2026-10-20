@@ -24,7 +24,7 @@ import { fileShort } from "../../lib/brandCore";
  *     defects:[{id,date,reportedBy,description,severity:low|medium|high|critical,status:open|resolved,resolution,incidentLinked?}] }
  * Defects can also be created automatically from incident reports (incidentLinked:true).
  *
- * SAVING: every change goes through setEquipment → App.jsx [equipment] auto-sync
+ * SAVING: every change goes through setEquipment → app/data/useSyncEffects.js [equipment] auto-sync
  * effect → dbSaveEquipment (upsert-and-prune). This component never calls Supabase.
  */
 function EquipmentTrackerTab({ equipment, setEquipment, staff, preset, clearPreset, extinguishers=[], onOpenFireSafety, Z, font }) {

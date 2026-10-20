@@ -26,7 +26,7 @@ import { todayISO, ukDate } from "../../lib/dates";
  *   fra            → fire_fra_reviews    { id, date, reviewedBy, trigger, changes, nextReviewDue, fileName?, fileUrl? }
  * (Examples in demo/seedFireSafety.js; the per-tab form below is the source of truth.)
  *
- * All six live in ONE state object `fireSafety` in App.jsx; any change is saved by the
+ * All six live in ONE state object `fireSafety` in the app's shared state (app/useAppState.js); any change is saved by the
  * [fireSafety] auto-sync effect → dbSaveFireSafety (upsert-and-prune per table).
  * Add/edit uses a single shared modal whose fields depend on `subTab` (wardens have their
  * own form, which saves the certificate record instead).

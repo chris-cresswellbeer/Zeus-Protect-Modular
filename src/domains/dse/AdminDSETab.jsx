@@ -5,7 +5,7 @@ import { Pill, Avatar, StatCard } from "../../shared/primitives";
  * AdminDSETab — admin review of staff DSE (Display Screen Equipment) self-assessments.
  * Shown inside Reports → "DSE". Lists every staff member's LATEST report; expanding one
  * shows each flagged issue with the staff comment, and lets the admin write a response
- * and mark it resolved (saved via App.jsx's adminResponses auto-sync effect).
+ * and mark it resolved (saved via the adminResponses auto-sync effect (app/data/useSyncEffects.js)).
  *
  * DSE DATA MODEL (shared by all three DSE components)
  *   dseReports     = { [userId]: [ report, report, ... ] }   ← oldest first; the LAST one is current

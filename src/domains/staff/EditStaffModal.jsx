@@ -9,8 +9,8 @@ import { Avatar } from "../../shared/primitives";
  * Machinery & Equipment access (machineryAccess: manage those two pages without being an admin),
  * status (active / inactive / leaver — leavers cannot log in), and an optional
  * temporary password.
- * onSaveProfile(updated) → App.jsx saves to users + user_profiles.
- * onSetTempPassword(user, password) → App.jsx → netlify/functions/zp-admin: the person must
+ * onSaveProfile(updated) → app/actions/account.js saves to users + user_profiles.
+ * onSetTempPassword(user, password) → app/actions/account.js → netlify/functions/zp-admin: the person must
  * choose their own at next sign-in. Minimum 8 characters.
  * NB: renaming someone does not update investigation actions assigned to their old
  * name (actions store the owner's NAME).

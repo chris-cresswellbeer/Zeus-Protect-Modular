@@ -10,7 +10,7 @@ import { mergeAiders, aiderState, coverageCount as countCover } from "./firstAid
  * (monthly checks) and the first-aid needs assessment.
  *
  * DATA: firstAidData = { aiders:[], kits:[], assessment:{ minPerShift, ... }, customZones:[] }
- * stored as ONE JSON document (first_aid_register row id "singleton") via App.jsx's
+ * stored as ONE JSON document (first_aid_register row id "singleton") via the auto-sync in
  * [firstAidData] auto-sync effect. Zones = the site's zones (Site Settings, lib/siteLists.js) + customZones;
  * shifts = the site's shifts (Site Settings).
  *

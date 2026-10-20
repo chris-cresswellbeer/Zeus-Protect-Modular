@@ -15,7 +15,7 @@ import { localISO, todayISO, ukDate } from "../../lib/dates";
  * Every change updates App state AND calls the matching dbSave* helper directly
  * (contractors are not covered by an auto-sync effect).
  *
- * CONTRACTOR DATA MODEL (App.jsx state → Supabase table)
+ * CONTRACTOR DATA MODEL (the app's shared state (app/useAppState.js) → Supabase table)
  *   contractors          [ { id:"con_<ts>", name, type, status, email, phone, notes,
  *                            workers:[{ id:"w_<ts>", name, role, email, phone }] } ]   → contractors
  *   contractorVisits     { [companyId]: [ { id:"v_<ts>", date, timeIn, timeOut, purpose, areas,

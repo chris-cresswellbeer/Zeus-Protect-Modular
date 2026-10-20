@@ -15,6 +15,11 @@ import { AdminDSETab } from "../dse/AdminDSETab";
 import { TrainingMatrixView } from "./TrainingMatrixView";
 import { MonthlyReportView } from "../reports/MonthlyReportView";
 import { EvidencePackView } from "../reports/EvidencePackView";
+import { BoardReportView } from "../reports/BoardReportView";
+import { InspectionScheduleView } from "../reports/InspectionScheduleView";
+import { RiddorRegisterView } from "../reports/RiddorRegisterView";
+import { recordTrainingSnapshot } from "../../lib/hsPerformance";
+import { buildTrainingMatrix } from "./trainingMatrix";
 import { useRemembered } from "../../lib/remembered";
 import { useSort, sortRows, SortButton } from "../../shared/Sortable";
 import { isActionDone } from "../../lib/actionStatus";
@@ -28,6 +33,9 @@ import { trainingCompliance, complianceBand, staffTraining, PRINT_COLOR, moduleS
  *
  *   "matrix"    – staff × module training matrix, coloured by status, Excel export (TrainingMatrixView)
  *   "monthly"   – monthly H&S management report / board pack as PDF (MonthlyReportView)
+ *   "board"     – quarterly / annual H&S performance report for the board, hours worked (BoardReportView)
+ *   "schedule"  – inspection & audit schedule: due vs done on time, overdue, findings ageing (InspectionScheduleView)
+ *   "riddor"    – RIDDOR register, printable and Excel (RiddorRegisterView)
  *   "evidence"  – audit evidence pack for customers / insurers / auditors, any period, no names (EvidencePackView)
  *   "staff"     – per-staff training progress, expandable to quiz answers, ext. certs, machinery
  *   "manager"   – compliance grouped by line manager (uses ManagerRow)
@@ -70,6 +78,16 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
   const [expandedStaff, setExpandedStaff] = useState(null);
   const [expandedModule, setExpandedModule] = useState(null);
   const [rptSort, setRptSortBy] = useSort("reports.staff", { by: "name", dir: "asc" });   // Staff Overview column sort
+
+  // Keep a monthly history of training compliance for the board report's trend (the portal
+  // only knows today's status): written at most once a day, when an admin opens Reports.
+  const snapDone = React.useRef(false);
+  React.useEffect(() => {
+    if (snapDone.current || !staff || !staff.length) return;
+    snapDone.current = true;
+    const pct = buildTrainingMatrix({ staff, modules: allModules, assigns: assigns || {}, comps: comps || {} }).totals.pct;
+    recordTrainingSnapshot(pct, todayISO()).catch(() => {});
+  }, [staff]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Manager performance calculations ──────────────────────────────────────
   // Groups staff by their `manager` text field and computes team totals for ManagerRow.
@@ -205,6 +223,9 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
         <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
           {tabBtn("matrix",    E("▦ ","")+"Training Matrix")}
           {tabBtn("monthly",   E("📑 ","")+"Monthly Report")}
+          {tabBtn("board",     E("📈 ","")+"H&S Performance")}
+          {tabBtn("schedule",  E("🗓 ","")+"Inspection Schedule")}
+          {tabBtn("riddor",    E("🏛 ","")+"RIDDOR Register")}
           {tabBtn("evidence",  E("📦 ","")+"Evidence Pack")}
           {tabBtn("staff",     E("👥 ","")+"Staff Overview")}
           {tabBtn("manager",   E("📊 ","")+"Manager Performance")}
@@ -738,6 +759,19 @@ function ReportsTab({ staff, assigns, comps, docs, docAssignments, docAcknowledg
       {reportView === "monthly" && (
         <MonthlyReportView incidents={incidents} investigations={investigations} inspections={inspections} ras={ras}
           staff={staff} modules={allModules} assigns={assigns} comps={comps} userName={userName} Z={Z} font={font}/>
+      )}
+
+      {reportView === "board" && (
+        <BoardReportView incidents={incidents} investigations={investigations} inspections={inspections}
+          staff={staff} modules={allModules} assigns={assigns} comps={comps} userName={userName} Z={Z} font={font}/>
+      )}
+
+      {reportView === "schedule" && (
+        <InspectionScheduleView inspections={inspections} userName={userName} Z={Z} font={font}/>
+      )}
+
+      {reportView === "riddor" && (
+        <RiddorRegisterView incidents={incidents} userName={userName} Z={Z} font={font}/>
       )}
 
       {reportView === "evidence" && (

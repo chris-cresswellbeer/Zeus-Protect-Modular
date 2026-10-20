@@ -15,6 +15,9 @@ import { useRacking, saveLocations, deleteLocation, saveCheck, saveRackingSettin
 import { RackBay, RateChip } from "../../shared/RackBay";
 import { qrSvg } from "../../lib/certificate";
 import { auditEvent } from "../../lib/audit";
+import { rackingWorkbook } from "../../lib/rackingExport";
+import { buildXlsx, downloadBlob } from "../../lib/xlsxWriter";
+import { brandCompany, fileShort } from "../../lib/brandCore";
 import { ask, notify } from "../../shared/Feedback";
 import { Modal, btn, small, field, lbl } from "../ppe/ppeUi";
 
@@ -101,6 +104,8 @@ export function RackingTab({ me, Z, font, focusCode, onFocusDone }) {
           ))}
         </div>
         <div style={{ flex: 1 }}/>
+        <button type="button" style={btn(Z, font)} disabled={!damage.length && !checks.length} data-testid="rack-xlsx" title="Every damage report (open and closed) and the inspections, as an Excel file"
+          onClick={() => downloadBlob(buildXlsx(rackingWorkbook({ damage, locations, checks, settings, company: brandCompany() })), `${fileShort()}-racking-register-${today()}.xlsx`)}>↓ Excel</button>
         <button type="button" style={btn(Z, font)} onClick={recordWeekly} data-testid="rack-weekly">Record racking check</button>
         <button type="button" style={btn(Z, font, "primary")} onClick={() => setPicking(true)} disabled={!locations.length} data-testid="rack-report-btn">+ Report damage</button>
       </div>

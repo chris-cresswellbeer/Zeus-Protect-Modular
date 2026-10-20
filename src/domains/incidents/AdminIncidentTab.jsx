@@ -33,6 +33,7 @@ import { useTicks, Tick, TickAll, BulkBar } from "../../shared/BulkBar";
 import { isIncompleteQuickReport } from "./quickReportStatus";
 import { AuditHistoryModal } from "../audit/AuditTrailTab";
 import { useRemembered } from "../../lib/remembered";
+import { LostTimeBox } from "./LostTimeBox";
 import { riddorDue, riddorDueText, riddorBadge, riddorUrgent, RIDDOR_CATEGORIES } from "./riddor";
 import { sb } from "../../lib/supabase";
 import { openFile } from "../../lib/fileAccess";
@@ -184,7 +185,7 @@ function AdminIncidentTab({ user, incidents, setIncidents, dbDeleteIncident, sta
       // ── Sheet 1: Incident Log ──
       const headers = [
         "Incident ID","Date","Time","Type","Location","Description",
-        "Injury Type","RIDDOR","Reported to HSE","HSE Report Date","HSE Reference","Reported to HSE By","HSE Notice Attached","RIDDOR Type","HSE Report Due By","Accident Code","Number Code","Status",
+        "Injury Type","Time Off Work","Working Days Lost","RIDDOR","Reported to HSE","HSE Report Date","HSE Reference","Reported to HSE By","HSE Notice Attached","RIDDOR Type","HSE Report Due By","Accident Code","Number Code","Status",
         "Reported By",
         "Equipment Involved","Equipment Asset No","Equipment Name","Equipment Damaged","Damage Description","Damage Severity","Taken Out of Service",
         "Person Involved","Date of Birth","Address","Postcode",
@@ -207,6 +208,8 @@ function AdminIncidentTab({ user, incidents, setIncidents, dbDeleteIncident, sta
             inc.location,
             inc.description,
             inc.injuryType||"",
+            inc.lostTime===true?"Yes":inc.lostTime===false?"No":"",
+            inc.lostTime===true&&inc.daysLost!=null?inc.daysLost:"",
             inc.riddor?"Yes":"No",
             inc.riddorReported?"Yes":"No",
             inc.riddorReportedDate||"",
@@ -244,7 +247,7 @@ function AdminIncidentTab({ user, incidents, setIncidents, dbDeleteIncident, sta
           ];
         });
 
-      const cols1 = [12,12,8,18,20,50, 20,8,14,14,16,20,14,16,22,14,12,10, 20, 12,14,30,12,30,14,14, 22,14,30,12, 22,22,22,22, 14,30,20, 30,30,40,22];
+      const cols1 = [12,12,8,18,20,50, 20,10,10,8,14,14,16,20,14,16,22,14,12,10, 20, 12,14,30,12,30,14,14, 22,14,30,12, 22,22,22,22, 14,30,20, 30,30,40,22];
 
       // ── Sheet 2: Monthly Summary ──
       const currentYear = new Date().getFullYear();
@@ -803,6 +806,11 @@ function AdminIncidentTab({ user, incidents, setIncidents, dbDeleteIncident, sta
                         </div>
                       );
                     })()}
+
+                    {/* Time off work: lost-time injuries and days lost for the board report (reports/boardReport.js) */}
+                    {(inc.type==="accident" || inc.lostTime!=null) && (
+                      <LostTimeBox inc={inc} onChange={patch=>setIncidents(p=>p.map(i=>i.id===inc.id?{...i,...patch}:i))} Z={Z} font={font}/>
+                    )}
 
                     {/* RIDDOR 2013: reportable incidents must be notified to HSE (most within 10 days; over-7-day injuries within 15).
                         Marking as reported stores date, HSE reference and reporter on the incident. */}

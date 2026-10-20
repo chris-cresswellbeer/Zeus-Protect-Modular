@@ -202,16 +202,8 @@ const arrow = (a, b, goodWhenDown = true) => {
   return `<span class="delta ${good ? "good" : "bad"}">${up ? "▲" : "▼"} ${Math.abs(a - b)} vs last month</span>`;
 };
 
-function renderMonthlyReportHtml(r, { logoSrc = "" } = {}) {
-  const i = r.incidents, t = r.training, a = r.actions, ins = r.inspections;
-  const tile = (label, value, sub, color = "#0f172a") => `<div class="tile"><div class="tv" style="color:${color}">${value}</div><div class="tl">${h(label)}</div><div class="ts">${sub || ""}</div></div>`;
-  const legend = TYPES.map(k => `<span><i style="background:${TYPE_COLORS[k]}"></i>${TYPE_LABELS[k]}</span>`).join("") + `<span><b style="color:#b91c1c">R</b> = RIDDOR</span>`;
-  const empty = (cols, text) => `<tr><td colspan="${cols}" class="empty">${h(text)}</td></tr>`;
-  const title = `H&S Management Report — ${r.period.label}`;
-
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${h(r.companyName.replace(/\s+/g, "_"))}_HS_Report_${r.period.year}-${pad(r.period.month + 1)}</title>
-<style>
-@page{size:A4;margin:14mm 13mm 16mm}
+/** The print styles shared by the printable reports (board report, inspection schedule, RIDDOR register). */
+const REPORT_CSS = `@page{size:A4;margin:14mm 13mm 16mm}
 *{box-sizing:border-box}
 body{font-family:"Segoe UI",Arial,sans-serif;color:#0f172a;font-size:11.5px;line-height:1.45;margin:0;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 .wrap{max-width:780px;margin:0 auto;padding:24px 16px}
@@ -244,7 +236,18 @@ td.empty{color:#64748b;font-style:italic;text-align:center;padding:10px}
 .note{font-size:9.5px;color:#64748b;font-style:italic;margin:2px 0 8px}
 footer{margin-top:26px;border-top:1px solid #e2e8f0;padding-top:8px;font-size:9.5px;color:#64748b;display:flex;justify-content:space-between}
 @media print{.toolbar{display:none}.wrap{padding:0;max-width:none}}
-</style></head><body>
+`;
+
+function renderMonthlyReportHtml(r, { logoSrc = "" } = {}) {
+  const i = r.incidents, t = r.training, a = r.actions, ins = r.inspections;
+  const tile = (label, value, sub, color = "#0f172a") => `<div class="tile"><div class="tv" style="color:${color}">${value}</div><div class="tl">${h(label)}</div><div class="ts">${sub || ""}</div></div>`;
+  const legend = TYPES.map(k => `<span><i style="background:${TYPE_COLORS[k]}"></i>${TYPE_LABELS[k]}</span>`).join("") + `<span><b style="color:#b91c1c">R</b> = RIDDOR</span>`;
+  const empty = (cols, text) => `<tr><td colspan="${cols}" class="empty">${h(text)}</td></tr>`;
+  const title = `H&S Management Report — ${r.period.label}`;
+
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${h(r.companyName.replace(/\s+/g, "_"))}_HS_Report_${r.period.year}-${pad(r.period.month + 1)}</title>
+<style>
+${REPORT_CSS}</style></head><body>
 <div class="toolbar">Your browser's print window opens automatically — choose <b>&nbsp;Save as PDF&nbsp;</b> as the printer. <button onclick="window.print()">Print / Save as PDF</button></div>
 <div class="wrap">
 <header class="cover">
@@ -357,4 +360,4 @@ function openMonthlyReport(html, filename) {
   return false;
 }
 
-export { buildMonthlyReport, renderMonthlyReportHtml, openMonthlyReport, MONTHS };
+export { buildMonthlyReport, renderMonthlyReportHtml, openMonthlyReport, MONTHS, REPORT_CSS };

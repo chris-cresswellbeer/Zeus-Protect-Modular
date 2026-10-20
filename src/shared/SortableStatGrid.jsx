@@ -2,7 +2,7 @@
  * shared/SortableStatGrid.jsx — the admin dashboard's figure cards, which can be dragged
  * into a different order (small ⠿⠿ handle in each card's corner).
  * In its own file so the drag-and-drop library (@dnd-kit) is only downloaded by admins
- * when the dashboard is shown (App.jsx loads this with React.lazy).
+ * when the dashboard is shown (app/lazyParts.jsx loads this with React.lazy).
  */
 import React from "react";
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";

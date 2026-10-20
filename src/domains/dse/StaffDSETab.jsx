@@ -6,7 +6,7 @@ import { ukDate } from "../../lib/dates";
 /**
  * StaffDSETab — the staff member's "My DSE" tab: start/retake the assessment and
  * see the latest report's issues alongside manager responses (resolved / open).
- * startAssessment() resets the wizard state in App.jsx and opens DSEAssessment.
+ * startAssessment() resets the wizard state (app/useAppState.js) and opens DSEAssessment.
  *
  * DSE DATA MODEL (shared by all three DSE components)
  *   dseReports     = { [userId]: [ report, report, ... ] }   ← oldest first; the LAST one is current
@@ -22,7 +22,7 @@ function StaffDSETab({ user, dseReports, adminResponses, setDseAnswers, setDseCo
   const latestRi    = myReports.length - 1;
   const myAdminResps = adminResponses[user.id] || {};
 
-  // onStartDse (App.jsx openDse) carries on from saved progress if there is some.
+  // onStartDse (app/actions/dse.js openDse) carries on from saved progress if there is some.
   const startAssessment = () => {
     if (onStartDse) return onStartDse();
     setDseAnswers({}); setDseComments({}); setDseSection(0); setDseSubmitted(false); setDseActive(true);

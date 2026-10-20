@@ -13,7 +13,7 @@ import { todayISO, ukDate } from "../../lib/dates";
  * (CSCS, IPAF, etc. — CONTRACTOR_CERT_TYPES) with issue/expiry dates.
  * Certificate files go to the "documents" bucket.
  *
- * CONTRACTOR DATA MODEL (App.jsx state → Supabase table)
+ * CONTRACTOR DATA MODEL (the app's shared state (app/useAppState.js) → Supabase table)
  *   contractors          [ { id:"con_<ts>", name, type, status, email, phone, notes,
  *                            workers:[{ id:"w_<ts>", name, role, email, phone }] } ]   → contractors
  *   contractorVisits     { [companyId]: [ { id:"v_<ts>", date, timeIn, timeOut, purpose, areas,

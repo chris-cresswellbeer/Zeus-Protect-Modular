@@ -3,12 +3,12 @@
 // The mobile shell: header, offline banner, screen router, tab bar.
 //
 // This component is intentionally a *view* over state that already lives in
-// App.jsx. It does not own the domain data and it does not talk to Supabase
+// the desktop portal (src/app). It does not own the domain data and it does not talk to Supabase
 // directly — every write goes out through the `db` prop, which is the existing
 // dbSave*/dbAcknowledge* functions, wrapped by the offline queue so nothing is
 // lost in a chill store.
 //
-// Mount it from App.jsx when the viewport is phone-sized:
+// Mount it from the app's shared state (src/app) when the viewport is phone-sized:
 //
 //   const winW = useWindowWidth();
 //   if (winW <= 700 && user) return <MobileApp … />;
@@ -37,6 +37,18 @@ import { Documents } from "./screens/Documents";
 import { More, Certificates, CorrectiveActions, TrainingHistory, Appearance } from "./screens/More";
 import { Inspections, InspectionRun } from "./screens/Inspection";
 import { Permits, PermitDetail } from "./screens/Permits";
+import { LoneWorking, LoneBanner } from "./screens/LoneWorking";
+import { LoneRespond } from "../shared/LoneRespond";
+import { useLoneSettings, useLoneSessions } from "../lib/loneClient";
+import { LONE_OPEN, LONE_ALARM } from "../lib/loneWorking";
+import { MyPpe, PpeBanner } from "./screens/MyPpe";
+import { usePpeSettings, usePpeIssues } from "../lib/ppeClient";
+import { RackPick } from "./screens/Racking";
+import { RackBay } from "../shared/RackBay";
+import { useRacking } from "../lib/rackClient";
+import { bayName } from "../lib/racking";
+import { hasMachineryAccess } from "../data/seedMachinery";
+import { getSiteLists } from "../lib/siteLists";
 import { INSP_TYPES } from "../data/seedInspections";
 import { useInspTemplates, inspTypes, inspTypeLabel } from "../lib/inspTemplates";
 import { myIncompleteQuickReports } from "../domains/incidents/quickReportStatus";
@@ -78,6 +90,11 @@ const TITLES = {
   inspections: ["Inspections", "Due & recent"],
   inspection: ["Inspection", ""],
   permits: ["Permits to work", ""],
+  lone: ["Lone working", ""],
+  ppe: ["Account", "My PPE"],
+  rack: ["Racking", ""],
+  rackpick: ["Racking", "Find a bay"],
+  lonealert: ["Lone working", "Alert"],
   permit: ["Permit to work", ""],
 };
 
@@ -87,6 +104,7 @@ const PARENT_TAB = {
   certificates: "more", actions: "more", history: "more", appearance: "more", language: "more",
   inspections: "more", inspection: "inspections",
   permits: "more", permit: "permits",
+  lone: "more", lonealert: "today", ppe: "more", rack: "more", rackpick: "more",
 };
 
 // Built-in inspection types that make sense to run from a phone (the annual audit and
@@ -95,10 +113,10 @@ const PARENT_TAB = {
 // DSE, incident triage and incident records live in the desktop portal.
 const MOBILE_INSP_TYPES = ["weekly_walk", "office_housekeeping", "warehouse_housekeeping", "fire_drill"];
 
-// PROPS: user, onSignOut, onSwitchToDesktop, the domain maps from App.jsx (allModules,
+// PROPS: user, onSignOut, onSwitchToDesktop, the domain maps from the app's shared state (src/app) (allModules,
 // assigns, comps, docs, docAssignments, docAcknowledgements, dseReports, incidents,
 // investigations, allUsers, siteInspections, permits = mobilePermits view model),
-// theme/setTheme/setDarkMode, and `db` = App.jsx's mobileDb object.
+// theme/setTheme/setDarkMode, and `db` = app/data/useMobileWrites.js's mobileDb object.
 // Optional db functions (optimistic*, previewDoc, addActionProof…) are always called
 // as `db.x && db.x(...)`, so a missing one is simply skipped. Currently mobileDb does
 // not provide optimisticInspection, optimisticPermitSignOn/Off or addActionProof.
@@ -108,15 +126,15 @@ const MOBILE_INSP_TYPES = ["weekly_walk", "office_housekeeping", "warehouse_hous
 function MobileApp({
   // identity
   user, onSignOut, onSwitchToDesktop, onCompleteQuickReport,
-  // domain state, straight from App.jsx
+  // domain state, straight from the app's shared state (src/app)
   allModules, assigns, comps, docs, docAssignments, docAcknowledgements, docBundles = [],
   dseReports, extCerts = {}, incidents, investigations, allUsers = [], dueDates = {},
   siteInspections = [], permits = [],
   // theme
   theme, setTheme, setDarkMode,
-  // language ("en" | "fr" | "pl" | "ro") and how to change it (App.jsx chooseLanguage)
+  // language ("en" | "fr" | "pl" | "ro") and how to change it (app/actions/account.js chooseLanguage)
   language = "en", onChangeLanguage,
-  // writes — the existing App.jsx functions
+  // writes — the desktop functions (src/app/actions)
   db,
 }) {
   const [online] = useOnline();
@@ -129,13 +147,32 @@ function MobileApp({
   // the person's saved one if it's that mode, else the last one they used in it.
   const effectiveTheme = followSystem ? themeForMode(systemDark ? "dark" : "light", theme) : theme;
   const T = getThemeTokens(effectiveTheme);
-  // Pale-text fix follows the theme actually on screen (App.jsx leaves this to us on phones).
+  // Pale-text fix follows the theme actually on screen (the desktop leaves this to us on phones).
   const brand = useBrand();   // re-render (and re-apply the theme) when the branding changes
   React.useEffect(() => { applyLightThemeFix(isLightTheme(effectiveTheme)); applyThemeVars(effectiveTheme); }, [effectiveTheme, brand]);
 
   const isAdmin = user.role === "admin";
+  // lone working: everyone's own session; admins and line managers also see alerts for others
+  const loneSettings = useLoneSettings(true);
+  const loneSessions = useLoneSessions(loneSettings.enabled, { every: 20000 });
+  const myLone = loneSessions.find((r) => String(r.user_id) === String(user.id) && LONE_OPEN.includes(r.status)) || null;
+  // the database rules already limit this to the team (managers) or everyone (admins); the
+  // same check here is a second line of defence against showing staff other people's
+  const norm = (x) => String(x || "").toLowerCase().replace(/\s+/g, " ").trim();
+  const myTeam = (r) => isAdmin || (user.role === "manager" && allUsers.some((u) => String(u.id) === String(r.user_id) && norm(u.manager) === norm(user.name)));
+  const otherAlarms = loneSessions.filter((r) => String(r.user_id) !== String(user.id) && LONE_ALARM.includes(r.status) && myTeam(r));
+  // PPE register: your own PPE (sign for it, report a problem)
+  const ppeSettings = usePpeSettings(true);
+  const ppeRows = usePpeIssues(ppeSettings.staffCanSee);
+  const ppeToSign = ppeSettings.staffCanSee ? ppeRows.filter((r) => String(r.user_id) === String(user.id) && r.status === "issued" && !(r.data || {}).signature).length : 0;
+  const [loneAlertId, setLoneAlertId] = React.useState(() => { try { return new URLSearchParams(window.location.search).get("lone"); } catch { return null; } });
   const [tab, setTab] = React.useState("today");
-  const [screen, setScreen] = React.useState("today");
+  const [screen, setScreen] = React.useState(() => { try { const q = new URLSearchParams(window.location.search); return q.get("rack") ? "rack" : q.get("lone") ? "lonealert" : "today"; } catch { return "today"; } });
+  // racking: ?rack=CODE (the QR label on a bay) opens that bay; More → Racking damage finds one by hand
+  const [rackCode, setRackCode] = React.useState(() => { try { return new URLSearchParams(window.location.search).get("rack"); } catch { return null; } });
+  const racking = useRacking(true, { every: 30000 });
+  const rackInspector = user.role === "admin" || hasMachineryAccess(user);
+  React.useEffect(() => { if (screen !== "rack" && rackCode) { try { const u = new URL(window.location.href); if (u.searchParams.get("rack")) { u.searchParams.delete("rack"); window.history.replaceState(null, "", u.toString()); } } catch { /* */ } } }, [screen]); // eslint-disable-line react-hooks/exhaustive-deps
   const mainRef = React.useRef(null);   // the scrolling <main>, for ScrollNav
   const [activeModule, setActiveModule] = React.useState(null);
   const [activeInspection, setActiveInspection] = React.useState(null);
@@ -165,10 +202,10 @@ function MobileApp({
   const refreshQueue = React.useCallback(() => { listQueue().then(setQueue); }, []);
   React.useEffect(refreshQueue, [refreshQueue]);
 
-  // Queue item `type` → the App.jsx write that performs it. Adding a new offline-capable
+  // Queue item `type` → the desktop write (src/app/actions) that performs it. Adding a new offline-capable
   // write = add a handler here + call write("<type>", payload, label, optimistic).
   // Never rename an existing type: items already queued on phones would be dropped.
-  // must(): the App.jsx saves resolve false when the database didn't take the write (bad
+  // must(): the desktop saves (src/app/actions) resolve false when the database didn't take the write (bad
   // signal, server error) — that must count as FAILED, so the item stays queued and retries.
   const must = (fn) => async (p) => { const r = await fn(p); if (r === false) throw new Error("not saved"); return r; };
   const handlers = React.useMemo(() => ({
@@ -435,6 +472,7 @@ function MobileApp({
     (fixedTitle && t(fixedTitle)) ||
     (screen === "training" ? t("{n} modules assigned", { n: myMods.length })
       : screen === "module" ? (activeModule || {}).title
+      : screen === "rack" ? (bayName(racking.locations.find((l) => l.id === rackCode)) || rackCode || "")
       : screen === "more" ? user.name
       : screen === "inspection" ? typeLabel((activeInspection || {}).typeId)
       : screen === "permits" ? `${myPermits.filter((p) => !p.closed).length} live on site`
@@ -460,6 +498,23 @@ function MobileApp({
       {(!online || queue.length > 0) && <OfflineBanner online={online} queueCount={waiting} stuckCount={queue.length - waiting} Z={T} />}
 
       <main ref={mainRef} style={{ flex: 1, overflow: "auto", WebkitOverflowScrolling: "touch" }}>
+        {otherAlarms.length > 0 && screen !== "lonealert" && (
+          <div style={{ padding: "12px 18px 0", display: "flex", flexDirection: "column", gap: 8 }}>
+            {otherAlarms.map((r) => (
+              <button key={r.id} type="button" data-testid="m-lone-alarm" onClick={() => { setLoneAlertId(r.id); go("lonealert"); }}
+                style={{ textAlign: "left", display: "flex", gap: 10, alignItems: "center", padding: "12px 14px", borderRadius: 14, border: "none", background: "linear-gradient(90deg,#b91c1c,#dc2626)", color: "#fff", fontFamily: FONT, fontWeight: 800, fontSize: 14, cursor: "pointer" }}>
+                <span style={{ fontSize: 20 }}>🧍</span>
+                <span style={{ flex: 1 }}>{(r.data || {}).name} {r.status === "help" ? "has asked for help" : "missed a lone working check-in"}<span style={{ display: "block", fontWeight: 600, fontSize: 12, opacity: .9 }}>{(r.data || {}).place} · tap to respond</span></span>
+              </button>
+            ))}
+          </div>
+        )}
+        {screen === "today" && ppeToSign > 0 && (
+          <div style={{ padding: "18px 18px 0" }}><PpeBanner count={ppeToSign} onOpen={() => go("ppe")} Z={T} font={FONT} /></div>
+        )}
+        {screen === "today" && myLone && (
+          <div style={{ padding: "18px 18px 0" }}><LoneBanner row={myLone} onOpen={() => go("lone")} Z={T} font={FONT} /></div>
+        )}
         {screen === "today" && (
           <Today
             user={user} myMods={myMods} myComps={myComps} unreadDocs={unreadDocs} compliance={myCompliance}
@@ -530,6 +585,12 @@ function MobileApp({
             onOpenDocs={() => go("documents")}
             onOpenCerts={() => go("certificates")}
             onOpenActions={() => go("actions")}
+            onOpenLone={loneSettings.enabled ? () => go("lone") : undefined}
+            loneActive={!!myLone}
+            onOpenPpe={ppeSettings.staffCanSee ? () => go("ppe") : undefined}
+            onOpenRacking={racking.locations.length ? () => go("rackpick") : undefined}
+            rackRed={racking.damage.filter((r) => r.status === "open" && r.rating === "red").length}
+            ppeToSign={ppeToSign}
             onOpenInspections={isAdmin ? () => go("inspections") : undefined}
             onOpenPermits={isAdmin ? () => go("permits") : undefined}
             onOpenHistory={() => go("history")}
@@ -541,6 +602,28 @@ function MobileApp({
             Z={T} font={FONT}
           />
         )}
+
+        {screen === "rackpick" && <RackPick locations={racking.locations} damage={racking.damage} onPick={(c) => { setRackCode(c); go("rack"); }} Z={T} font={FONT} />}
+        {screen === "rack" && rackCode && (
+          <div style={{ padding: 18 }}>
+            {racking.loaded ? <RackBay code={rackCode} loc={racking.locations.find((l) => l.id === rackCode) || null} damage={racking.damage} user={user} isInspector={rackInspector} settings={racking.settings} Z={T} font={FONT} />
+              : <div style={{ color: T.muted, fontSize: 14 }}>{t("Loading…")}</div>}
+          </div>
+        )}
+        {screen === "ppe" && <MyPpe user={user} rows={ppeRows} settings={ppeSettings} online={online} Z={T} font={FONT} />}
+
+        {screen === "lone" && (
+          <LoneWorking user={user} settings={loneSettings} sessions={loneSessions} online={online}
+            places={(getSiteLists() || {}).reportLocations || []} Z={T} font={FONT} />
+        )}
+
+        {screen === "lonealert" && (() => {
+          const r = loneSessions.find((x) => x.id === loneAlertId);
+          const box = { padding: 18 };
+          if (!r) return <div style={{ ...box, color: T.muted, fontSize: 14 }}>{loneSessions.length ? "This alert has been closed, or you can't see it." : "Loading…"}</div>;
+          if (!LONE_ALARM.includes(r.status)) return <div style={{ ...box, color: T.white, fontSize: 15, lineHeight: 1.5 }} data-testid="m-lone-closed">{(r.data || {}).name}: {r.data && r.data.ack ? `already dealt with by ${r.data.ack.by}.` : "they've checked in, or the session has ended."}</div>;
+          return <div style={box}><LoneRespond row={r} people={allUsers} byName={user.name} Z={T} font={FONT} onDone={() => { setLoneAlertId(null); go("today"); }} /></div>;
+        })()}
 
         {screen === "certificates" && <Certificates certificates={certificates} holder={user && user.name} holderJob={(user && user.jobTitle) || ""} Z={T} font={FONT} />}
 

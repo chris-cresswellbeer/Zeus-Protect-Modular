@@ -7,7 +7,7 @@ import { todayISO } from "../../lib/dates";
 /**
  * DSEAssessment — full-screen staff wizard for the DSE workstation self-assessment
  * (Health and Safety (Display Screen Equipment) Regulations 1992).
- * Rendered by App.jsx instead of the staff portal while `dseActive` is true.
+ * Shown (app/screens/Screens.jsx) instead of the staff portal while `dseActive` is true.
  *
  * One section at a time (tabs across the top); each question is Yes/No with an
  * optional comment. "Next" is enabled once every question in the section is answered.
@@ -15,7 +15,7 @@ import { todayISO } from "../../lib/dates";
  * appended to the user's list; after that the "submitted" screen shows the latest
  * report together with any admin responses.
  *
- * All wizard state (answers, comments, section, submitted) lives in App.jsx so the
+ * All wizard state (answers, comments, section, submitted) lives in the app's shared state (app/useAppState.js) so the
  * draft survives re-renders; onClose resets it.
  *
  * DSE DATA MODEL (shared by all three DSE components)
@@ -36,7 +36,7 @@ function DSEAssessment({ user, dseAnswers, setDseAnswers, dseComments, setDseCom
     value: { answers: dseAnswers, comments: dseComments, section: dseSection },
     changed: !dseSubmitted && (Object.keys(dseAnswers || {}).length > 0 || Object.values(dseComments || {}).some(v => String(v || "").trim())),
     onRestore: v => { setDseAnswers(v.answers || {}); setDseComments(v.comments || {}); setDseSection(v.section || 0); } });
-  // Progress is saved to the person's account (App.jsx saveDseProgress → user_profiles.dseDraft),
+  // Progress is saved to the person's account (app/actions/dse.js saveDseProgress → user_profiles.dseDraft),
   // so an unfinished assessment shows in My Actions and can be finished later, on any computer.
   const hasProgress = !dseSubmitted && (Object.keys(dseAnswers || {}).length > 0 || Object.values(dseComments || {}).some(v => String(v || "").trim()));
   const progress = () => ({ answers: dseAnswers, comments: dseComments, section: dseSection, at: new Date().toISOString() });
@@ -60,7 +60,7 @@ function DSEAssessment({ user, dseAnswers, setDseAnswers, dseComments, setDseCom
 
   // A question is an ISSUE when the answer is the "bad" one: questions with flagOnYes:true
   // flag a YES (e.g. "Do you get eye strain?"), all others flag a NO (e.g. "Is your chair adjustable?").
-  // The new report is saved to Supabase by App.jsx's dseReports auto-sync effect.
+  // The new report is saved to Supabase by the dseReports auto-sync effect (app/data/useSyncEffects.js).
   function submit() {
     const issues = [];
     DSE_SECTIONS.forEach(sec => {

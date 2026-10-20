@@ -1,6 +1,6 @@
 /**
  * ═══════════════════════════════════════════════════════════════════════════
- * lib/supabase.js — Database + file storage client, password hashing, write helper
+ * lib/supabase.js — Database + file storage client and write helper
  * ═══════════════════════════════════════════════════════════════════════════
  * This is a small hand-written replacement for the official `@supabase/supabase-js`
  * library. It talks directly to Supabase's REST API (PostgREST) and Storage API
@@ -27,18 +27,16 @@
  *   - write failure→ { data: null, error: "message" }
  *   Always check `error`, or wrap writes in dbWrite() (bottom of this file).
  *
- * ── SECURITY NOTES (read before going further than an internal tool) ────────
- *  1. SUPABASE_ANON is the public "anon" key. It is visible to anyone who opens
- *     the site's JavaScript. That is normal for Supabase, BUT it means the data
- *     is only as protected as the Row Level Security (RLS) policies configured
- *     in the Supabase dashboard. If RLS is disabled on a table, anyone with
- *     the URL can read/write it.
- *  2. Logins are checked in the browser by comparing SHA-256 hashes (see
- *     hashPassword below). This is not a substitute for server-side auth
- *     (e.g. Supabase Auth). Consider migrating if the portal is exposed to
- *     untrusted users.
- *  3. If you ever rotate the anon key in Supabase, update SUPABASE_ANON here
- *     (and in any Netlify Functions that reuse it) and redeploy.
+ * ── SECURITY NOTES ──────────────────────────────────────────────────────────
+ *  1. SUPABASE_ANON is the public "anon" key: anyone can see it in the site's
+ *     JavaScript, which is normal for Supabase. The data is protected by the
+ *     row-level security rules in database/rules/db_rules.sql, which apply to
+ *     every request made with a signed-in person's token (setAccessToken below).
+ *  2. Passwords are checked by Supabase Auth (lib/auth.js). Nothing to do with
+ *     passwords happens in the browser beyond sending them to Supabase.
+ *  3. The service role key is NEVER used here: only the Netlify functions have it.
+ *     If you rotate the anon key, update the Netlify variables (and the fallback
+ *     below) and redeploy.
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
@@ -54,8 +52,8 @@ const SUPABASE_URL  = String(ENV.VITE_SUPABASE_URL || LIVE_SUPABASE_URL).replace
 const SUPABASE_ANON = ENV.VITE_SUPABASE_ANON_KEY || LIVE_SUPABASE_ANON;
 
 // Signed-in session token (Supabase Auth). When set, every request is made AS that
-// person, so the database's row-level security rules apply to them. Until then
-// (and always in the old "legacy" sign-in mode) the public anon key is used.
+// person, so the database's row-level security rules apply to them. Before sign-in
+// the public anon key is used (it can read only the branding).
 // lib/auth.js calls setAccessToken() after sign-in / token refresh / sign-out.
 let accessToken = null;
 function setAccessToken(t) { accessToken = t || null; }
@@ -243,31 +241,6 @@ const sb = (() => {
   return { from, storage };
 })();
 
-// ─── Password hashing ───────────────────────────────────────────────────────────
-/**
- * SHA-256 hex digest of a password, computed in the browser (Web Crypto API).
- * Stored in the users table and compared at login.
- * NOTE: unsalted, fast hash — fine for an internal portal, but see the security
- * notes at the top of this file. crypto.subtle only works on HTTPS or localhost.
- * If you ever change the algorithm, every existing stored hash stops matching,
- * so all users would need a password reset.
- * @returns {Promise<string>} 64-char lowercase hex string
- */
-async function hashPassword(password) {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(password);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
-}
-// Default password hash (for "pass123")
-// Given to newly created staff accounts. Computed asynchronously at module load,
-// so it is "" for a split second on startup. Because it's exported as a `let`,
-// ES modules give importers a LIVE binding — they see the filled-in value once
-// the promise resolves. Do not copy it into a const at import time.
-let DEFAULT_HASH = "";
-hashPassword("pass123").then(h => { DEFAULT_HASH = h; });
-
 // ─── Write helper — surfaces errors instead of silently swallowing them ────────
 // Wrap any sb.from(...).upsert/insert/update/delete(...) or sb.storage.upload/remove(...)
 // call. Logs on failure (and optionally alerts) so a failed save is never silent.
@@ -283,6 +256,9 @@ async function dbWrite(promise, label, opts = {}) {
   const { error } = await promise;
   if (error) {
     console.error(`[dbWrite] Save failed${label ? ` [${label}]` : ""}:`, error);
+    // the screen may now show something the database doesn't have: the next refresh
+    // re-reads everything instead of only what changed (lib/changes.js listens for this)
+    try { window.dispatchEvent(new Event("zp-write-failed")); } catch { /* not in a browser */ }
     if (opts.alertOnError) {
       notify(`Failed to save${label ? ` ${label}` : ""}. Your changes may not have been saved.\n${error}`, { kind: "error" });
     }
@@ -313,4 +289,4 @@ async function insertNew(table, rows, label, onDuplicate = null) {
   return ok;
 }
 
-export { SUPABASE_URL, SUPABASE_ANON, sb, hashPassword, DEFAULT_HASH, dbWrite, insertNew, setAccessToken, bearer };
+export { SUPABASE_URL, SUPABASE_ANON, sb, dbWrite, insertNew, setAccessToken, bearer };

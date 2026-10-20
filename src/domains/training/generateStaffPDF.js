@@ -20,7 +20,7 @@ import { collectCertFiles, renderCertFiles, appendixHtml } from "./certAppendix"
  * straight away (so pop-up blockers allow it) with a "preparing" message while the
  * files are fetched; the print dialog opens when the report is ready.
  *
- * Parameters are the global state maps from App.jsx, passed through by ReportsTab.
+ * Parameters are the global state maps from the app's shared state (src/app), passed through by ReportsTab.
  * `Z` is accepted but unused (the report is always light/print-styled).
  *
  * NOTES

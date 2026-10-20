@@ -16,14 +16,14 @@ import React from "react";
  *     field extras: options:[{value,label}] (drop-down), suggestions:["…"] (type or pick), help:"…"
  *     type:"file" (+ accept:".pdf,image/*") — the answer holds the chosen File, or "" for none
  *
- * <FeedbackHost/> is rendered once (App.jsx, desktop and phone) and shows them.
+ * <FeedbackHost/> is rendered once (main.jsx, desktop and phone) and shows them.
  * A message can survive a page reload with notifyAfterReload() (e.g. "signed out").
  * Tests can answer windows automatically by setting window.__zpTestAutoAnswer.
  */
 
 let toasts = [];
 let theme = { Z: null, font: "system-ui,sans-serif" };
-/** App.jsx passes its colour theme so messages match it. */
+/** The portal passes its colour theme so messages match it. */
 export function setFeedbackTheme(Z, font) { if (theme.Z !== Z || theme.font !== font) { theme = { Z, font }; emit(); } }
 let dialog = null;
 let nextId = 1;

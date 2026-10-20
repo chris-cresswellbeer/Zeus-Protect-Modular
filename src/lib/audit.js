@@ -19,7 +19,7 @@
  *   WITHOUT logging, so loading data never creates entries.
  *
  * WHO
- *   setAuditUser(user) is called by App.jsx whenever the signed-in user changes.
+ *   setAuditUser(user) is called by app/effects/useSessionEffects.js whenever the signed-in user changes.
  *   ⚠ Logins are checked in the browser (see lib/supabase.js), so "who" is the
  *   account the portal says is signed in. The SQL makes the table insert-only for
  *   the app's key, so entries can't be edited or deleted from the portal.
@@ -161,7 +161,7 @@ const AUDIT_ENTITY_LABELS = {
   incident: "Incident", investigation: "Investigation", risk_assessment: "Risk assessment",
   coshh_assessment: "COSHH assessment", dse_report: "DSE assessment", dse_response: "DSE response",
   inspection: "Site inspection", corrective_action: "Corrective action", training_assign: "Training assignment",
-  fire_warden: "Fire warden", document: "Document", module: "Training module", training_completion: "Training completion", backup: "Backup", staff: "Staff record", doc_bundle: "Document bundle", settings: "Settings", machine_competence: "Machinery competence",
+  fire_warden: "Fire warden", document: "Document", module: "Training module", training_completion: "Training completion", backup: "Backup", staff: "Staff record", doc_bundle: "Document bundle", settings: "Settings", machine_competence: "Machinery competence", inspection_template: "Inspection checklist", contractor_signin: "Contractor sign-in",
 };
 
 export {

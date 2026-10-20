@@ -23,7 +23,7 @@ import { useFormGuard, DraftBanner } from "../../lib/unsaved";
  * Props:
  *   editingModule – module to edit, or null to create a new one
  *   onSave(module)– NEW module: called after a successful save to Supabase (version 1).
- *                   EDITED module: called WITHOUT saving — App.jsx shows NewVersionModal
+ *                   EDITED module: called WITHOUT saving — the Create Module page shows NewVersionModal
  *                   (minor/major) and saveModuleVersion() writes it as the next version.
  *   Z, font       – theme + font
  *
@@ -146,7 +146,7 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
   }
 
   // Cleans the slides (sanitises HTML, drops failed uploads), writes to custom_modules,
-  // then calls onSave. NOTE: App.jsx's onSave writes the same record again (adding
+  // then calls onSave. NOTE: the portal's onSave writes the same record again (adding
   // _override for built-in modules) and the customModules auto-sync effect writes it a
   // third time — redundant but harmless. New modules get id "custom_<timestamp>".
   async function saveModule() {
@@ -178,7 +178,7 @@ function CreateModuleTab({ onSave, editingModule, Z, font }) {
       quiz: quiz.map(q=>({...q, answer:Number(q.answer)})),
       _custom: true,
     };
-    // Editing an existing module: App.jsx asks "minor or major change?" and saves it as a
+    // Editing an existing module: the portal asks "minor or major change?" and saves it as a
     // new version (saveModuleVersion) — nothing is written until the admin confirms.
     if (editingModule) { guard.done(); onSave(newModule); return; }
     // New module: save directly to Supabase before updating state

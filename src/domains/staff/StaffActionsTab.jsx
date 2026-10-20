@@ -15,7 +15,7 @@ import { DSE_RENEWAL_MONTHS, DSE_QUESTION_COUNT } from "../../data/seedDse";
  *   • investigation corrective actions in the user's name (sameName: case and extra spaces ignored,
  *     as in the reminder emails)
  * For corrective actions the user can mark complete, add progress notes and attach
- * evidence (base64). Changes go into `investigations` state and are saved by App.jsx's
+ * evidence (base64). Changes go into `investigations` state and are saved by the auto-sync in
  * [investigations] auto-sync effect.
  *
  * "Done" and the completion date come from lib/actionStatus.js (same as everywhere else).

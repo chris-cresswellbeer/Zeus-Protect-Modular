@@ -6,7 +6,7 @@
  * Its only job is to mount the React tree into the <div id="root"> element.
  *
  * Everything else — login, data loading from Supabase, desktop vs. mobile
- * layout, navigation — lives in App.jsx (the "composition root").
+ * layout, navigation — lives in App.jsx and src/app/ (see src/app/README.md).
  *
  * NOTE ON StrictMode:
  *   In development (`npm run dev`) React.StrictMode deliberately mounts every
@@ -28,9 +28,8 @@ import { startBrand } from "./lib/brand";
 import { watchStaleBuild } from "./lib/staleBuild";
 import { UpdateBar } from "./shared/UpdateBar";
 
-// New sign-in only: swap links to private files (documents, fire safety,
-// incident photos) for short-lived signed links as they appear on screen.
-// Does nothing with the old sign-in. See lib/fileAccess.js.
+// Swap links to private files (documents, fire safety, incident photos) for
+// short-lived signed links as they appear on screen. See lib/fileAccess.js.
 startPrivateFiles();
 
 // Offline copy of the portal for phones (public/sw.js): opens with no signal, keeps
@@ -63,9 +62,17 @@ document.head.appendChild(focusCss);
 // check page (shared/VerifyPage.jsx), with no sign-in and none of the portal.
 const VERIFY_ID = (() => { try { return new URLSearchParams(window.location.search).get("verify"); } catch { return null; } })();
 const VerifyPage = React.lazy(() => import("./shared/VerifyPage").then(m => ({ default: m.VerifyPage })));
+// Contractor sign-in at reception (the QR code on the poster): <portal>/?signin=CODE shows
+// only the sign-in page (shared/SignInPage.jsx), again with no account and none of the portal.
+const SIGNIN_CODE = (() => { try { return new URLSearchParams(window.location.search).get("signin"); } catch { return null; } })();
+const SignInPage = React.lazy(() => import("./shared/SignInPage").then(m => ({ default: m.SignInPage })));
 
 // React 18 root API. `document.getElementById("root")` must match the id in index.html.
-if (VERIFY_ID !== null) {
+if (SIGNIN_CODE !== null) {
+  ReactDOM.createRoot(document.getElementById("root")).render(
+    <React.Suspense fallback={null}><SignInPage code={SIGNIN_CODE}/></React.Suspense>
+  );
+} else if (VERIFY_ID !== null) {
   ReactDOM.createRoot(document.getElementById("root")).render(
     <React.Suspense fallback={null}><VerifyPage initialId={VERIFY_ID}/></React.Suspense>
   );

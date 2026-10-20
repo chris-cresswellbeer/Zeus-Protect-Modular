@@ -10,10 +10,10 @@
  *                              lib/plainSymbols.js), or the fallback if there isn't one.
  *
  * Emoji written WITHOUT E() are converted too in Professional Mode, by the page
- * watcher in lib/plainSymbols.js (started/stopped by App.jsx).
+ * watcher in lib/plainSymbols.js (started/stopped by app/effects/useSessionEffects.js).
  *
  * HOW IT STAYS IN SYNC:
- *   App.jsx holds the real `emojiMode` React state and calls syncEmojiMode()
+ *   app/useAppState.js holds the real `emojiMode` React state and calls syncEmojiMode()
  *   inside a useEffect whenever it changes. Because App re-renders its whole
  *   tree after that state change, every E() call picks up the new value.
  *
@@ -37,10 +37,10 @@ const EmojiCtx = React.createContext(true);
 // it directly instead of calling useContext, so E() is safe to call from
 // anywhere (including conditionally, inside loops, before hooks, etc.)
 // without violating the Rules of Hooks. It's kept in sync with the real
-// emojiMode state via syncEmojiMode(), which App.jsx calls in a useEffect.
+// emojiMode state via syncEmojiMode(), which app/effects/useSessionEffects.js calls in a useEffect.
 let _emojiMode = true;
 
-/** Called by App.jsx only. Updates the flag that E() reads. */
+/** Called by src/app only. Updates the flag that E() reads. */
 function syncEmojiMode(value) {
   _emojiMode = value;
 }

@@ -25,7 +25,7 @@ function isHtmlContent(text) {
   
   /**
    * Adds the shared `.rte-content` / `.rte-editable` CSS to <head> once per page.
-   * Called by App.jsx on mount and by RichTextEditor — safe to call repeatedly.
+   * Called by app/data/useMobileWrites.js on mount and by RichTextEditor — safe to call repeatedly.
    * `.rte-editable:empty:before` shows the placeholder text in an empty editor.
    */
   let injected = false;

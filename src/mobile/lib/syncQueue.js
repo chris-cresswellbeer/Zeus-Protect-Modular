@@ -9,7 +9,7 @@
 //   label   — human-readable, shown in More > Offline queue
 //
 // The handlers are the app's existing dbSave*/dbAcknowledge* functions from
-// App.jsx, so nothing about the server contract changes.
+// the desktop portal (src/app), so nothing about the server contract changes.
 
 // IndexedDB names. Changing DB_NAME/STORE orphans any queued items on devices; bump
 // DB_VERSION (and handle it in onupgradeneeded) if the store shape ever changes.
@@ -105,7 +105,7 @@ async function bumpAttempts(item) {
 }
 
 // handlers: { [type]: async (payload) => void } — a handler FAILS by throwing/rejecting
-// (MobileApp wraps the App.jsx saves so that "not saved" throws).
+// (MobileApp wraps the desktop saves so that "not saved" throws).
 // Drains in insertion order and stops at the first failure so writes that depend on
 // earlier ones (a completion before its certificate) stay ordered — except an item that
 // has failed MAX_ATTEMPTS times: it's set aside ("couldn't be sent", shown in More) so it

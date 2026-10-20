@@ -4,6 +4,8 @@ import { Avatar } from "../../shared/primitives";
 import { INDUCTION_ITEMS } from "../../data/seedContractors";
 import { WorkerDetailModal } from "./WorkerDetailModal";
 import { CompanyForm } from "./CompanyForm";
+import { useSiteSignins } from "../../lib/siteSignins";
+import { CompanySignins } from "./SigninPanel";
 
 import { localISO, todayISO, ukDate } from "../../lib/dates";
 /**
@@ -13,7 +15,7 @@ import { localISO, todayISO, ukDate } from "../../lib/dates";
  * Every change updates App state AND calls the matching dbSave* helper directly
  * (contractors are not covered by an auto-sync effect).
  *
- * CONTRACTOR DATA MODEL (App.jsx state → Supabase table)
+ * CONTRACTOR DATA MODEL (the app's shared state (app/useAppState.js) → Supabase table)
  *   contractors          [ { id:"con_<ts>", name, type, status, email, phone, notes,
  *                            workers:[{ id:"w_<ts>", name, role, email, phone }] } ]   → contractors
  *   contractorVisits     { [companyId]: [ { id:"v_<ts>", date, timeIn, timeOut, purpose, areas,
@@ -25,6 +27,7 @@ import { localISO, todayISO, ukDate } from "../../lib/dates";
  */
 function ContractorDetail({ selCon, contractorInductions, setContractorInductions, contractorCerts, setContractorCerts, contractorVisits, setContractorVisits, contractors, setContractors, dbSaveContractor, dbDeleteContractor, dbSaveContractorInductions, dbSaveContractorCerts, dbSaveContractorVisits, staff, isMobile, setView, T, font }) {
   const today = todayISO();
+  const qrSignins = useSiteSignins(true, { fresh: true }).filter(x => x.data && x.data.companyId === selCon.id);
   const [tab, setTab] = React.useState("visits");
   const [showVisitForm, setShowVisitForm] = React.useState(false);
   const [visitForm, setVisitForm] = React.useState({id:"",date:today,timeIn:"",timeOut:"",purpose:"",areas:"",signedInBy:"",workers:[],permitRequired:false,notes:""});
@@ -41,6 +44,8 @@ function ContractorDetail({ selCon, contractorInductions, setContractorInduction
   const allVisits = (contractorVisits[selCon.id]||[]).slice();
   const visits = allVisits.filter(v=>v.date<=today).sort((a,b)=>b.date.localeCompare(a.date));
   const upcoming = allVisits.filter(v=>v.date>today).sort((a,b)=>a.date.localeCompare(b.date));
+  // last visit, logged by hand or signed in with the reception QR code
+  const lastAny = [...visits.map(v=>v.date), ...qrSignins.map(s=>s.data.date)].filter(Boolean).sort().pop();
   const inp = {width:"100%",background:T.overlay,border:`1px solid ${T.borderMd}`,borderRadius:9,padding:"9px 13px",color:T.white,fontSize:13,outline:"none",fontFamily:font,boxSizing:"border-box"};
   const lbl = {fontSize:11,fontWeight:700,color:T.muted,letterSpacing:.5,textTransform:"uppercase",display:"block",marginBottom:5};
 
@@ -90,7 +95,7 @@ function ContractorDetail({ selCon, contractorInductions, setContractorInduction
           </div>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:8}}>
-          {[{l:"Workers",v:workers.length},{l:"Total Visits",v:visits.length},{l:"Last Visit",v:visits[0]?.date||"Never"},{l:"On Site Today",v:visits.filter(v=>v.date===today).length>0?"Yes":"No"}].map((r,i)=>(
+          {[{l:"Workers",v:workers.length},{l:"Total Visits",v:visits.length+qrSignins.length},{l:"Last Visit",v:lastAny?ukDate(lastAny):"Never"},{l:"On Site Today",v:visits.some(v=>v.date===today)||qrSignins.some(s=>s.data.date===today&&!s.data.timeOut)?"Yes":"No"}].map((r,i)=>(
             <div key={i} style={{background:T.overlay,borderRadius:8,padding:"8px 12px"}}>
               <div style={{fontSize:10,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:.5,marginBottom:2}}>{r.l}</div>
               <div style={{fontSize:13,color:T.white,fontWeight:700}}>{r.v}</div>
@@ -107,7 +112,7 @@ function ContractorDetail({ selCon, contractorInductions, setContractorInduction
 
       {/* Tabs */}
       <div style={{display:"flex",borderBottom:`1px solid ${T.border}`,marginBottom:20}}>
-        {[["visits",`🗓 Visits (${visits.length})`],["workers",`👷 Workers (${workers.length})`]].map(([id,label])=>(
+        {[["visits",`🗓 Visits (${visits.length+qrSignins.length})`],["workers",`👷 Workers (${workers.length})`]].map(([id,label])=>(
           <button key={id} onClick={()=>setTab(id)} style={{padding:"11px 18px",background:"none",border:"none",borderBottom:`2px solid ${tab===id?T.gold:"transparent"}`,color:tab===id?T.white:T.muted,fontWeight:tab===id?700:400,cursor:"pointer",fontFamily:font,fontSize:13}}>{label}</button>
         ))}
       </div>
@@ -269,8 +274,9 @@ function ContractorDetail({ selCon, contractorInductions, setContractorInduction
             </div>
           )}
 
+          <CompanySignins list={qrSignins} T={T}/>
           {visits.length===0
-            ? <div style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:14,padding:"32px 20px",textAlign:"center",border:`1px solid ${T.border}`,color:T.muted,fontSize:14}}>No visits logged yet.</div>
+            ? <div style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:14,padding:"32px 20px",textAlign:"center",border:`1px solid ${T.border}`,color:T.muted,fontSize:14}}>{qrSignins.length ? "No visits logged by hand yet." : "No visits logged yet."}</div>
             : <div style={{display:"flex",flexDirection:"column",gap:10}}>
               {visits.map((v,vi)=>(
                 <div key={v.id||vi} style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:14,padding:"16px 20px",border:`1px solid ${editingVisitIdx===vi?T.accent:T.border}`}}>

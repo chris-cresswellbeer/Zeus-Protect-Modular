@@ -3,7 +3,7 @@
  * backup.js — download a full copy of the portal's records (admins only)
  * ═══════════════════════════════════════════════════════════════════════════
  * Supabase's free plan keeps no backups you can download, so an admin can save
- * one here (Documents ▼ → Audit Trail → Download full backup). The download is a
+ * one here (⚙ → Audit Trail → Download full backup). The download is a
  * .zip holding:
  *   • zeus-protect-backup.json  every row of every table, exactly as stored —
  *                               the copy to restore from if records are ever lost
@@ -27,7 +27,7 @@ export const BACKUP_TABLES = [
   "incidents", "investigations", "site_inspections", "equipment", "machine_completions", "custom_machine_types",
   "risk_assessments", "coshh_assessments", "custom_chemicals", "msds_files",
   "fire_wardens", "fire_drills", "fire_alarm_tests", "fire_extinguishers", "fire_emerg_lighting", "fire_fra_reviews",
-  "first_aid_register", "app_settings", "contractors", "contractor_inductions", "contractor_certs", "contractor_visits", "permits",
+  "first_aid_register", "app_settings", "contractors", "contractor_inductions", "contractor_certs", "contractor_visits", "site_signins", "lone_working", "ppe_issues", "racking_locations", "racking_damage", "racking_checks", "permits",
   "audit_log",
 ];
 const PAGE = 1000;               // Supabase returns at most 1000 rows per request

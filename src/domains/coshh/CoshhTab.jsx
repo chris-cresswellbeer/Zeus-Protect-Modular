@@ -20,9 +20,9 @@ import { useRemembered } from "../../lib/remembered";
  *   • delete (custom substances only)
  *
  * STORAGE
- *   custom_chemicals   { code (unique), data }          ← loaded by App.jsx
- *   msds_files         { code, file_name, file_url, uploaded_at } ← loaded by App.jsx
- *   coshh_assessments  { code, data }                   ← loaded by App.jsx
+ *   custom_chemicals   { code (unique), data }          ← loaded by app/data/useLoadAll.js
+ *   msds_files         { code, file_name, file_url, uploaded_at } ← loaded by app/data/useLoadAll.js
+ *   coshh_assessments  { code, data }                   ← loaded by app/data/useLoadAll.js
  *   SDS files: "documents" bucket, path msds_<code>_<sanitisedFileName>
  *
  * Assessments are held in App state (loaded by loadAll) and passed in as

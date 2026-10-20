@@ -1,7 +1,7 @@
 /**
  * lib/incidentAlert.js — ask the server to email about a high-risk incident straight away.
  *
- * Called after an incident or hazard report is saved (App.jsx dbSaveIncidentNow). The
+ * Called after an incident or hazard report is saved (app/actions/incidents.js dbSaveIncidentNow). The
  * server (netlify/functions/zp-email-alert.mjs) decides whether anything needs sending,
  * using the rules in Site Settings → Email reminders; this just says "check now".
  *   • the first save of an incident in this browser asks at once (keepalive, so it still goes

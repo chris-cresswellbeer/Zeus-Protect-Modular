@@ -32,11 +32,12 @@ import { brandHtml } from "../../lib/brandCore";
  *     typeLabel: the checklist's name when saved (so it can be named without the templates),
  *     nonConformances: [ { id:"nc_<ts>", section, sectionId, questionId?, finding,
  *                          severity: major|minor|observation, photos:[dataURL|url],
- *                          actionOwner, actionDue, actionStatus: open|closed, actionNote } ],
+ *                          actionOwner, actionDue, actionStatus: open|complete, actionNote,
+ *                          completedDate, completedBy (set when marked resolved, from Oct 2026) } ],
  *     status: open|closed (open while any NC action is open), overallScore, maxScore }
- * Inspections created on the mobile app arrive through App.jsx mobileDb.saveInspection.
+ * Inspections created on the mobile app arrive through app/data/useMobileWrites.js mobileDb.saveInspection.
  *
- * SAVING: setInspections → App.jsx [siteInspections] auto-sync → dbSaveSiteInspections
+ * SAVING: setInspections → app/data/useSyncEffects.js [siteInspections] auto-sync → dbSaveSiteInspections
  * (upsert-and-prune — so removing an inspection from this array deletes it in the DB).
  *
  * INLINE NC FLAGGING: answering Partial/Non-compliant on a checklist question offers
@@ -433,7 +434,9 @@ function SiteInspectionsTab({ inspections, setInspections, staff, userName = "",
                               setInspections(p=>p.map(ins=>{
                                 if(ins.id!==activeId) return ins;
                                 const ncs=[...ins.nonConformances];
-                                ncs[i]={...ncs[i], actionStatus:newStatus};
+                                // the date it was resolved: the board report counts findings closed by their due date
+                                const { completedDate, completedBy, ...rest } = ncs[i];   // eslint-disable-line no-unused-vars
+                                ncs[i] = newStatus==="complete" ? {...rest, actionStatus:newStatus, completedDate:todayISO(), completedBy:userName||""} : {...rest, actionStatus:newStatus};
                                 const allClosed = ncs.every(n=>n.actionStatus==="complete");
                                 return {...ins, nonConformances:ncs, status:allClosed?"closed":"open"};
                               }));

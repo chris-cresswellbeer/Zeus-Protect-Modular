@@ -1,7 +1,7 @@
 /**
  * shared/NotificationBell.jsx — Header bell icon with a dropdown of pending actions.
  *
- * App.jsx builds the `notifications` array (overdue training, unread documents,
+ * app/bell/adminNotifications.js and staffNotifications.js build the `notifications` array (overdue training, unread documents,
  * DSE due, etc.) and passes it in; this component only displays it.
  *
  * Each notification object:

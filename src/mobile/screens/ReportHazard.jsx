@@ -22,7 +22,7 @@ const URGENCY_OPTIONS = [
 // Props: user, managerName (shown on the confirmation), suggestedLocation, online
 // (changes the confirmation wording), onSubmit(record), onDone, Z, font.
 // Photos are compressed on the phone (lib/photos.js) and uploaded when the incident is
-// saved (App.jsx dbSaveIncident → uploadPhotos).
+// saved (app/actions/incidents.js dbSaveIncident → uploadPhotos).
 function ReportHazard({ user, managerName, suggestedLocation, online, onSubmit, onDone, language = "en", Z, font }) {
   const siteLists = useSiteLists();                 // "Where was it?" choices: Site Settings
   const [step, setStep] = React.useState(1);

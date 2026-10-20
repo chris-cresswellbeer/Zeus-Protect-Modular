@@ -60,7 +60,7 @@ function cellFor(user, mod, assigns, comps, dueDates) {
 
 /**
  * @param {object} p
- *   staff, modules, assigns, comps  — as held in App.jsx
+ *   staff, modules, assigns, comps  — as held in the app's shared state (app/useAppState.js)
  *   filter: { manager, department, search, includeLeavers, onlyNonCompliant, allModules }
  */
 function buildTrainingMatrix({ staff, modules, assigns, comps, dueDates, filter = {} }) {

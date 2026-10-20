@@ -10,7 +10,7 @@ import { mergeAiders, aiderState, coverageCount as countCover } from "./firstAid
  * (monthly checks) and the first-aid needs assessment.
  *
  * DATA: firstAidData = { aiders:[], kits:[], assessment:{ minPerShift, ... }, customZones:[] }
- * stored as ONE JSON document (first_aid_register row id "singleton") via App.jsx's
+ * stored as ONE JSON document (first_aid_register row id "singleton") via the auto-sync in
  * [firstAidData] auto-sync effect. Zones = the site's zones (Site Settings, lib/siteLists.js) + customZones;
  * shifts = the site's shifts (Site Settings).
  *
@@ -359,7 +359,7 @@ function FirstAidRegisterTab({ staff, extCerts, firstAidData, setFirstAidData, Z
             <span><span style={{color:"#10b981",fontWeight:700}}>●</span> Good coverage ({`>${minPerShift}`})</span>
           </div>
           <div style={{marginTop:8,fontSize:11,color:Z.muted,background:Z.overlay,borderRadius:8,padding:"8px 12px",border:`1px solid ${Z.border}`}}>
-            <strong style={{color:Z.white}}>Columns:</strong> this site's first aid shifts (Documents ▼ → Site Settings). First aiders tagged with an "All shifts" option count in every column.
+            <strong style={{color:Z.white}}>Columns:</strong> this site's first aid shifts (⚙ → Site Settings). First aiders tagged with an "All shifts" option count in every column.
           </div>
         </div>
       )}

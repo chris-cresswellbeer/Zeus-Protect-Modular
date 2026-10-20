@@ -2,7 +2,7 @@
 //
 // The staff home. Answers "what needs me today" above the fold.
 // All the derived compliance figures come from the same expressions the desktop
-// staff dashboard uses in App.jsx — this screen does not invent its own maths.
+// staff dashboard uses (app/screens/staff/myOverview.js) — this screen does not invent its own maths.
 
 import { complianceBand } from "../../domains/training/compliance";
 import React from "react";

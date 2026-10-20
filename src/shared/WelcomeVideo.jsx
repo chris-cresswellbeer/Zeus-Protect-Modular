@@ -15,7 +15,7 @@ import { t, useLang } from "../lib/i18n";
  *                   { url, name, size, link, provider, path, updatedAt, updatedBy }
  *                 (url = uploaded file in the documents bucket under welcome/, or a
  *                  YouTube / Vimeo / Stream link). No row, or no url = no welcome video.
- *   First sign-in App.jsx finishLogin(): no last_logins row for them yet → showWelcome()
+ *   First sign-in app/actions/session.js finishLogin(): no last_logins row for them yet → showWelcome()
  *                 once they reach the portal (after choosing their password).
  *                 People who have signed in before never see it automatically.
  *   Admin         <WelcomeVideoSettings/> from the Staff screen: upload / link / preview / remove.

@@ -10,7 +10,7 @@
  * @returns {object} merged incident record
  */
 // Fields without their own column in the incidents table are saved in its jsonb
-// `details` column (App.jsx dbSaveIncident / INCIDENT_CORE_KEYS), so they survive a reload.
+// `details` column (app/actions/incidents.js dbSaveIncident / INCIDENT_CORE_KEYS), so they survive a reload.
 function formToInc(form, existing) {
   return {
     ...existing,
@@ -36,7 +36,7 @@ function formToInc(form, existing) {
     equipmentDamageDesc: (form.equipmentInvolved && form.equipmentDamaged) ? (form.equipmentDamageDesc||"").trim() : "",
     equipmentDamageSeverity: (form.equipmentInvolved && form.equipmentDamaged) ? (form.equipmentDamageSeverity||"medium") : "",
     equipmentOOS: form.equipmentInvolved && form.equipmentOOS,
-    // Evidence photos & files added or removed on the form (uploaded on save by App.jsx).
+    // Evidence photos & files added or removed on the form (uploaded on save by app/actions/incidents.js).
     photos: Array.isArray(form.photos) ? form.photos : (existing && existing.photos) || [],
   };
 }

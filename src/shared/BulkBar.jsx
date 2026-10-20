@@ -16,7 +16,7 @@ export function useTicks(shownIds, allIds) {
   return ticksFrom(sel, setSel, shownIds, allIds);
 }
 
-/** The same, for a list whose ticked ids live in someone else's state (e.g. App.jsx). */
+/** The same, for a list whose ticked ids live in someone else's state (e.g. the app's shared state). */
 export function ticksFrom(sel, setSel, shownIds, allIds) {
   const known = new Set((allIds || shownIds).map(String));
   const ids = (sel || []).filter(id => known.has(id));    // forget ticks on things that no longer exist

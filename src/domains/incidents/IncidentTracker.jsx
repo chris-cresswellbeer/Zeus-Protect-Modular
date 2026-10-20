@@ -13,8 +13,8 @@ import { todayISO, ukDate } from "../../lib/dates";
 /**
  * IncidentTracker — the STAFF "Report Incident" tab.
  * Lists incidents the logged-in user reported (matched on reportedBy === user id),
- * and opens IncidentForm to create or edit one. Saving updates App.jsx state;
- * persistence happens via App.jsx's [incidents] auto-sync effect (dbSaveIncident).
+ * and opens IncidentForm to create or edit one. Saving updates the app's shared state (app/useAppState.js);
+ * persistence happens via app/data/useSyncEffects.js [incidents] auto-sync effect (dbSaveIncident).
  *
  * Props: user, incidents/setIncidents, equipment/setEquipment (for the
  *        "equipment involved" section), Z, font.
@@ -69,7 +69,7 @@ function IncidentTracker({ user, incidents, setIncidents, equipment, setEquipmen
 
   // If the report says equipment was involved: optionally mark it out of service
   // (status "inactive") and/or add a defect entry tagged incidentLinked:true to that
-  // equipment's defect log. Saved via App.jsx's [equipment] auto-sync effect.
+  // equipment's defect log. Saved via app/data/useSyncEffects.js [equipment] auto-sync effect.
   function applyEquipmentSideEffects(f) {
     if (!f.equipmentInvolved || !f.equipmentId) return;
     const today = todayISO();

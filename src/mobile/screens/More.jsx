@@ -18,7 +18,7 @@ const tr = t;   // in Appearance, `t` is the theme being drawn
 
 function More({
   user, counts, queue, onRetryQueued, canInstall,
-  onOpenDocs, onOpenCerts, onOpenActions, onOpenHistory, onOpenAppearance,
+  onOpenDocs, onOpenCerts, onOpenActions, onOpenHistory, onOpenAppearance, onOpenLone, loneActive = false, onOpenPpe, ppeToSign = 0, onOpenRacking, rackRed = 0,
   onOpenInspections, onOpenPermits, onOpenLanguage, language = "en",
   onSignOut, onSwitchToDesktop, Z, font,
 }) {
@@ -45,6 +45,18 @@ function More({
           right={<Chevron Z={Z} badge={counts.certificates} badgeColor={Z.green} />} />
         <Row Z={Z} font={font} icon="✅" title={t("My corrective actions")} onClick={onOpenActions}
           right={<Chevron Z={Z} badge={counts.openActions} badgeColor={Z.gold} />} />
+        {onOpenPpe && (
+          <Row Z={Z} font={font} icon="🦺" title={t("My PPE")} sub={ppeToSign ? t("Sign for your new PPE") : t("Boots, gloves, hi-vis and more")} onClick={onOpenPpe}
+            right={<Chevron Z={Z} badge={ppeToSign} badgeColor={Z.accent} />} />
+        )}
+        {onOpenRacking && (
+          <Row Z={Z} font={font} icon="🏗" title={t("Racking damage")} sub={t("Report damage, or see a bay")} onClick={onOpenRacking}
+            right={<Chevron Z={Z} badge={rackRed} badgeColor="#ef4444" />} />
+        )}
+        {onOpenLone && (
+          <Row Z={Z} font={font} icon="🧍" title={t("Lone working")} sub={loneActive ? t("Checking in now") : t("Working alone? Start check-ins")} onClick={onOpenLone}
+            right={<Chevron Z={Z} badge={loneActive ? 1 : 0} badgeColor={Z.green} />} />
+        )}
         {(onOpenInspections || onOpenPermits) && <SectionLabel Z={Z}>Supervisors</SectionLabel>}
         {onOpenInspections && (
           <Row Z={Z} font={font} icon="🚶" title="Site inspections" onClick={onOpenInspections}
@@ -231,7 +243,7 @@ function Certificates({ certificates, holder, holderJob = "", Z, font }) {
 // ─── Corrective actions ──────────────────────────────────────────────────────
 
 // The user's investigation actions (matched by owner name). "Mark complete" goes through
-// the offline queue → App.jsx dbCompleteAction.
+// the offline queue → app/actions/incidents.js dbCompleteAction.
 function CorrectiveActions({ open, closed, onComplete, onAddProof, Z, font }) {
   return (
     <Screen Z={Z}>

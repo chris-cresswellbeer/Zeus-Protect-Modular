@@ -25,7 +25,7 @@ import { localISO, todayISO, ukDate } from "../../lib/dates";
  * Scores use the 5×5 matrix (shared/RiskMatrix.jsx).
  *
  * Saved via dbSaveRA → risk_assessments (JSON per RA). All RAs come from the database (formerly merged with built-in INIT_RAS)d
- * with DB rows on load in App.jsx.
+ * with DB rows on load (app/data/useLoadAll.js).
  */
 function RiskAssessmentTab({ docs, setDocs, setAtab, ras, setRas, dbSaveRA, Z, font }) {
   const isMobile = useWindowWidth() <= 1024;
@@ -108,7 +108,7 @@ function RiskAssessmentTab({ docs, setDocs, setAtab, ras, setRas, dbSaveRA, Z, f
   // "Publish": generate the RA HTML, add/replace its entry in the Documents library
   // (matched by raId), update ras state and save the RA.
   // The generated document lives in `docs` STATE only (not the documents table).
-  // App.jsx regenerates a document for every RA in `ras` after each load, using the
+  // app/data/useLoadAll.js regenerates a document for every RA in `ras` after each load, using the
   // same stable id "d_<raId>", so the library entry survives a reload.
   function finalise() {
     const html = generateRAHtml(form);

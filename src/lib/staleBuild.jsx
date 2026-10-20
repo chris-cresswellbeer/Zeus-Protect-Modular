@@ -2,7 +2,7 @@
  * ═══════════════════════════════════════════════════════════════════════════
  * lib/staleBuild.js — a page left open across a new release
  * ═══════════════════════════════════════════════════════════════════════════
- * Parts of the portal are downloaded the first time they're opened (App.jsx
+ * Parts of the portal are downloaded the first time they're opened (app/lazyParts.jsx
  * lazyPart). A page opened BEFORE a new release asks for the old file names. The
  * offline copy (public/sw.js) keeps the previous release's files, so this normally
  * just works; if a part still can't be downloaded (no offline copy, very old

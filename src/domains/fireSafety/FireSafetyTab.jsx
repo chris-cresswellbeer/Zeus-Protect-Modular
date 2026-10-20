@@ -26,7 +26,7 @@ import { todayISO, ukDate } from "../../lib/dates";
  *   fra            → fire_fra_reviews    { id, date, reviewedBy, trigger, changes, nextReviewDue, fileName?, fileUrl? }
  * (Examples in demo/seedFireSafety.js; the per-tab form below is the source of truth.)
  *
- * All six live in ONE state object `fireSafety` in App.jsx; any change is saved by the
+ * All six live in ONE state object `fireSafety` in the app's shared state (app/useAppState.js); any change is saved by the
  * [fireSafety] auto-sync effect → dbSaveFireSafety (upsert-and-prune per table).
  * Add/edit uses a single shared modal whose fields depend on `subTab` (wardens have their
  * own form, which saves the certificate record instead).
@@ -920,7 +920,7 @@ function FireSafetyTab({ fireSafety, setFireSafety, staff, onUploadFraDoc, onDel
                     {on?"✓ ":""}{z}
                   </button>); })}
               </div>
-            ) : <div style={{fontSize:12,color:Z.muted}}>No areas set up yet: add them in Documents ▼ → Site Settings (first aid zones). You can type one below.</div>}
+            ) : <div style={{fontSize:12,color:Z.muted}}>No areas set up yet: add them in ⚙ → Site Settings (first aid zones). You can type one below.</div>}
             <div style={{display:"flex",gap:8,marginTop:8}}>
               <input aria-label="Add another area" value={wForm.zoneText} onChange={e=>wSet({zoneText:e.target.value})} placeholder="Another area…" style={{...inp,marginBottom:0,flex:1}}
                 onKeyDown={e=>{ if(e.key==="Enter"){ e.preventDefault(); const v=wForm.zoneText.trim(); if(v&&!wForm.zones.includes(v)) wSet({zones:[...wForm.zones,v],zoneText:""}); } }}/>

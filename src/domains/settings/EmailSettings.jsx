@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { sb } from "../../lib/supabase";
-import { AUTH_MODE, emailCall } from "../../lib/auth";
+import { emailCall } from "../../lib/auth";
 import { notify, ask } from "../../shared/Feedback";
 import { auditEvent } from "../../lib/audit";
 import { useFormGuard, DraftBanner } from "../../lib/unsaved";
@@ -11,7 +11,7 @@ import { INJURY_TYPES } from "../../data/seedIncidents";
  * EmailSettings — Site Settings → 📧 Email reminders (admins).
  *   • the switches, stored in app_settings row "email" (lib/reminders.js reads them)
  *   • set-up check, preview, test email and "Send due emails now", which call the
- *     server (netlify/functions/zp-email.mjs) — these need the individual sign-ins
+ *     server (netlify/functions/zp-email.mjs) with the admin's sign-in token
  *   • high-risk incident emails: which incidents count, and who's told
  *   • the last 50 emails sent (email_log, email_reminders.sql)
  * The emails themselves are sent by the scheduled job on Netlify every 15 minutes.
@@ -31,7 +31,6 @@ function EmailSettings({ Z, font, embedded = false, onStatus }) {
   const [log, setLog] = useState(null);           // null = loading; { rows } | { error }
   const [preview, setPreview] = useState(null);   // the preview result
   const [view, setView] = useState(null);         // one previewed email
-  const server = AUTH_MODE === "supabase";
   const changed = loaded && JSON.stringify(form) !== JSON.stringify(savedForm);
   const guard = useFormGuard({ key: "email-settings", label: "the email reminder settings", active: loaded, value: form, onRestore: v => setForm(v), changed });
 
@@ -45,7 +44,7 @@ function EmailSettings({ Z, font, embedded = false, onStatus }) {
     try { r = await sb.from("email_log").query("select=*&order=sent_at.desc&limit=50"); } catch (e) { r = { error: e }; }
     setLog(!r || r.error ? { error: (r && r.error && r.error.message) || "can't read" } : { rows: Array.isArray(r.data) ? r.data : [] });
   }
-  async function checkSetup() { if (!server) return; const r = await emailCall("status"); setStatus(r); }
+  async function checkSetup() { const r = await emailCall("status"); setStatus(r); }
   useEffect(() => { loadSettings(); loadLog(); checkSetup(); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
 
   async function save() {
@@ -199,11 +198,6 @@ function EmailSettings({ Z, font, embedded = false, onStatus }) {
       {/* ── Server: set-up, preview, test, send now ── */}
       <div style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid ${Z.borderMd}` }}>
         <h4 style={{ margin: "0 0 8px", fontSize: 12, fontWeight: 800, letterSpacing: 1, color: Z.muted }}>SET-UP AND TESTING</h4>
-        {!server ? (
-          <p style={{ fontSize: 12.5, color: Z.muted, margin: 0, lineHeight: 1.5 }}>
-            Preview, test emails and "Send now" work once everyone has their own sign-in (the changeover). The scheduled reminders work either way once the Netlify settings are in place.
-          </p>
-        ) : (
           <>
             {status && (
               <div data-testid="email-status" role="status" style={{ fontSize: 12.5, lineHeight: 1.6, padding: "10px 12px", borderRadius: 10, marginBottom: 10,
@@ -225,7 +219,6 @@ function EmailSettings({ Z, font, embedded = false, onStatus }) {
               <button type="button" onClick={checkSetup} disabled={!!busy} style={btn(false, !!busy)}>↻ Check set-up</button>
             </div>
           </>
-        )}
       </div>
 
       {/* ── Recent emails ── */}

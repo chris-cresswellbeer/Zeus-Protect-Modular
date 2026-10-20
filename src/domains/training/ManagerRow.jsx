@@ -16,7 +16,7 @@ import { machineState, compsFor } from "../../data/seedMachinery";
  *   mgr   – pre-computed summary built by ReportsTab:
  *           { name, members:[user], status:"green"|"amber"|"red", compliancePct,
  *             nonCompliant, noModules, ... }
- *   assigns, comps, extCerts, machineComps – the global maps from App.jsx (keyed by user id)
+ *   assigns, comps, extCerts, machineComps – the global maps from the app's shared state (src/app) (keyed by user id)
  *   modules          – allModules (falls back to built-in TRAINING_MODULES if omitted)
  *   allMachineTypes  – built-in + custom machine types
  *   Z, font          – theme + font

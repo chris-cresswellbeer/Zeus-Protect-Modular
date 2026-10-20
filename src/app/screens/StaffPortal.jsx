@@ -10,6 +10,7 @@
  */
 import React from "react";
 import { hasMachineryAccess, isWarehouseWorker } from "../../data/seedMachinery";
+import { hasReceptionAccess } from "../../lib/contractorApproval";
 import { teamOf } from "../../domains/manager/team";
 import { listSessions } from "../../domains/training/evidence";
 import { checkPassword as authCheckPassword, changeOwnPassword } from "../../lib/auth";
@@ -24,7 +25,7 @@ import { WelcomeReplay } from "../../shared/WelcomeVideo";
 import { getTheme, oppositeTheme } from "../../theme/tokens";
 import { useApp } from "../AppContext";
 import { staffNotifications } from "../bell/staffNotifications";
-import { GroupSessionModal, LazyAccountTab, LazyAdminMachineryTab, LazyEquipmentTrackerTab, LazyIncidentTracker, LazyMachineryCompetenceTab, LazyMyTeamTab, LazyStaffActionsTab, LazyStaffDSETab, MachineryEquipmentPage, MyPpeTab, PreviewModal, QuickReportModal, RackingTab, SessionsModal } from "../lazyParts";
+import { GroupSessionModal, LazyAccountTab, LazyAdminMachineryTab, LazyEquipmentTrackerTab, LazyIncidentTracker, LazyMachineryCompetenceTab, LazyMyTeamTab, LazyStaffActionsTab, LazyStaffDSETab, MachineryEquipmentPage, MyPpeTab, PreviewModal, ReceptionTab, QuickReportModal, RackingTab, SessionsModal } from "../lazyParts";
 import { CertModal } from "./CertModal";
 import { MyDocumentsTab } from "./staff/MyDocumentsTab";
 import { MyHistoryTab } from "./staff/MyHistoryTab";
@@ -37,16 +38,16 @@ export function StaffPortal() {
   const app = useApp();
   const {
     adminResponses, allMachineCategories, allMachineTypes, allModules, allUsers, assigns, attachToSession,
-    chooseLanguage, comps, customMachineTypes, darkMode, dbDeleteCustomMachineType, dbDeleteMachineComp,
+    chooseLanguage, comps, contractorCerts, contractors, contractorVisits, customMachineTypes, darkMode, dbDeleteCustomMachineType, dbDeleteMachineComp,
     dbSaveEmojiMode, dbSaveIncident, dbSaveMachineComp, dbSaveTheme, docAcknowledgements, docAssignments,
     docs, dseDraft, dseReports, dueDates, emojiMode, equipment, fireSafety, font, groupSessionFor, incidents,
     investigations, isMobile, logout, loneBar, machineComps, managerAssign, managerSignOffAction,
-    managerSignOffDse, mobileMenuOpen, openDse, pagePreset, ppeRows, ppeSettings, previewDoc, quickEditId,
+    managerSignOffDse, mobileMenuOpen, openDse, pagePreset, permits, ppeRows, refreshContractors, ppeSettings, previewDoc, quickEditId,
     quickItems, racking, rackInspector, rackWindow, recordCompletions, setCustomMachineTypes, setDarkMode,
     setDseActive, setDseAnswers, setDseComments, setDseSection, setDseSubmitted, setEmojiMode, setEquipment,
     setGroupSessionFor, setIncidents, setInvestigations, setMachineComps, setMobileMenuOpen, setMod,
     setPagePreset, setPreviewDoc, setQuickEditId, setShowQuickReport, setShowSessions, setStab, setTheme,
-    setView, showMyPpe, showQuickReport, showSessions, stab, T, theme, user, userLang, winW
+    setView, showMyPpe, showQuickReport, showSessions, signinSettings, siteSignins, stab, T, theme, user, userLang, winW
   } = app;
 
 
@@ -57,7 +58,7 @@ export function StaffPortal() {
   // more tabs (machinery, PPE, team, machinery & equipment) need the shorter labels sooner
   // The staff tabs. History and My Machinery are sections of My Training (Oct 2026), so
   // stab "history" / "machinery" still exist and light up the My Training tab.
-  const STAFF_BAR = ["dashboard","training","documents","incidents","dse",...(showMyPpe?["ppe"]:[]),"actions",...(user.role==="manager"?["team"]:[]),...(user.role!=="admin"&&hasMachineryAccess(user)?["mequip"]:[])];
+  const STAFF_BAR = ["dashboard","training","documents","incidents","dse",...(showMyPpe?["ppe"]:[]),"actions",...(user.role==="manager"?["team"]:[]),...(user.role!=="admin"&&hasMachineryAccess(user)?["mequip"]:[]),...(user.role!=="admin"&&hasReceptionAccess(user)?["reception"]:[])];
   const TRAINING_PARTS = ["training","history",...(isWarehouseWorker(user)?["machinery"]:[])];
   const tabOn = t => stab===t || (t==="training" && TRAINING_PARTS.includes(stab));
   const sTabCount = STAFF_BAR.length;
@@ -65,8 +66,8 @@ export function StaffPortal() {
   const sTight = winW < 1700 + sExtra, sTiny = winW < 1400 + sExtra, sSnug = sTiny && sTabCount >= 10;
   // Menu names in the person's language (lib/i18n.js); the pages behind them are English for now.
   const inLang = o => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, t(v)]));
-  const STAFF_TAB_LABEL = inLang({dashboard:"Dashboard",training:"My Training",history:"History",documents:"Documents",incidents:"Report Incident",dse:"My DSE",machinery:"My Machinery",mequip:"Machinery & Equipment",actions:"My Actions",ppe:"My PPE",team:"My Team"});
-  const STAFF_TAB_SHORT = inLang({dashboard:"Dashboard",training:"Training",history:"History",documents:"Documents",incidents:"Report",dse:"DSE",machinery:"Machinery",mequip:"Equipment",actions:"Actions",ppe:"PPE",team:"Team"});
+  const STAFF_TAB_LABEL = inLang({dashboard:"Dashboard",training:"My Training",history:"History",documents:"Documents",incidents:"Report Incident",dse:"My DSE",machinery:"My Machinery",mequip:"Machinery & Equipment",actions:"My Actions",ppe:"My PPE",team:"My Team",reception:"Reception"});
+  const STAFF_TAB_SHORT = inLang({dashboard:"Dashboard",training:"Training",history:"History",documents:"Documents",incidents:"Report",dse:"DSE",machinery:"Machinery",mequip:"Equipment",actions:"Actions",ppe:"PPE",team:"Team",reception:"Reception"});
   return (
     <EmojiCtx.Provider value={emojiMode}>
     <div style={{minHeight:"100vh",background:T.bg,fontFamily:font,color:T.white}}>
@@ -98,7 +99,8 @@ export function StaffPortal() {
             const notifications = staffNotifications({
               adminResponses, allMachineTypes, allModules, allUsers, assigns, comps, docAcknowledgements,
               docAssignments, docs, dseDraft, dseReports, dueDates, incidents, investigations, machineComps,
-              ppeRows, ppeSettings, racking, rackInspector, showMyPpe, user
+              ppeRows, ppeSettings, racking, rackInspector, showMyPpe, user,
+              contractors, contractorVisits, siteSignins, signinSettings
             });
             return <NotificationBell notifications={notifications} onNavigate={n=>{ if(n.preset) setPagePreset(n.preset); setStab(n.tab); if(n.editId) setQuickEditId(n.editId); }} Z={T} font={font}/>;
           })()}
@@ -139,7 +141,7 @@ export function StaffPortal() {
           {STAFF_BAR.map(t=>(
             <button key={t} onClick={()=>{setStab(t);setMobileMenuOpen(false);}}
               style={{display:"block",width:"100%",textAlign:"left",padding:"12px 24px",background:tabOn(t)?"rgba(37,99,235,0.15)":"transparent",border:"none",borderBottom:`1px solid rgba(255,255,255,0.05)`,color:tabOn(t)?T.white:T.muted,fontWeight:tabOn(t)?700:400,fontSize:14,cursor:"pointer",fontFamily:font}}>
-              {{dashboard:E("🏠 ",""),training:E("📚 ",""),history:E("📋 ",""),documents:E("📄 ",""),incidents:E("🚨 ",""),dse:"🖥️ ",machinery:"⚙️ ",mequip:"🛠 ",actions:"✅ ",ppe:E("🦺 ",""),team:E("👥 ","")}[t]}{STAFF_TAB_LABEL[t]}
+              {{dashboard:E("🏠 ",""),training:E("📚 ",""),history:E("📋 ",""),documents:E("📄 ",""),incidents:E("🚨 ",""),dse:"🖥️ ",machinery:"⚙️ ",mequip:"🛠 ",actions:"✅ ",ppe:E("🦺 ",""),team:E("👥 ",""),reception:E("🛎 ","")}[t]}{STAFF_TAB_LABEL[t]}
             </button>
           ))}
         </div>
@@ -229,6 +231,9 @@ export function StaffPortal() {
           />
         )}
 
+        {stab==="reception" && user.role!=="admin" && hasReceptionAccess(user) && (
+          <ReceptionTab me={user} contractors={contractors} contractorVisits={contractorVisits} contractorCerts={contractorCerts} permits={permits} refreshContractors={refreshContractors} T={T} font={font}/>
+        )}
         {stab==="ppe" && showMyPpe && (
           <MyPpeTab user={user} people={allUsers} team={user.role==="manager"?teamOf(user, allUsers):[]} Z={T} font={font}/>
         )}

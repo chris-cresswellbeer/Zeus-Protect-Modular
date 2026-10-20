@@ -312,6 +312,7 @@ export default {
   "DSE": "Poste écran",
   "Machinery": "Machines",
   "Equipment": "Équipements",
+  "Reception": "Accueil",
   "Actions": "Actions",
   "Team": "Équipe",
 

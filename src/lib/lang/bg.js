@@ -312,6 +312,7 @@ export default {
   "DSE": "Работно място",
   "Machinery": "Машини",
   "Equipment": "Оборудване",
+  "Reception": "Рецепция",
   "Actions": "Действия",
   "Team": "Екип",
 

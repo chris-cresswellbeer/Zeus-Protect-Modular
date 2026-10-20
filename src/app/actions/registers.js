@@ -11,15 +11,44 @@
  */
 import { auditRecord } from "../../lib/audit";
 import { dbWrite, sb } from "../../lib/supabase";
+import { markSaved, mergeKeyed } from "../../lib/keyedSync";
 
 export function createRegisterActions(app) {
   const {
-    fireLoadOkRef
+    fireLoadOkRef, regRef, setContractors
   } = app;
 
   // Contractor data is stored as JSON blobs keyed by contractor id (company, inductions, certs, visits).
-  async function dbSaveContractor(c) { await dbWrite(sb.from("contractors").upsert({id:c.id,data:c},{onConflict:"id"}), "contractor"); }
-  async function dbDeleteContractor(id) { await dbWrite(sb.from("contractors").delete().eq("id",id), "contractor delete"); }
+  // Saving a company first reads the stored copy and keeps anything added there meanwhile (a
+  // worker added by a QR sign-in, a document uploaded in another browser): lib/contractorApproval.js
+  // mergeCompany. opts.removedWorkers / removedDocs: ids this save deliberately takes out.
+  async function dbSaveContractor(c, opts = {}) {
+    const T = regRef.current.contractors;
+    markSaved(T, c);                       // the 30-second refresh leaves this company alone meanwhile
+    let out = c;
+    const r = await sb.from("contractors").select("*").eq("id", c.id);
+    const stored = r && !r.error && Array.isArray(r.data) && r.data[0] ? r.data[0].data : null;
+    if (stored) {
+      const { mergeCompany } = await import("../../lib/contractorApproval");   // only admins save companies
+      out = mergeCompany(c, stored, opts);
+      if (JSON.stringify(out) !== JSON.stringify(c)) setContractors(p => p.map(x => (String(x.id) === String(c.id) ? out : x)));
+    }
+    markSaved(T, out);
+    await dbWrite(sb.from("contractors").upsert({id:out.id,data:out},{onConflict:"id"}), "contractor");
+    return out;
+  }
+  // Read the register again now (a QR sign-in has just added a company or worker this browser
+  // hasn't got); the 30-second refresh does the same for changes made elsewhere.
+  async function refreshContractors() {
+    const readAt = Date.now();
+    const r = await sb.from("contractors").select("*");
+    if (r && !r.error && Array.isArray(r.data)) { const fresh = r.data.map(x => x.data).filter(Boolean); setContractors(cur => mergeKeyed(regRef.current.contractors, cur, fresh, readAt)); }
+  }
+  async function dbDeleteContractor(id) {
+    const T = regRef.current.contractors;
+    T.saved.delete(String(id)); T.wrote.set(String(id), Date.now());   // a refresh read before this mustn't bring it back
+    await dbWrite(sb.from("contractors").delete().eq("id",id), "contractor delete");
+  }
   async function dbSaveContractorInductions(cid,data) { await dbWrite(sb.from("contractor_inductions").upsert({contractor_id:cid,data},{onConflict:"contractor_id"}), "contractor inductions"); }
   async function dbSaveContractorCerts(cid,data) { await dbWrite(sb.from("contractor_certs").upsert({contractor_id:cid,data},{onConflict:"contractor_id"}), "contractor certs"); }
   async function dbSaveContractorVisits(cid,data) { await dbWrite(sb.from("contractor_visits").upsert({contractor_id:cid,data},{onConflict:"contractor_id"}), "contractor visits"); }
@@ -149,7 +178,7 @@ export function createRegisterActions(app) {
   }
 
   return {
-    dbSaveContractor, dbDeleteContractor, dbSaveContractorInductions, dbSaveContractorCerts,
+    dbSaveContractor, dbDeleteContractor, refreshContractors, dbSaveContractorInductions, dbSaveContractorCerts,
     dbSaveContractorVisits, dbSavePermit, dbDeletePermit, dbSaveRA, dbSaveExtCert, dbDeleteExtCert,
     dbSaveCustomMachineType, dbDeleteCustomMachineType, dbSaveMachineComp, dbDeleteMachineComp,
     dbSaveEquipment, dbSaveSiteInspections, dbSaveFirstAidData, dbSaveFireSafety, dbUploadFraDocument,

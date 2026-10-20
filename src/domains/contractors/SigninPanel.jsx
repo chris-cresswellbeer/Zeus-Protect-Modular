@@ -1,21 +1,20 @@
 /**
  * SigninPanel — contractor sign-ins from the reception QR code, on the Contractors page.
- *   QrSigninCard     one person on site now (in the On Site Right Now board): what they
- *                    told us, what reception should check, Sign out / Remove
- *   QrSignedOutChip  one person who has signed out today
- *   SigninReview     "New contractors to review": link a sign-in to the register, add the
- *                    company or worker, or dismiss it
+ * (Who is on site now, with Sign out: OnSiteBoard.jsx.)
+ *   QrAddedReview    "Added from QR sign-in – check": companies and workers a QR sign-in added
+ *                    to the register (netlify/functions/zp-signin.mjs). OK keeps them; Merge
+ *                    moves them into the entry they really are (a typo, "Ltd" missing…).
+ *   SigninReview     sign-ins from before October 2026, when a sign-in didn't add to the
+ *                    register: link to the register, add the company or worker, or dismiss
  *   CompanySignins   a company's QR sign-ins (company page → Visits)
- * Data: lib/siteSignins.js (site_signins, admins only). A sign-in never changes the
- * Contractor Register by itself; only the buttons here do.
+ * Data: lib/siteSignins.js (site_signins: admins and Reception access).
  */
 import React from "react";
 import { ask, notify } from "../../shared/Feedback";
 import { ukDate } from "../../lib/dates";
-import { saveSignin, removeSignin } from "../../lib/siteSignins";
-import { similarCompanies, findWorker, ukNow } from "../../lib/contractorSignin";
+import { saveSignin } from "../../lib/siteSignins";
+import { similarCompanies, findWorker, normPerson } from "../../lib/contractorSignin";
 
-const PERMIT = { yes: "Needs a permit to work", unsure: "Not sure if a permit is needed" };
 const amber = { background: "rgba(245,158,11,0.10)", border: "1px solid rgba(245,158,11,0.35)", color: "#fbbf24" };
 
 function Warnings({ list }) {
@@ -27,59 +26,13 @@ function Warnings({ list }) {
   );
 }
 
-export function QrSigninCard({ s, T, font }) {
-  const d = s.data;
-  const [busy, setBusy] = React.useState(false);
-  const small = { background: T.overlay, color: T.white, border: `1px solid ${T.borderMd}`, borderRadius: 7, padding: "5px 10px", cursor: "pointer", fontSize: 11, fontFamily: font, fontWeight: 700 };
-  async function out() {
-    setBusy(true);
-    const ok = await saveSignin(s, { timeOut: ukNow().time, signedOutBy: "reception" }, "Signed out at reception");
-    setBusy(false);
-    if (!ok) notify("The sign-out couldn't be saved. Check the connection and try again.", { kind: "error" });
-  }
-  async function remove() {
-    if (!(await ask({ title: "Remove this sign-in?", message: `${d.workerName} (${d.companyName}), ${ukDate(d.date)} ${d.timeIn}. Use this only for a mistake or a test: it's taken off the visit record.`, ok: "Remove", danger: true }))) return;
-    if (!(await removeSignin(s))) notify("The sign-in couldn't be removed.", { kind: "error" });
-  }
-  return (
-    <div data-testid="qr-onsite" style={{ background: "rgba(16,185,129,0.08)", borderRadius: 12, padding: "12px 14px", border: `1px solid ${d.warnings && d.warnings.length ? "rgba(245,158,11,0.45)" : "rgba(16,185,129,0.25)"}` }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: T.white, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d.workerName}</div>
-          <div style={{ fontSize: 10.5, color: "#34d399", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d.companyName}</div>
-        </div>
-        <span title="Signed in with the reception QR code" style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: .5, padding: "2px 6px", borderRadius: 6, background: T.overlay, color: T.muted, border: `1px solid ${T.border}` }}>QR</span>
-      </div>
-      <div style={{ fontSize: 11, color: T.muted }}>In: {d.timeIn}{d.areas ? ` · ${d.areas}` : ""}</div>
-      <div style={{ fontSize: 11, color: T.muted, marginTop: 2 }}>Seeing {d.host} · {d.purpose}</div>
-      <div style={{ fontSize: 11, color: T.muted, marginTop: 2 }}>📞 <a href={`tel:${d.phone}`} style={{ color: T.muted }}>{d.phone}</a></div>
-      {PERMIT[d.permit] && <div style={{ marginTop: 5, fontSize: 10.5, fontWeight: 700, color: "#f59e0b" }}>⚠ {PERMIT[d.permit]}</div>}
-      <Warnings list={d.warnings}/>
-      <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-        <button type="button" data-testid="qr-signout" style={{ ...small, opacity: busy ? .6 : 1 }} disabled={busy} onClick={out}>Sign out</button>
-        <button type="button" aria-label={`Remove the sign-in of ${d.workerName}`} style={{ ...small, color: "#f87171" }} onClick={remove}>🗑</button>
-      </div>
-    </div>
-  );
-}
-
-export function QrSignedOutChip({ s, T }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "6px 12px", borderRadius: 20, background: T.overlay, border: `1px solid ${T.border}` }}>
-      <span style={{ fontSize: 9, fontWeight: 800, color: T.muted }}>QR</span>
-      <span style={{ fontSize: 12, color: T.muted }}>{s.data.workerName} · {s.data.companyName}</span>
-      <span style={{ fontSize: 11, color: T.muted }}>Out {s.data.timeOut}</span>
-    </div>
-  );
-}
-
 /** New companies and workers from QR sign-ins, for an admin to deal with. */
 export function SigninReview({ list, contractors, setContractors, dbSaveContractor, onOpenCompany, T, font }) {
   if (!list.length) return null;
   return (
     <div data-testid="qr-review" style={{ ...amber, color: T.white, borderRadius: 16, padding: 18, marginBottom: 20 }}>
-      <h3 style={{ margin: "0 0 4px", fontSize: 15, fontWeight: 800, color: T.white }}>🪪 New contractors to review ({list.length})</h3>
-      <p style={{ margin: "0 0 12px", fontSize: 12.5, color: T.muted, lineHeight: 1.5 }}>Signed in with the reception QR code but not in the Contractor Register. Link each one to the right company and worker, or add them, then check their induction and certificates.</p>
+      <h3 style={{ margin: "0 0 4px", fontSize: 15, fontWeight: 800, color: T.white }}>🪪 Older sign-ins not in the register ({list.length})</h3>
+      <p style={{ margin: "0 0 12px", fontSize: 12.5, color: T.muted, lineHeight: 1.5 }}>From before sign-ins added contractors to the register themselves. Link each one to the right company and worker, add them, or dismiss.</p>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {list.map(s => <ReviewRow key={s.id} s={s} contractors={contractors} setContractors={setContractors} dbSaveContractor={dbSaveContractor} onOpenCompany={onOpenCompany} T={T} font={font}/>)}
       </div>
@@ -98,7 +51,7 @@ function ReviewRow({ s, contractors, setContractors, dbSaveContractor, onOpenCom
   const sel = { background: T.overlay, border: `1px solid ${T.borderMd}`, borderRadius: 8, padding: "7px 10px", color: T.white, fontFamily: font, fontSize: 12, minHeight: 34, maxWidth: 260 };
   const reviewed = { reviewed: true, reviewedAt: new Date().toISOString() };
   // the "new company / new worker" warning has been dealt with; say what reception still has to do
-  const ADDED = "Added to the register from this sign-in: site induction and certificates to record";
+  const ADDED = "Added to the register from this sign-in";
   const warn = (added) => [...(d.warnings || []).filter(w => !/^New (company|worker)/.test(w)), ...(added ? [ADDED] : [])];
   const run = async (fn) => { setBusy(true); try { await fn(); } finally { setBusy(false); } };
   const saveCo = async (c) => { setContractors(p => (p.some(x => x.id === c.id) ? p.map(x => (x.id === c.id ? c : x)) : [c, ...p])); await dbSaveContractor(c); };
@@ -179,6 +132,134 @@ export function CompanySignins({ list, T }) {
             <Warnings list={d.warnings}/>
           </div>
         ); })}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * "Added from QR sign-in – check": what the QR sign-in added to the register.
+ *  Company: OK (keep it) · Merge into… (it's really a company already in the register) · Open
+ *  Worker at a known company: OK · Same person as… · Open
+ */
+export function QrAddedReview({ contractors, setContractors, signins, dbSaveContractor, dbDeleteContractor, contractorCerts, onOpenCompany, T, font }) {
+  const newCos = contractors.filter(c => c.createdFrom === "qr" && !c.checked);
+  const newWorkers = [];
+  contractors.forEach(c => { if (c.createdFrom === "qr" && !c.checked) return; (c.workers || []).forEach(w => { if (w.createdFrom === "qr" && !w.checked) newWorkers.push({ c, w }); }); });
+  if (!newCos.length && !newWorkers.length) return null;
+  const n = newCos.length + newWorkers.length;
+  return (
+    <div data-testid="qr-added" style={{ ...amber, color: T.white, borderRadius: 16, padding: 18, marginBottom: 20 }}>
+      <h3 style={{ margin: "0 0 4px", fontSize: 15, fontWeight: 800, color: T.white }}>🪪 Added from QR sign-in – check ({n})</h3>
+      <p style={{ margin: "0 0 12px", fontSize: 12.5, color: T.muted, lineHeight: 1.5 }}>The reception QR code added these to the register. If one is really a company or person already in the register (a typo, "Ltd" missing), merge it; otherwise tick OK. Then add the company's documents so it can be approved.</p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {newCos.map(c => <AddedCompanyRow key={c.id} c={c} contractors={contractors} setContractors={setContractors} signins={signins} dbSaveContractor={dbSaveContractor} dbDeleteContractor={dbDeleteContractor} contractorCerts={contractorCerts} onOpenCompany={onOpenCompany} T={T} font={font}/>)}
+        {newWorkers.map(({ c, w }) => <AddedWorkerRow key={`${c.id}:${w.id}`} c={c} w={w} setContractors={setContractors} signins={signins} dbSaveContractor={dbSaveContractor} onOpenCompany={onOpenCompany} T={T} font={font}/>)}
+      </div>
+    </div>
+  );
+}
+
+const btnStyle = (T, font, primary) => ({ background: primary ? `linear-gradient(135deg,${T.accent},${T.blue})` : T.overlay, color: "#fff", border: primary ? "none" : `1px solid ${T.borderMd}`, borderRadius: 8, padding: "7px 12px", cursor: "pointer", fontFamily: font, fontSize: 12, fontWeight: 700, minHeight: 34 });
+const selStyle = (T, font) => ({ background: T.overlay, border: `1px solid ${T.borderMd}`, borderRadius: 8, padding: "7px 10px", color: T.white, fontFamily: font, fontSize: 12, minHeight: 34, maxWidth: 260 });
+const later = (a, b) => [a, b].filter(Boolean).sort().pop();
+const earlier = (a, b) => [a, b].filter(Boolean).sort()[0];
+/** Two records of one worker → one (the register's details win; dates and counts combine). */
+function joinWorker(keep, extra) {
+  return { ...keep, phone: keep.phone || extra.phone || "", firstInducted: earlier(keep.firstInducted, extra.firstInducted), lastSignin: later(keep.lastSignin, extra.lastSignin),
+    signinCount: (Number(keep.signinCount) || 0) + (Number(extra.signinCount) || 0) };
+}
+const tidy = o => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
+
+function AddedCompanyRow({ c, contractors, setContractors, signins, dbSaveContractor, dbDeleteContractor, contractorCerts, onOpenCompany, T, font }) {
+  const others = contractors.filter(x => x.id !== c.id && !(x.createdFrom === "qr" && !x.checked));
+  const sims = [...new Set([...(c.possibleDuplicates || []), ...similarCompanies(others, c.name).map(x => x.id)])].map(id => others.find(x => x.id === id)).filter(Boolean);
+  const [pick, setPick] = React.useState(sims[0] ? sims[0].id : "");
+  const [busy, setBusy] = React.useState(false);
+  const run = async fn => { setBusy(true); try { await fn(); } finally { setBusy(false); } };
+  const ok = () => run(async () => {
+    const next = { ...c, checked: true, workers: (c.workers || []).map(w => ({ ...w, checked: true })) };
+    setContractors(p => p.map(x => (x.id === c.id ? next : x)));
+    await dbSaveContractor(next);
+  });
+  const merge = () => run(async () => {
+    const target = contractors.find(x => x.id === pick); if (!target) return;
+    if (Object.keys(contractorCerts || {}).some(k => k.startsWith(`${c.id}_`))) { notify(`${c.name} has worker certificates recorded. Move them by hand first, or tick OK instead.`, { kind: "warn" }); return; }
+    if (!(await ask({ title: `Merge into ${target.name}?`, message: `${c.name} is taken out of the register. Its ${(c.workers || []).length} worker(s), documents and sign-ins move to ${target.name}.`, ok: "Merge" }))) return;
+    const map = {};
+    let workers = [...(target.workers || [])];
+    (c.workers || []).forEach(w => {
+      const same = workers.find(x => normPerson(x.name) === normPerson(w.name));
+      if (same) { map[w.id] = same.id; workers = workers.map(x => (x.id === same.id ? tidy(joinWorker(x, w)) : x)); }
+      else { map[w.id] = w.id; workers.push({ ...w, checked: true }); }
+    });
+    const next = tidy({ ...target, workers, documents: [...(target.documents || []), ...(c.documents || [])], lastOnSite: later(target.lastOnSite, c.lastOnSite),
+      signinCount: (Number(target.signinCount) || 0) + (Number(c.signinCount) || 0) || undefined });
+    // saved first, then the QR entry removed, then this browser's copy (so nothing reads the
+    // register again while the sign-ins still point at a company that's gone)
+    const saved = (await dbSaveContractor(next)) || next;
+    await dbDeleteContractor(c.id);
+    for (const s of (signins || []).filter(s => s.data && s.data.companyId === c.id)) {
+      await saveSignin(s, { companyId: target.id, workerId: map[s.data.workerId] || s.data.workerId }, `Moved to ${target.name} (merged)`);   // eslint-disable-line no-await-in-loop
+    }
+    setContractors(p => p.filter(x => x.id !== c.id).map(x => (x.id === target.id ? saved : x)));
+    notify(`${c.name} merged into ${target.name}.`);
+  });
+  return (
+    <div data-testid="qr-added-company" style={{ background: T.overlay, borderRadius: 12, padding: "12px 14px", border: `1px solid ${T.border}` }}>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "baseline" }}>
+        <b style={{ fontSize: 14 }}>{c.name}</b>
+        <span style={{ fontSize: 12, color: T.muted }}>new company{c.createdAt ? `, ${ukDate(c.createdAt)}` : ""} · {(c.workers || []).map(w => w.name).join(", ") || "no workers"}</span>
+        {sims.length > 0 && <span style={{ fontSize: 12, color: "#fbbf24", fontWeight: 700 }}>Similar: {sims.map(x => x.name).join(", ")}</span>}
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10, alignItems: "center" }}>
+        <button type="button" data-testid="qr-added-ok" style={btnStyle(T, font, true)} disabled={busy} onClick={ok}>✓ OK, it's a new company</button>
+        {others.length > 0 && <>
+          <span style={{ fontSize: 12, color: T.muted }}>or it's</span>
+          <select aria-label="Company it really is" data-testid="qr-added-pick" value={pick} onChange={e => setPick(e.target.value)} style={selStyle(T, font)}>
+            <option value="">Choose a company…</option>
+            {sims.length > 0 && <optgroup label="Similar names">{sims.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</optgroup>}
+            <optgroup label="All companies">{[...others].sort((a, b) => a.name.localeCompare(b.name)).map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</optgroup>
+          </select>
+          <button type="button" data-testid="qr-added-merge" style={btnStyle(T, font, false)} disabled={busy || !pick} onClick={merge}>Merge</button>
+        </>}
+        <button type="button" style={{ ...btnStyle(T, font, false), marginLeft: "auto" }} onClick={() => onOpenCompany(c.id)}>Open →</button>
+      </div>
+    </div>
+  );
+}
+
+function AddedWorkerRow({ c, w, setContractors, signins, dbSaveContractor, onOpenCompany, T, font }) {
+  const others = (c.workers || []).filter(x => x.id !== w.id);
+  const [pick, setPick] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const run = async fn => { setBusy(true); try { await fn(); } finally { setBusy(false); } };
+  const save = async next => { setContractors(p => p.map(x => (x.id === c.id ? next : x))); await dbSaveContractor(next, { removedWorkers: next.workers.some(x => x.id === w.id) ? [] : [w.id] }); };
+  const ok = () => run(() => save({ ...c, workers: c.workers.map(x => (x.id === w.id ? { ...x, checked: true } : x)) }));
+  const same = () => run(async () => {
+    const keep = others.find(x => x.id === pick); if (!keep) return;
+    await save({ ...c, workers: c.workers.filter(x => x.id !== w.id).map(x => (x.id === keep.id ? tidy(joinWorker(x, w)) : x)) });
+    for (const s of (signins || []).filter(s => s.data && s.data.companyId === c.id && s.data.workerId === w.id)) {
+      await saveSignin(s, { workerId: keep.id }, `Linked to ${keep.name} (same person)`);   // eslint-disable-line no-await-in-loop
+    }
+  });
+  return (
+    <div data-testid="qr-added-worker" style={{ background: T.overlay, borderRadius: 12, padding: "12px 14px", border: `1px solid ${T.border}` }}>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "baseline" }}>
+        <b style={{ fontSize: 14 }}>{w.name}</b>
+        <span style={{ fontSize: 12, color: T.muted }}>new worker at {c.name}{w.createdAt ? `, ${ukDate(w.createdAt)}` : ""}{w.phone ? ` · 📞 ${w.phone}` : ""}</span>
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10, alignItems: "center" }}>
+        <button type="button" data-testid="qr-added-worker-ok" style={btnStyle(T, font, true)} disabled={busy} onClick={ok}>✓ OK</button>
+        {others.length > 0 && <>
+          <span style={{ fontSize: 12, color: T.muted }}>or the same person as</span>
+          <select aria-label="Worker it really is" data-testid="qr-added-worker-pick" value={pick} onChange={e => setPick(e.target.value)} style={selStyle(T, font)}>
+            <option value="">Choose…</option>
+            {others.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
+          </select>
+          <button type="button" data-testid="qr-added-worker-same" style={btnStyle(T, font, false)} disabled={busy || !pick} onClick={same}>Same person</button>
+        </>}
+        <button type="button" style={{ ...btnStyle(T, font, false), marginLeft: "auto" }} onClick={() => onOpenCompany(c.id)}>Open →</button>
       </div>
     </div>
   );

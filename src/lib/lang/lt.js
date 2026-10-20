@@ -313,6 +313,7 @@ export default {
   "DSE": "Darbo vieta",
   "Machinery": "Mašinos",
   "Equipment": "Įranga",
+  "Reception": "Registratūra",
   "Actions": "Veiksmai",
   "Team": "Komanda",
 

@@ -35,6 +35,14 @@
  *              who reported it and the hazard); never who was hurt or what the injury was. Sent within minutes: the portal
  *              asks the server to check straight after an incident is saved
  *              (netlify/functions/zp-email-alert.mjs), and the 15-minute job catches anything missed.
+ *   contractor to H&S (admins + extra admin emails) and, if they're a member of staff, the host,
+ *              when a contractor signs in with the reception QR code and the company isn't approved
+ *              (documents missing / expired, banned, new and not checked) or a permit to work is
+ *              needed and not issued (Site Settings → Contractor sign-in: alertOnArrival / alertHost).
+ *              Worked out from the register when the email goes, so fixing it first stops it.
+ *              Once per sign-in per person. Sent straight away by the sign-in function too.
+ *   onsite     to reception (staff with Reception access + the reception addresses; else admins),
+ *              once a day, at or after the end-of-day check time if anyone is still signed in.
  *
  * DUPLICATES are prevented with KEYS stored in the email_keys table once an email
  * has gone (e.g. "new:t:4:fire_safety", "exp:4:ext:first_aid:2026-11-02:30",
@@ -59,6 +67,8 @@ import { riddorDue, riddorUrgent, riddorDueText } from "../domains/incidents/rid
 import { INJURY_TYPES } from "../data/seedIncidents";
 import { INSP_TYPES } from "../data/seedInspections";
 import { CONTRACTOR_CERT_TYPES } from "../data/seedContractors";
+import { normaliseSigninSettings } from "./contractorSignin";
+import { onSiteList, liveIssues, approvalOf } from "./contractorApproval";
 import { latestByKey } from "../domains/inspections/inspectionDue";
 import { fireSummary, DRILL_INSPECTION, FRA_INSPECTION } from "../domains/fireSafety/fireLogic";
 import { renderEmail, ukDate } from "./emailTemplates";
@@ -134,11 +144,12 @@ export function emailSettings(data) {
 /** The date, hour and weekday in the UK, whatever time zone the computer is in. */
 export function ukClock(now = new Date()) {
   const parts = Object.fromEntries(new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", hourCycle: "h23", weekday: "short" }).formatToParts(now).map(p => [p.type, p.value]));
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23", weekday: "short" }).formatToParts(now).map(p => [p.type, p.value]));
   const today = `${parts.year}-${parts.month}-${parts.day}`;
   const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(parts.weekday);
   const iso = weekday === 0 ? 7 : weekday;                        // Monday 1 … Sunday 7
-  return { today, hour: Number(parts.hour) % 24, weekday, isoDay: iso, weekStart: plusDays(today, 1 - iso), ms: now.getTime() };
+  const hour = Number(parts.hour) % 24;
+  return { today, hour, time: `${String(hour).padStart(2, "0")}:${parts.minute}`, weekday, isoDay: iso, weekStart: plusDays(today, 1 - iso), ms: now.getTime() };
 }
 
 // ── date helpers (plain "YYYY-MM-DD", UTC maths so the time zone can't shift a day) ──
@@ -204,7 +215,12 @@ export function prepareData(rows = {}) {
     fireSafety: { wardens: r("fire_wardens").map(data).filter(Boolean), drills: r("fire_drills").map(data).filter(Boolean),
       extinguishers: r("fire_extinguishers").map(data).filter(Boolean), fraReviews: r("fire_fra_reviews").map(data).filter(Boolean) },
     firstAid: (firstAidRow && firstAidRow.data) || {},
-    contractors: r("contractors").map(data).filter(Boolean), conCerts };
+    contractors: r("contractors").map(data).filter(Boolean), conCerts,
+    // contractor sign-in (today's QR sign-ins, visits logged by hand, permits, the sign-in settings)
+    signins: r("site_signins").filter(x => x && x.data).map(x => ({ id: String(x.id), data: x.data })),
+    conVisits: Object.fromEntries(r("contractor_visits").map(x => [String(x.contractor_id), Array.isArray(x.data) ? x.data : []])),
+    permits: r("permits").map(x => ({ ...(x.data || {}), id: x.id })),
+    signinSettings: normaliseSigninSettings(rows.signinSettings) };
 }
 
 const active = u => (u.status || "active") !== "leaver";
@@ -320,6 +336,9 @@ export function dueChecks(data, today, days = 30) {
     if (last) add("First aid kit check", k.location || "First aid kit", plusDays(last, 35));
     else out.push({ what: "First aid kit check", text: k.location || "First aid kit", due: "", days: -1, note: "Never checked" }); });
   if (fa.assessment && fa.assessment.nextReview) add("First aid needs assessment", "First aid needs assessment", fa.assessment.nextReview);
+  const req = (data.signinSettings || {}).requiredDocs;
+  (data.contractors || []).filter(c => c.status !== "banned" && c.status !== "inactive").forEach(c => approvalOf(c, { required: req, today }).docs
+    .filter(d => d.required && d.doc && d.doc.date).forEach(d => add("Contractor document", `${c.name || "Contractor"} · ${d.short}`, d.doc.date)));
   (data.contractors || []).forEach(c => (c.workers || []).forEach(w => Object.entries((data.conCerts || {})[`${c.id}_${w.id}`] || {}).forEach(([type, cert]) =>
     add("Contractor certificate", `${c.name || "Contractor"} · ${w.name || "worker"} · ${(CONTRACTOR_CERT_TYPES.find(t => t.id === type) || {}).label || type}`, cert && cert.expiryDate))));
   return out.sort((a, b) => a.days - b.days || a.what.localeCompare(b.what));
@@ -346,6 +365,74 @@ const isStopWork = inc => !!inc.quickReport && inc.urgency === "high";
 const incidentKind = inc => (inc.quickReport ? "hazard report" : (INCIDENT_TYPES[inc.type] || "incident").toLowerCase());
 const clip = (t, n) => { const v = String(t || "").replace(/\s+/g, " ").trim(); return v.length > n ? `${v.slice(0, n - 1).trimEnd()}…` : v; };
 
+// ── Contractors ─────────────────────────────────────────────────────────────
+/**
+ * Keys: "con:<recipient>:<sign-in id>" (arrival), "onsite:<recipient>:<date>" (end of day).
+ * "baseline:con": the first time this runs, sign-ins already made are noted without emailing.
+ */
+function planContractorEmails({ data, s, clock, sent, admins, withEmail, link, emails, quietKeys, baselineKeys, ignoreSchedule }) {
+  const cs = data.signinSettings || normaliseSigninSettings(null);
+  const today = clock.today;
+  const signins = (data.signins || []).filter(x => x.data.date === today);
+  const conFirst = !sent.has("baseline:con");
+  if (conFirst) baselineKeys.push("baseline:con");
+  const ctx = { contractors: data.contractors || [], contractorCerts: data.conCerts || {}, permits: data.permits || [], settings: cs, today };
+  const companyOf = id => (data.contractors || []).find(c => String(c.id) === String(id));
+
+  // arrivals
+  signins.forEach(row => {
+    const d = row.data;
+    const issues = liveIssues({ row, companyId: d.companyId, workerId: d.workerId, companyName: d.companyName, permit: d.permit }, ctx).filter(i => i.kind !== "cert");
+    if (!issues.length) return;
+    const to = admins.map(a => ({ ...a, admin: true }));
+    if (cs.alertHost && d.host) {
+      const host = withEmail.find(u => norm(u.name) === norm(d.host)) || withEmail.filter(u => norm(u.name).split(" ")[0] === norm(d.host) && norm(d.host).indexOf(" ") < 0).find((u, i, all) => all.length === 1);
+      if (host) to.push({ id: host.id, name: host.name, email: host.email.trim(), admin: host.role === "admin", host: true });
+    }
+    const seen = new Set();
+    to.filter(r => { const k = r.email.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; }).forEach(r => {
+      const key = `con:${r.id}:${row.id}`;
+      if (sent.has(key)) return;
+      if (conFirst) { baselineKeys.push(key); return; }
+      if (!cs.alertOnArrival) { quietKeys.push(key); return; }
+      const company = companyOf(d.companyId);
+      const red = issues.some(i => i.level === "red");
+      const subject = `${red ? "Check before work starts" : "Contractor on site"}: ${clip(d.workerName, 40)} (${clip((company && company.name) || d.companyName, 50)})`;
+      const intro = r.host && !r.admin
+        ? `${d.workerName} from ${(company && company.name) || d.companyName} has signed in at reception to see you${d.purpose ? ` (${clip(d.purpose, 80)})` : ""}. There's something to check before they start work.`
+        : `${d.workerName} from ${(company && company.name) || d.companyName} signed in at ${d.timeIn} with the reception QR code. There's something to check.`;
+      emails.push({ kind: "contractor", priority: -1, userId: /^x-/.test(String(r.id)) ? null : r.id, name: r.name, to: r.email, subject, keys: [key],
+        ...renderEmail({ preheader: issues[0].text, greeting: r.name ? `Hi ${firstName(r)},` : "Hello,", intro,
+          sections: [
+            { title: "Signed in", items: [{ text: `${d.workerName}, ${(company && company.name) || d.companyName}`, sub: [`${ukDate(d.date)} at ${d.timeIn}`, d.host && `seeing ${d.host}`, d.areas && `working in ${clip(d.areas, 60)}`].filter(Boolean).join(" · ") },
+              d.purpose && { text: "Here to", sub: clip(d.purpose, 160) }].filter(Boolean) },
+            { title: "To check", items: issues.map(i => ({ text: i.text, flag: i.level === "red" })) },
+          ],
+          note: "Nothing stopped them signing in. Upload the company's documents or issue the permit in the portal and the warning clears.",
+          button: r.admin ? { label: "Open Contractors", href: link("#/admin/contractors") } : { label: `Open ${P()}`, href: link("") } }) });
+    });
+  });
+
+  // end of day: still signed in
+  if (!cs.onsiteCheckTime) return;
+  if (!ignoreSchedule && (clock.time || "00:00") < cs.onsiteCheckTime) return;
+  const list = onSiteList({ signins, contractors: data.contractors || [], visits: data.conVisits || {}, today, now: clock.time || "23:59" });
+  if (!list.length) return;
+  const reception = [...withEmail.filter(u => u.reception === true && u.role !== "admin").map(u => ({ id: u.id, name: u.name, email: u.email.trim() })),
+    ...cs.receptionEmails.map(e => ({ id: `x-${e}`, name: "", email: e }))];
+  const to = (reception.length ? reception : admins).filter((a, i, all) => all.findIndex(b => b.email.toLowerCase() === a.email.toLowerCase()) === i);
+  to.forEach(r => {
+    const key = `onsite:${r.id}:${today}`;
+    if (sent.has(key)) return;
+    emails.push({ kind: "onsite", priority: 0, userId: /^x-/.test(String(r.id)) ? null : r.id, name: r.name, to: r.email, keys: [key],
+      subject: `${list.length} contractor${list.length === 1 ? " is" : "s are"} still signed in`,
+      ...renderEmail({ preheader: "Please check they've left and sign them out", greeting: r.name ? `Hi ${firstName(r)},` : "Hello,",
+        intro: `It's after ${cs.onsiteCheckTime} and ${plural(list.length, "contractor")} ${list.length === 1 ? "is" : "are"} still signed in${cs.site ? ` at ${cs.site}` : ""}. Please check they've left, and sign them out, so the fire roll call is right.`,
+        sections: [{ title: "Still signed in", items: list.map(p => ({ text: `${p.name}, ${p.companyName}`, sub: [`in at ${p.timeIn || "?"}`, p.host && `seeing ${p.host}`, p.phone && `📞 ${p.phone}`].filter(Boolean).join(" · ") })) }],
+        button: { label: "Open the list", href: link(r.id && !/^x-/.test(String(r.id)) && !admins.some(a => a.id === r.id) ? "#/staff/reception" : "#/admin/contractors") } }) });
+  });
+}
+
 // ── The plan ────────────────────────────────────────────────────────────────
 /**
  * What to send now.
@@ -355,7 +442,8 @@ const clip = (t, n) => { const v = String(t || "").replace(/\s+/g, " ").trim(); 
  *   sent       Set of keys already done (email_keys)
  *   portalUrl  link target, e.g. "https://zeus-protect.netlify.app"
  *   ignoreSchedule  true for "Send now" / preview: don't wait for the send hour or weekday
- *   only       "incident": high-risk incident alerts and nothing else (the alert function)
+ *   only       "incident": high-risk incident alerts and nothing else (the alert function);
+ *              "contractor": incident + contractor emails (the sign-in function)
  * → { emails:[{ kind, priority, userId, name, to, subject, html, text, keys:[] }],
  *     quietKeys:[], baselineKeys:[], firstRun, noEmail:[names] }
  */
@@ -453,6 +541,13 @@ export function planEmails({ data, settings, clock, sent = new Set(), portalUrl 
     });
   }
   if (only === "incident") {
+    emails.sort((a, b) => a.priority - b.priority);
+    return { emails, quietKeys, baselineKeys, firstRun: false, noEmail };
+  }
+
+  // 0b. CONTRACTORS — arrivals H&S should know about (any hour) and the end-of-day check.
+  planContractorEmails({ data, s, clock, sent, admins, withEmail, link, emails, quietKeys, baselineKeys, ignoreSchedule });
+  if (only === "contractor") {
     emails.sort((a, b) => a.priority - b.priority);
     return { emails, quietKeys, baselineKeys, firstRun: false, noEmail };
   }

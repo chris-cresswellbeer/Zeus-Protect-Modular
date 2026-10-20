@@ -130,7 +130,8 @@ export function buildEvidencePack(data, { from, to, preparedBy = "", preparedFor
   const visitsHand = cons.reduce((s, c) => s + ((data.contractorVisits || {})[c.id] || []).filter(v => inP(v.date) && d10(v.date) <= today).length, 0);
   const visitsQr = (data.siteSignins || []).filter(s => s && s.data && inP(s.data.date)).length;
   const workers = cons.flatMap(c => (c.workers || []).map(w => ({ c, w })));
-  const inducted = count(workers, ({ c, w }) => { const ind = (data.contractorInductions || {})[`${c.id}_${w.id}`] || {}; return INDUCTION_ITEMS.every(i => ind[i.id] && ind[i.id].done); });
+  // inducted: the QR sign-in checklist (w.firstInducted), or every induction item ticked by hand
+  const inducted = count(workers, ({ c, w }) => { if (w.firstInducted) return true; const ind = (data.contractorInductions || {})[`${c.id}_${w.id}`] || {}; return INDUCTION_ITEMS.every(i => ind[i.id] && ind[i.id].done); });
   const certExpired = count(workers, ({ c, w }) => vals((data.contractorCerts || {})[`${c.id}_${w.id}`]).some(x => x && x.expiryDate && x.expiryDate < today));
   const contractors = { companies: count(cons, c => c.status === "active"), banned: count(cons, c => c.status === "banned"), workers: workers.length, inducted, inductedPct: pct(inducted, workers.length),
     certExpired, visits: visitsHand + visitsQr, visitsQr };

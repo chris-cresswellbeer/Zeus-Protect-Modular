@@ -1,24 +1,31 @@
 import React from "react";
 import { useWindowWidth } from "../../shared/hooks";
-import { Avatar } from "../../shared/primitives";
 import { ContractorDetail } from "./ContractorDetail";
 import { CompanyForm } from "./CompanyForm";
 import { useRemembered } from "../../lib/remembered";
 import { HelpTip } from "../../shared/HelpTip";
-import { useSiteSignins, signinsOnSite, signinsOutToday, signinsToReview } from "../../lib/siteSignins";
-import { QrSigninCard, QrSignedOutChip, SigninReview } from "./SigninPanel";
+import { useSiteSignins, signinsToReview, useSigninSettings } from "../../lib/siteSignins";
+import { SigninReview, QrAddedReview } from "./SigninPanel";
+import { OnSiteBoard, ApprovalChip, useRegisterCatchUp } from "./OnSiteBoard";
+import { approvalOf } from "../../lib/contractorApproval";
 
 import { localISO, todayISO, ukDate } from "../../lib/dates";
 /**
- * ContractorsTab — admin contractor management: company list with status filter and
- * search, an "on site now" panel (today's visits), upcoming scheduled visits, and
- * flags for expired worker certificates. Selecting a company opens ContractorDetail.
- * People who signed in with the reception QR code (lib/siteSignins.js) show in On Site
- * Right Now too, and new companies / workers from it under "New contractors to review".
+ * ContractorsTab — admin contractor management:
+ *   • On Site Right Now (OnSiteBoard.jsx): QR sign-ins and visits logged here, with what to
+ *     know about each (approval, permit), Sign out, the end-of-day check and the fire roll call
+ *   • "Added from QR sign-in – check" (SigninPanel.jsx QrAddedReview): companies and workers the
+ *     QR sign-in added to the register, to confirm or merge into the right entry
+ *   • the register: approval (lib/contractorApproval.js: required documents on file and in
+ *     date, or banned / inactive), search and filter, expired worker certificates
+ * Selecting a company opens ContractorDetail.
  *
  * CONTRACTOR DATA MODEL (the app's shared state (app/useAppState.js) → Supabase table)
- *   contractors          [ { id:"con_<ts>", name, type, status, email, phone, notes,
- *                            workers:[{ id:"w_<ts>", name, role, email, phone }] } ]   → contractors
+ *   contractors          [ { id:"con_<ts>" | "con_qr_<…>", name, type, status, email, phone, notes,
+ *                            createdFrom:"qr", checked, possibleDuplicates:[id], lastOnSite, signinCount,
+ *                            documents:[{ id, type, title, fileName, fileUrl, date, uploadedAt, uploadedBy, note }],
+ *                            workers:[{ id:"w_<ts>", name, role, email, phone,
+ *                                       createdFrom, checked, firstInducted, lastSignin, signinCount }] } ]   → contractors
  *   contractorVisits     { [companyId]: [ { id:"v_<ts>", date, timeIn, timeOut, purpose, areas,
  *                            signedInBy, workers:[workerId], permitRequired, notes, scheduled? } ] } → contractor_visits
  *   contractorInductions { ["<companyId>_<workerId>"]: { [inductionItemId]: {done,date,by} } } → contractor_inductions
@@ -26,12 +33,13 @@ import { localISO, todayISO, ukDate } from "../../lib/dates";
  *   NB: inductions and certs are keyed per WORKER using the composite "<companyId>_<workerId>"
  *   string (stored in the contractor_id column). Induction items / cert types: data/seedContractors.js.
  */
-function ContractorsTab({ contractors, setContractors, contractorInductions, setContractorInductions, contractorCerts, setContractorCerts, contractorVisits, setContractorVisits, dbSaveContractor, dbDeleteContractor, dbSaveContractorInductions, dbSaveContractorCerts, dbSaveContractorVisits, staff, focusContractorId, setFocusContractorId, T, font }) {
+function ContractorsTab({ contractors, setContractors, contractorInductions, setContractorInductions, contractorCerts, setContractorCerts, contractorVisits, setContractorVisits, dbSaveContractor, dbDeleteContractor, dbSaveContractorInductions, dbSaveContractorCerts, dbSaveContractorVisits, staff, permits = [], me, refreshContractors, focusContractorId, setFocusContractorId, T, font }) {
   const isMobile = useWindowWidth() <= 1024;
   const [view, setView] = React.useState("list");
   const [selected, setSelected] = React.useState(null);
   const [showForm, setShowForm] = React.useState(false);
-  const [filterStatus, setFilterStatus] = useRemembered("contractors.status", "all");
+  const [filterRaw, setFilterStatus] = useRemembered("contractors.approval", "all");
+  const filterStatus = ["all","approved","docs","blocked","new"].includes(filterRaw) ? filterRaw : "all";
   const [search, setSearch] = React.useState("");
   // Quick search (app/quickSearch.js) asks for a particular contractor: open it, then clear the request.
   React.useEffect(() => {
@@ -41,89 +49,34 @@ function ContractorsTab({ contractors, setContractors, contractorInductions, set
   }, [focusContractorId]); // eslint-disable-line react-hooks/exhaustive-deps
   const today = todayISO();
   const signins = useSiteSignins(true, { fresh: true });
-  const qrActive = signinsOnSite(signins, today);
-  const qrOut = signinsOutToday(signins, today);
+  const settings = useSigninSettings(true);
+  useRegisterCatchUp(signins, contractors, refreshContractors);
   const qrReview = signinsToReview(signins);
+  const open = id => { setSelected(id); setView("detail"); };
+  const approval = c => approvalOf(c, { required: settings.requiredDocs, today });
 
   const selCon = contractors.find(c=>c.id===selected);
   const filtered = contractors.filter(c=>{
-    if (filterStatus!=="all"&&c.status!==filterStatus) return false;
+    if (filterStatus!=="all") {
+      const k = approval(c).key;
+      if (filterStatus==="approved" && !(k==="approved"||k==="expiring")) return false;
+      if (filterStatus==="docs" && !(k==="missing"||k==="expired")) return false;
+      if (filterStatus==="blocked" && !(k==="banned"||k==="inactive")) return false;
+      if (filterStatus==="new" && !(c.createdFrom==="qr"&&!c.checked)) return false;
+    }
     if (search) { const q=search.toLowerCase(); if(!c.name.toLowerCase().includes(q)) return false; }
     return true;
   });
 
   if (view==="detail"&&selCon) {
-    return <ContractorDetail selCon={selCon} contractorInductions={contractorInductions} setContractorInductions={setContractorInductions} contractorCerts={contractorCerts} setContractorCerts={setContractorCerts} contractorVisits={contractorVisits} setContractorVisits={setContractorVisits} contractors={contractors} setContractors={setContractors} dbSaveContractor={dbSaveContractor} dbDeleteContractor={dbDeleteContractor} dbSaveContractorInductions={dbSaveContractorInductions} dbSaveContractorCerts={dbSaveContractorCerts} dbSaveContractorVisits={dbSaveContractorVisits} staff={staff} isMobile={isMobile} setView={setView} T={T} font={font}/>;
+    return <ContractorDetail selCon={selCon} settings={settings} me={me} contractorInductions={contractorInductions} setContractorInductions={setContractorInductions} contractorCerts={contractorCerts} setContractorCerts={setContractorCerts} contractorVisits={contractorVisits} setContractorVisits={setContractorVisits} contractors={contractors} setContractors={setContractors} dbSaveContractor={dbSaveContractor} dbDeleteContractor={dbDeleteContractor} dbSaveContractorInductions={dbSaveContractorInductions} dbSaveContractorCerts={dbSaveContractorCerts} dbSaveContractorVisits={dbSaveContractorVisits} staff={staff} isMobile={isMobile} setView={setView} T={T} font={font}/>;
   }
 
   return (
     <div>
-      {/* On Site Now Board */}
-      {(() => {
-        const onSiteNow = [];
-        contractors.forEach(c=>{
-          const todayVisits = (contractorVisits[c.id]||[]).filter(v=>v.date===today);
-          todayVisits.forEach(v=>{
-            if (v.workers&&v.workers.length>0) {
-              v.workers.forEach(wid=>{
-                const w=(c.workers||[]).find(x=>x.id===wid);
-                if (w) onSiteNow.push({company:c,worker:w,visit:v,signedOut:!!(v.timeOut&&v.timeOut<new Date().toTimeString().slice(0,5))});
-              });
-            } else {
-              // Visit logged but no specific workers — show the company
-              onSiteNow.push({company:c,worker:null,visit:v,signedOut:!!(v.timeOut&&v.timeOut<new Date().toTimeString().slice(0,5))});
-            }
-          });
-        });
-        const active = onSiteNow.filter(x=>!x.signedOut);
-        const signedOut = onSiteNow.filter(x=>x.signedOut);
-        if (onSiteNow.length===0 && !qrActive.length && !qrOut.length) return null;
-        const nActive = active.length + qrActive.length, nOut = signedOut.length + qrOut.length;
-        return (
-          <div style={{background:nActive>0?`linear-gradient(135deg,rgba(16,185,129,0.1),rgba(16,185,129,0.05))`:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:16,padding:20,marginBottom:20,border:`1px solid ${nActive>0?"rgba(16,185,129,0.3)":T.border}`}} data-testid="onsite-board">
-            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16,flexWrap:"wrap"}}>
-              <div style={{width:10,height:10,borderRadius:"50%",background:nActive>0?"#10b981":"#64748b",boxShadow:nActive>0?"0 0 0 3px rgba(16,185,129,0.25)":"none",animation:nActive>0?"pulse 2s infinite":"none",flexShrink:0}}/>
-              <h3 style={{margin:0,fontSize:15,fontWeight:800,color:T.white}}>On Site Right Now</h3>
-              <span data-testid="onsite-count" style={{fontSize:12,color:nActive>0?"#10b981":T.muted,fontWeight:600}}>{nActive} active · {nOut} signed out</span>
-              <style>{`@keyframes pulse{0%,100%{box-shadow:0 0 0 3px rgba(16,185,129,0.25)}50%{box-shadow:0 0 0 6px rgba(16,185,129,0.1)}}`}</style>
-            </div>
-            {nActive>0 && (
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:10,marginBottom:nOut>0?16:0}}>
-                {qrActive.map(s=><QrSigninCard key={s.id} s={s} T={T} font={font}/>)}
-                {active.map((entry,i)=>(
-                  <div key={i} style={{background:"rgba(16,185,129,0.08)",borderRadius:12,padding:"12px 14px",border:"1px solid rgba(16,185,129,0.25)"}}>
-                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
-                      {entry.worker ? <Avatar name={entry.worker.name} size={28}/> : <div style={{width:28,height:28,borderRadius:8,background:`linear-gradient(135deg,${T.accent},${T.blue})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>🏢</div>}
-                      <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontSize:13,fontWeight:700,color:T.white,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{entry.worker?entry.worker.name:entry.company.name}</div>
-                        <div style={{fontSize:10,color:"#34d399"}}>{entry.worker?entry.company.name:entry.visit.purpose}</div>
-                      </div>
-                      <div style={{width:8,height:8,borderRadius:"50%",background:"#10b981",flexShrink:0}}/>
-                    </div>
-                    {entry.worker && <div style={{fontSize:11,color:T.muted,marginBottom:3}}>{entry.worker.role||entry.company.type}</div>}
-                    <div style={{fontSize:11,color:T.muted}}>{entry.visit.timeIn?`In: ${entry.visit.timeIn}`:""}{entry.visit.areas?` · ${entry.visit.areas}`:""}</div>
-                    {entry.visit.purpose && entry.worker && <div style={{fontSize:11,color:T.muted,marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{entry.visit.purpose}</div>}
-                    {entry.visit.permitRequired && <div style={{marginTop:5,fontSize:10,fontWeight:700,color:"#f59e0b"}}>⚠ Permit to Work active</div>}
-                  </div>
-                ))}
-              </div>
-            )}
-            {nOut>0 && (
-              <div>
-                <div style={{fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:.5,marginBottom:8}}>Signed Out Today</div>
-                <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
-                  {qrOut.map(s=><QrSignedOutChip key={s.id} s={s} T={T}/>)}
-                  {signedOut.map((entry,i)=>(
-                    <div key={i} style={{display:"flex",alignItems:"center",gap:7,padding:"6px 12px",borderRadius:20,background:T.overlay,border:`1px solid ${T.border}`}}>
-                      {entry.worker ? <Avatar name={entry.worker.name} size={18}/> : <span style={{fontSize:12}}>🏢</span>}
-                      <span style={{fontSize:12,color:T.muted}}>{entry.worker?entry.worker.name:entry.company.name}</span>
-                      {entry.visit.timeOut && <span style={{fontSize:11,color:T.muted}}>Out {entry.visit.timeOut}</span>}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          {/* Upcoming today / this week */}
+      <OnSiteBoard signins={signins} contractors={contractors} contractorVisits={contractorVisits} setContractorVisits={setContractorVisits} dbSaveContractorVisits={dbSaveContractorVisits}
+        contractorCerts={contractorCerts} permits={permits} settings={settings} admin me={me} onOpenCompany={open} T={T} font={font}>
+          {/* Upcoming this week */}
           {(()=>{
             const upcomingAll=[];
             const soon=localISO(new Date(Date.now()+7*86400000));
@@ -141,7 +94,7 @@ function ContractorsTab({ contractors, setContractors, contractorInductions, set
                 <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
                   {upcomingAll.map((entry,i)=>(
                     <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 12px",borderRadius:10,background:"rgba(245,158,11,0.07)",border:"1px solid rgba(245,158,11,0.2)"}}>
-                      <span style={{fontSize:12,fontWeight:800,color:"#f59e0b"}}>{entry.daysUntil===1?"Tomorrow":entry.visit.date}</span>
+                      <span style={{fontSize:12,fontWeight:800,color:"#f59e0b"}}>{entry.daysUntil===1?"Tomorrow":ukDate(entry.visit.date)}</span>
                       <span style={{fontSize:12,color:T.white,fontWeight:600}}>{entry.company.name}</span>
                       <span style={{fontSize:11,color:T.muted}}>— {entry.visit.purpose}</span>
                     </div>
@@ -150,16 +103,16 @@ function ContractorsTab({ contractors, setContractors, contractorInductions, set
               </div>
             );
           })()}
-          </div>
-        );
-      })()}
+      </OnSiteBoard>
+
+      <QrAddedReview contractors={contractors} setContractors={setContractors} signins={signins} dbSaveContractor={dbSaveContractor} dbDeleteContractor={dbDeleteContractor} contractorCerts={contractorCerts} onOpenCompany={open} T={T} font={font}/>
 
       <SigninReview list={qrReview} contractors={contractors} setContractors={setContractors} dbSaveContractor={dbSaveContractor} onOpenCompany={id=>{setSelected(id);setView("detail");}} T={T} font={font}/>
 
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20,flexWrap:"wrap",gap:12}}>
         <div>
-          <h2 style={{fontSize:22,fontWeight:900,letterSpacing:-.5,margin:"0 0 4px"}}>Contractor Register <HelpTip dark={false} text="One entry per company that works on site. Open a company to record its insurance and accreditation certificates (with expiry dates), its workers and their site inductions, and each visit. Expired certificates show in the bell, and today's visits make up 'On Site Now' on the dashboard. Permits to work are under Risk ▼ → Permits to Work."/></h2>
-          <p style={{color:T.muted,fontSize:13,margin:0}}>{contractors.filter(c=>c.status==="active").length} active companies · {contractors.reduce((s,c)=>(s+(c.workers||[]).length),0)} workers total</p>
+          <h2 style={{fontSize:22,fontWeight:900,letterSpacing:-.5,margin:"0 0 4px"}}>Contractor Register <HelpTip dark={false} text="One entry per company that works on site. Companies and workers who sign in with the reception QR code are added automatically. Open a company to upload its insurance, RAMS and policies (with expiry or review dates): a company is Approved when the documents set in Site Settings → Contractor sign-in are on file and in date. Also its workers (with the date of their first QR induction and last day on site), their certificates and each visit. Permits to work are under Risk ▼ → Permits to Work."/></h2>
+          <p style={{color:T.muted,fontSize:13,margin:0}}>{contractors.filter(c=>approval(c).approved).length} approved of {contractors.filter(c=>(c.status||"active")==="active").length} active companies · {contractors.reduce((s,c)=>(s+(c.workers||[]).length),0)} workers total</p>
         </div>
         <button onClick={()=>setShowForm(v=>!v)} style={{background:showForm?"rgba(239,68,68,0.1)":`linear-gradient(135deg,${T.accent},${T.blue})`,color:showForm?"#f87171":"#fff",border:showForm?"1px solid rgba(239,68,68,0.2)":"none",borderRadius:10,padding:"10px 20px",cursor:"pointer",fontFamily:font,fontWeight:700,fontSize:13}}>
           {showForm?"✕ Cancel":"+ Add Company"}
@@ -173,8 +126,8 @@ function ContractorsTab({ contractors, setContractors, contractorInductions, set
           <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search company name..."
             style={{width:"100%",background:T.overlay,border:`1px solid ${T.borderMd}`,borderRadius:9,padding:"8px 10px 8px 32px",color:T.white,fontSize:13,outline:"none",fontFamily:font,boxSizing:"border-box"}}/>
         </div>
-        {[["all","All"],["active","Active"],["inactive","Inactive"],["banned","Banned"]].map(([val,lbl])=>(
-          <button key={val} onClick={()=>setFilterStatus(val)} style={{padding:"7px 14px",borderRadius:9,border:`1px solid ${filterStatus===val?T.accent:T.borderMd}`,background:filterStatus===val?`rgba(37,99,235,0.15)`:T.overlay,color:filterStatus===val?T.accentLt:T.muted,cursor:"pointer",fontFamily:font,fontSize:12,fontWeight:filterStatus===val?700:400}}>{lbl}</button>
+        {[["all","All"],["approved","Approved"],["docs","Documents missing or expired"],["blocked","Banned / inactive"],["new","New from QR"]].map(([val,lbl])=>(
+          <button key={val} data-testid={`con-filter-${val}`} onClick={()=>setFilterStatus(val)} style={{padding:"7px 14px",borderRadius:9,border:`1px solid ${filterStatus===val?T.accent:T.borderMd}`,background:filterStatus===val?`rgba(37,99,235,0.15)`:T.overlay,color:filterStatus===val?T.accentLt:T.muted,cursor:"pointer",fontFamily:font,fontSize:12,fontWeight:filterStatus===val?700:400}}>{lbl}</button>
         ))}
         <span style={{color:T.muted,fontSize:12,marginLeft:"auto"}}>{filtered.length} of {contractors.length}</span>
       </div>
@@ -182,7 +135,7 @@ function ContractorsTab({ contractors, setContractors, contractorInductions, set
       <div style={{background:`linear-gradient(135deg,${T.navyMd},${T.navy})`,borderRadius:16,overflow:"hidden",border:`1px solid ${T.border}`}}>
         {!isMobile && (
           <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr 1fr 80px",padding:"10px 20px",background:T.headerBg,fontSize:11,fontWeight:700,letterSpacing:1,color:T.muted,textTransform:"uppercase"}}>
-            <span>Company</span><span>Type</span><span>Status</span><span>Workers</span><span>Visits</span><span></span>
+            <span>Company</span><span>Type</span><span>Approval</span><span>Workers</span><span>Visits</span><span></span>
           </div>
         )}
         {filtered.length===0 && (contractors.length===0
@@ -193,40 +146,40 @@ function ContractorsTab({ contractors, setContractors, contractorInductions, set
           // visits logged by hand + sign-ins from the reception QR code linked to this company
           const qv=signins.filter(s=>s.data&&s.data.companyId===c.id);
           const nVisits=cv.length+qv.length;
-          const lastVisit=[...cv.map(v=>v.date),...qv.map(s=>s.data.date)].filter(d=>d&&d<=today).sort().pop();
+          const lastVisit=[...cv.map(v=>v.date),...qv.map(s=>s.data.date),c.lastOnSite].filter(d=>d&&d<=today).sort().pop();
           const onSiteToday=cv.some(v=>v.date===today)||qv.some(s=>s.data.date===today&&!s.data.timeOut);
-          const ss=c.status==="active"?{color:"#10b981",bg:"rgba(16,185,129,0.12)",border:"rgba(16,185,129,0.3)"}:c.status==="banned"?{color:"#f87171",bg:"rgba(239,68,68,0.12)",border:"rgba(239,68,68,0.3)"}:{color:T.muted,bg:T.overlay,border:T.borderMd};
           const hasExpiredWorkerCert=(c.workers||[]).some(w=>Object.values(contractorCerts[`${c.id}_${w.id}`]||{}).some(cert=>cert.expiryDate&&cert.expiryDate<today));
           return isMobile ? (
-            <div key={c.id} onClick={()=>{setSelected(c.id);setView("detail");}} style={{padding:"14px 16px",borderTop:i>0?`1px solid ${T.border}`:"none",cursor:"pointer",display:"flex",alignItems:"center",gap:12}}>
+            <div key={c.id} onClick={()=>open(c.id)} style={{padding:"14px 16px",borderTop:i>0?`1px solid ${T.border}`:"none",cursor:"pointer",display:"flex",alignItems:"center",gap:12}}>
               <div style={{width:36,height:36,borderRadius:10,background:`linear-gradient(135deg,${T.accent},${T.blue})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>🏢</div>
               <div style={{flex:1}}>
                 <div style={{fontSize:13,fontWeight:700,color:T.white}}>{c.name}</div>
                 <div style={{fontSize:11,color:T.muted}}>{c.type} · {(c.workers||[]).length} workers</div>
               </div>
-              <span style={{fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:20,background:ss.bg,color:ss.color,border:`1px solid ${ss.border}`,textTransform:"capitalize"}}>{c.status}</span>
+              <ApprovalChip company={c} required={settings.requiredDocs} today={today} small/>
             </div>
           ) : (
-            <div key={c.id} style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr 1fr 80px",padding:"14px 20px",borderTop:i>0?`1px solid ${T.border}`:"none",alignItems:"center"}}>
+            <div key={c.id} data-testid="con-row" style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr 1fr 80px",padding:"14px 20px",borderTop:i>0?`1px solid ${T.border}`:"none",alignItems:"center"}}>
               <div style={{display:"flex",alignItems:"center",gap:12}}>
                 <div style={{width:36,height:36,borderRadius:10,background:`linear-gradient(135deg,${T.accent},${T.blue})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>🏢</div>
                 <div>
                   <div style={{fontSize:13,fontWeight:700,color:T.white,display:"flex",alignItems:"center",gap:6}}>
                     {c.name}
                     {onSiteToday && <span style={{fontSize:9,fontWeight:700,color:"#10b981",background:"rgba(16,185,129,0.12)",padding:"1px 6px",borderRadius:20,border:"1px solid rgba(16,185,129,0.3)"}}>ON SITE</span>}
+                    {c.createdFrom==="qr" && !c.checked && <span data-testid="con-new-qr" style={{fontSize:9,fontWeight:700,color:"#fbbf24",background:"rgba(245,158,11,0.1)",padding:"1px 6px",borderRadius:20,border:"1px solid rgba(245,158,11,0.3)"}}>NEW · QR</span>}
                     {hasExpiredWorkerCert && <span style={{fontSize:9,fontWeight:700,color:"#f87171",background:"rgba(239,68,68,0.1)",padding:"1px 6px",borderRadius:20,border:"1px solid rgba(239,68,68,0.2)"}}>CERT EXPIRED</span>}
                   </div>
                   {c.email && <div style={{fontSize:11,color:T.muted}}>{c.email}</div>}
                 </div>
               </div>
               <span style={{fontSize:12,color:T.muted}}>{c.type}</span>
-              <span style={{fontSize:11,fontWeight:700,padding:"2px 9px",borderRadius:20,background:ss.bg,color:ss.color,border:`1px solid ${ss.border}`,textTransform:"capitalize",display:"inline-block"}}>{c.status}</span>
+              <span><ApprovalChip company={c} required={settings.requiredDocs} today={today}/></span>
               <span style={{fontSize:12,color:T.white,fontWeight:600}}>{(c.workers||[]).length} worker{(c.workers||[]).length!==1?"s":""}</span>
               <div>
                 <div data-testid="con-visits" style={{fontSize:12,color:T.white,fontWeight:600}}>{nVisits} visit{nVisits!==1?"s":""}</div>
                 {lastVisit && <div style={{fontSize:10,color:T.muted}}>Last: {ukDate(lastVisit)}</div>}
               </div>
-              <button onClick={()=>{setSelected(c.id);setView("detail");}} style={{background:"rgba(37,99,235,0.1)",color:T.accentLt,border:"1px solid rgba(37,99,235,0.25)",borderRadius:8,padding:"6px 12px",cursor:"pointer",fontFamily:font,fontWeight:700,fontSize:11}}>View →</button>
+              <button onClick={()=>open(c.id)} style={{background:"rgba(37,99,235,0.1)",color:T.accentLt,border:"1px solid rgba(37,99,235,0.25)",borderRadius:8,padding:"6px 12px",cursor:"pointer",fontFamily:font,fontWeight:700,fontSize:11}}>View →</button>
             </div>
           );
         })}

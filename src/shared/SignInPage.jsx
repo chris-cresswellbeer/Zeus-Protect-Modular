@@ -155,7 +155,7 @@ export function SignInPage({ code: rawCode = "" }) {
       {error}
       <button type="submit" data-testid="signin-submit" style={btn(true, { opacity: busy || !allTicked ? .6 : 1 })} disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
       <p style={{ fontSize: 12.5, color: MUTED, lineHeight: 1.5, marginTop: 14 }}>
-        {brandCompany(b)} keeps these details to know who is on site, for safety and emergencies. They're seen only by the site's H&amp;S administrators.
+        {brandCompany(b)} keeps these details to know who is on site, for safety and emergencies. They're seen only by the site's H&amp;S administrators and reception.
       </p>
     </form>
   );

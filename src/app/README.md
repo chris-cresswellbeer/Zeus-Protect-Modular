@@ -45,14 +45,14 @@ differently: functions see the current state, and every screen redraws when stat
 | `actions/documents.js` | Documents, who must read them, read confirmations, bundles |
 | `actions/dse.js` | DSE reports, responses, the unfinished draft |
 | `actions/account.js` | Staff records, profiles, theme / language / emoji, temporary passwords |
-| `actions/registers.js` | Contractors, permits, risk assessments, certificates, machinery, equipment, inspections, first aid, fire safety |
+| `actions/registers.js` | Contractors (a company save merges with the stored copy; `refreshContractors`), permits, risk assessments, certificates, machinery, equipment, inspections, first aid, fire safety |
 | `actions/manager.js` | Line managers: assign, sign off DSE and actions |
 | `actions/session.js` | Sign in / out, open a module |
 | `actions/staffBulk.js` | Staff list bulk actions |
 | `actions/player.js` | The module player: the module in the person's language, marking the quiz |
 | `effects/useSessionEffects.js` | Theme, language, emoji, welcome video, page address (Back / Forward), viewport, 30-minute sign-out, module progress |
 | `quickSearch.js`, `navStyles.js`, `siteBars.jsx` | Quick search results; header button sizes; the racking bay window (`?rack=`) and the lone working alert bar |
-| **bell/** | What the notification bell lists: `adminNotifications.js`, `staffNotifications.js`, `rackingNotifications.js`. Plain functions (data in, list out), tested in `tests/portal/belllib.mjs`. |
+| **bell/** | What the notification bell lists: `adminNotifications.js`, `staffNotifications.js`, `rackingNotifications.js`, `contractorNotifications.js`. Plain functions (data in, list out), tested in `tests/portal/belllib.mjs`. |
 | **screens/** | |
 | `screens/Screens.jsx` | Which screen to show (sign-in, choose a password, phone, DSE, module player, staff, admin) |
 | `screens/LoginScreen.jsx`, `ChangePasswordScreen.jsx`, `PhoneScreen.jsx`, `DseScreen.jsx`, `ModulePlayerScreen.jsx`, `CertModal.jsx` | One screen each |

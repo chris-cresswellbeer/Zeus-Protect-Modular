@@ -312,6 +312,7 @@ export default {
   "DSE": "Postazione",
   "Machinery": "Macchine",
   "Equipment": "Attrezzature",
+  "Reception": "Reception",
   "Actions": "Azioni",
   "Team": "Team",
 

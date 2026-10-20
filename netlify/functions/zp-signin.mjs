@@ -17,14 +17,20 @@
  * WHAT IT WILL AND WON'T DO
  *   • Only with the current site code (Site Settings → Contractor sign-in); a wrong or
  *     old code, or sign-in switched off, gets "this code isn't in use".
- *   • It only ADDS sign-ins and fills in a time out. It never changes the Contractor
- *     Register, and it never sends back anything from it: the contractor is told only
- *     whether to see reception first. Reception sees the reasons in the portal.
+ *   • It adds sign-ins and fills in a time out, and keeps the Contractor Register up to
+ *     date: a company or worker it doesn't know is added (marked "Added from QR sign-in"
+ *     for H&S to check), and each worker's first induction (the QR checklist) and last
+ *     day on site are recorded. It never sends back anything from the register: the
+ *     contractor is told only whether to see reception first (a banned / inactive company,
+ *     or a permit to work that isn't issued). Reception and H&S see the reasons in the
+ *     portal (lib/contractorApproval.js signinIssues), and by email (netlify/shared/emailJob.mjs).
  *   • At most 60 sign-ins in 10 minutes for the site, so a code shared online can't
  *     flood the list.
  * ═══════════════════════════════════════════════════════════════════════════
  */
-import { SIGNIN_SETTINGS_ID, CODE_RE, normaliseSigninSettings, findCompany, findWorker, signinWarnings, normCompany, normPerson, ukNow } from "../../src/lib/contractorSignin.js";
+import { SIGNIN_SETTINGS_ID, CODE_RE, normaliseSigninSettings, findCompany, findWorker, similarCompanies, normCompany, normPerson, ukNow } from "../../src/lib/contractorSignin.js";
+import { signinIssues, seeReception, recordSignin } from "../../src/lib/contractorApproval.js";
+import { runEmailJob, siteOf } from "../shared/emailJob.mjs";
 
 process.env.TZ = "Europe/London";
 
@@ -91,28 +97,45 @@ export async function handler(event) {
       if (recent.length > 60) return reply(429, { ok: false, error: "Too many sign-ins just now. Please sign in at reception." });
 
       const contractors = (await rest("contractors?select=id,data")).map(r => ({ ...(r.data || {}), id: r.id }));
-      const company = findCompany(contractors, f.companyName);
-      const worker = findWorker(company, f.workerName);
-      let inductions = {}, certs = {};
-      if (company && worker) {
-        const key = encodeURIComponent(`${company.id}_${worker.id}`);
-        const [ir, cr] = await Promise.all([
-          rest(`contractor_inductions?select=contractor_id,data&contractor_id=eq.${key}`),
-          rest(`contractor_certs?select=contractor_id,data&contractor_id=eq.${key}`),
-        ]);
-        ir.forEach(r => { inductions[r.contractor_id] = r.data; });
-        cr.forEach(r => { certs[r.contractor_id] = r.data; });
+      const found = findCompany(contractors, f.companyName);
+      const foundWorker = findWorker(found, f.workerName);
+      // Keep the register up to date: add the company / worker if new, note today's sign-in.
+      const rec = recordSignin({ company: found, worker: foundWorker, signin: f, date: now.date, similar: found ? [] : similarCompanies(contractors, f.companyName).map(c => c.id), rnd: rnd(5) });
+      let company = rec.company, worker = rec.worker, registered = true;
+      try {
+        if (found) await rest(`contractors?id=eq.${encodeURIComponent(company.id)}`, { method: "PATCH", body: { data: company }, prefer: "return=minimal" });
+        else await rest("contractors", { method: "POST", body: { id: company.id, data: company }, prefer: "return=minimal" });
+      } catch (e) {
+        // the register couldn't be updated (contractor_approval.sql not run yet): still sign them in
+        console.error(`[zp-signin] register not updated: ${e.message}`);
+        registered = false; company = found; worker = foundWorker;
       }
-      const warnings = signinWarnings({ company, worker, inductions, certs, today: now.date });
+      let certs = {}, permits = [];
+      const key = encodeURIComponent(`${company && company.id}_${worker && worker.id}`);
+      const [cr, pr] = await Promise.all([
+        foundWorker && worker ? rest(`contractor_certs?select=contractor_id,data&contractor_id=eq.${key}`) : [],
+        f.permit === "no" ? [] : rest("permits?select=id,data&data->>status=in.(active,draft)").catch(() => []),
+      ]);
+      cr.forEach(r => { certs[r.contractor_id] = r.data; });
+      permits = pr.map(r => ({ ...(r.data || {}), id: r.id }));
+      const issues = signinIssues({ signin: f, company, worker, certs, permits, required: s.requiredDocs, today: now.date });
+      const warnings = issues.map(i => i.text);
       const id = `qr_${Date.now().toString(36)}${rnd(4)}`, token = rnd(24);
       const data = {
         site: s.site, date: now.date, timeIn: now.time, timeOut: "", ...f,
         companyId: company ? company.id : "", workerId: worker ? worker.id : "",
         answers: Object.fromEntries(s.items.map(i => [i.id, true])), items: s.items.map(i => i.text),
-        warnings, newCompany: !company, newWorker: !!company && !worker, reviewed: !!(company && worker), token,
+        warnings, issues, newCompany: !found, newWorker: !foundWorker, reviewed: !!(found && foundWorker), ...(registered ? {} : { notRegistered: true }), token,
       };
       await rest("site_signins", { method: "POST", body: { id, data }, prefer: "return=minimal" });
-      return reply(200, { ok: true, id, token, date: now.date, timeIn: now.time, seeReception: warnings.length > 0 });
+      // Something for H&S to check: email them now (the 15-minute job would catch it too; each goes once).
+      if (s.alertOnArrival && issues.some(i => i.kind !== "cert")) {
+        try {
+          const site = siteOf(event);
+          await runEmailJob({ mode: "contractor", portalUrl: site.ours ? site.portalUrl : undefined, forceTest: !site.isLive });
+        } catch (e) { console.error(`[zp-signin] arrival email: ${e.message}`); }
+      }
+      return reply(200, { ok: true, id, token, date: now.date, timeIn: now.time, seeReception: seeReception(issues) });
     }
 
     if (b.action === "signout") {

@@ -313,6 +313,7 @@ export default {
   "DSE": "Post calculator",
   "Machinery": "Utilaje",
   "Equipment": "Echipamente",
+  "Reception": "Recepție",
   "Actions": "Acțiuni",
   "Team": "Echipa",
 

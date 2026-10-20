@@ -312,6 +312,7 @@ export default {
   "DSE": "Munkahely",
   "Machinery": "Gépek",
   "Equipment": "Berendezések",
+  "Reception": "Recepció",
   "Actions": "Intézkedések",
   "Team": "Csapat",
 

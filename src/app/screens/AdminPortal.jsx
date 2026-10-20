@@ -56,7 +56,7 @@ export function AdminPortal() {
     investigationView, isMobile, lastBackup, lastLoginMap, logout, loneBar, loneSessions, loneSettings,
     machineComps, matrixAssign, mobileMenuOpen, moduleTrans, moduleVersions, msdsFiles, navBtn, navCompact,
     navTight, navTiny, newAssignDue, newDepartment, newEmail, newIsWarehouse, newJobTitle, newManager,
-    newName, newRole, newStatus, noteDue, openInAssign, pagePreset, pendingModuleSave, permits, ppeFocus,
+    newName, newRole, newStatus, noteDue, openInAssign, pagePreset, pendingModuleSave, permits, ppeFocus, refreshContractors, signinSettings,
     ppeRows, ppeSettings, previewDoc, previewModule, quickItems, quizFailures, racking, rackInspector,
     rackWindow, ras, saveModuleVersion, setAddErr, setAdminReportView, setAdminResponses, setAllUsers,
     setAssigns, setAtab, setCompHistory, setComps, setContractorCerts, setContractorInductions,
@@ -207,7 +207,7 @@ export function AdminPortal() {
             // fire warden cert default 36 months.
             // the list itself: app/bell/adminNotifications.js
             const notifications = adminNotifications({
-              adminResponses, allMachineTypes, allModules, assigns, comps, contractorCerts, contractors,
+              adminResponses, allMachineTypes, allModules, assigns, comps, contractorCerts, contractors, contractorVisits, permits, signinSettings,
               docAcknowledgements, docAssignments, docs, dseReports, dueDates, extCerts, fireSafety, incidents,
               lastBackup, loneSessions, machineComps, ppeRows, ppeSettings, quizFailures, racking,
               rackInspector, ras, siteInspections, siteSignins, staff
@@ -423,7 +423,7 @@ export function AdminPortal() {
             dbSaveContractorCerts={dbSaveContractorCerts}
             dbSaveContractorVisits={dbSaveContractorVisits}
             focusContractorId={focusContractorId} setFocusContractorId={setFocusContractorId}
-            staff={staff} T={T} font={font}/>
+            permits={permits} me={user} refreshContractors={refreshContractors} staff={staff} T={T} font={font}/>
           </React.Suspense>
         )}
 

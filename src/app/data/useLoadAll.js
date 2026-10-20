@@ -107,7 +107,7 @@ export function useLoadAll(app) {
         Object.entries({ training_assigns: aRes, training_completions: cRes, incidents: iRes, investigations: invRes, doc_acknowledgements: ackRes,
           doc_assignments: daRes, custom_modules: cmRes, equipment: eqRes, site_inspections: siRes, fire_wardens: fwRes, fire_drills: fdRes,
           fire_alarm_tests: fatRes, fire_extinguishers: fexRes, fire_emerg_lighting: felRes, fire_fra_reviews: ffrRes, first_aid_register: faRes,
-          custom_machine_types: cmtRes, doc_bundles: bdRes }).forEach(([t, r]) => { if (readOk(r)) pre.mark(t); });
+          custom_machine_types: cmtRes, doc_bundles: bdRes, contractors: conRes }).forEach(([t, r]) => { if (readOk(r)) pre.mark(t); });
         if (usersRes.status === "rejected") console.error("Supabase load error (users):", usersRes.reason);
         [aRes,cRes,iRes,invRes,ackRes,daRes,docRes,dseRes,resRes,llRes,upRes,ecRes,qfRes,conRes,conIndRes,conCertRes,conVisitRes,permitRes,raRes,cmRes,mcRes,eqRes,siRes,msdsRes,ccRes,fwRes,fdRes,fatRes,fexRes,felRes,ffrRes,faRes,cmtRes,dlRes,caRes,dahRes,chRes,mvRes,bdRes]
           .forEach(r => { if (r.status === "rejected") console.error("Supabase load error:", r.reason); });

@@ -19,6 +19,7 @@ import { mapBundleRows } from "../../domains/documents/bundles";
 import { primeAudit, primeAuditList } from "../../lib/audit";
 import { mapDueRows } from "../../lib/dueDates";
 import { mergeKeyed } from "../../lib/keyedSync";
+import { hasReceptionAccess } from "../../lib/contractorSignin";
 import { sb } from "../../lib/supabase";
 import { FIRE_TABLES, RECENT_MS, TRACKED, idsKey, mapAckRows, mapAssignRows, mapCompRows, mapDocAssignRows, mapIncidentRow, mergeAssigns, mergeNested, sharedTracker, stableJSON } from "../records";
 
@@ -26,7 +27,7 @@ export function createSync(app) {
   const {
     _ready, allUsers, firstAidSavedRef, firstAidWroteRef, historyIdsRef, historyReadyRef, incidentSavedRef,
     incidentWritingRef, investigationBaseRef, investigationSavedRef, investigationWritingRef, recentWriteRef,
-    refreshBusyRef, regRef, saveQueueRef, setAssigns, setCompHistory, setComps, setCustomMachineTypes,
+    refreshBusyRef, regRef, saveQueueRef, setAssigns, setCompHistory, setComps, setContractors, setCustomMachineTypes,
     setCustomModules, setDocAcknowledgements, setDocAssignments, setDocBundles, setDueDates, setEquipment,
     setFireSafety, setFirstAidData, setIncidents, setInvestigations, setSiteInspections, user
   } = app;
@@ -47,11 +48,17 @@ export function createSync(app) {
   async function refreshRegisters(tr) {
     // only the people who edit registers take in other people's changes
     const admin = !!user && user.role === "admin", machinery = !!user && hasMachineryAccess(user);
-    if (!machinery) return;
     const R = regRef.current;
     const ok = r => r && !r.error && Array.isArray(r.data);
     const data = r => r.data.map(x => x.data).filter(Boolean);
     const rd = changedRead(tr);
+    // The Contractor Register: admins and Reception access (QR sign-ins add companies and workers).
+    if (hasReceptionAccess(user)) {
+      const readAt = Date.now();
+      const r = await rd("contractors", () => sb.from("contractors").select("*"));
+      if (ok(r)) { const fresh = data(r); setContractors(cur => mergeKeyed(R.contractors, cur, fresh, readAt)); }
+    }
+    if (!machinery) return;
     const reads = { equipment: ["equipment", () => sb.from("equipment").select("*")], machineTypes: ["custom_machine_types", () => sb.from("custom_machine_types").select("*")] };
     if (admin) {
       Object.assign(reads, { inspections: ["site_inspections", () => sb.from("site_inspections").select("*")], modules: ["custom_modules", () => sb.from("custom_modules").select("*")],

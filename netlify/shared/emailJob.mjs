@@ -8,6 +8,8 @@
  *                   (check set-up, preview, send a test, send now)
  *   zp-email-alert  called by the portal straight after an incident is saved, so a
  *                   high-risk incident is emailed within a minute (mode "incident")
+ *   zp-signin       after a contractor signs in with the reception QR code and there's
+ *                   something to check, so H&S hear straight away (mode "contractor")
  *
  * It reads the database with the Supabase SERVICE ROLE key, works out what to send
  * with src/lib/reminders.js (the same rules as the portal's screens), sends through
@@ -28,6 +30,7 @@
  *   SUPABASE_SERVICE_ROLE_KEY, VITE_SUPABASE_URL   (already set for the sign-in service)
  */
 import { prepareData, planEmails, ukClock, emailSettings, plusDays, EMAIL_SETTINGS_ROW, INCIDENT_ALERT_DAYS } from "../../src/lib/reminders.js";
+import { SIGNIN_SETTINGS_ID } from "../../src/lib/contractorSignin.js";
 import { renderEmail } from "../../src/lib/emailTemplates.js";
 import { setBrand, getBrand, brandSender } from "../../src/lib/brandCore.js";
 import crypto from "crypto";
@@ -133,8 +136,8 @@ function reviewsNeeded({ mode, settings, clock, sent, users = [] }) {
 }
 /** Tables that may not exist on an older database just count as empty. A review-list table that
  *  can't be read (e.g. the service key wasn't given access: email_service_access.sql) is noted in `skipped`. */
-async function readOptional(c, table, skipped = []) {
-  try { return await readAll(c, table); } catch (e) {
+async function readOptional(c, table, skipped = [], filter = "") {
+  try { return await readAll(c, table, "*", TABLES[table] || "", filter); } catch (e) {
     if (e.status === 404 || /does not exist|schema cache/i.test(e.message)) return [];
     if (REVIEW_TABLES.has(table) && (e.status === 401 || e.status === 403)) { skipped.push(table); return []; }   // no access: noted; anything else (time-out, outage): the run fails and is tried again
     throw e;
@@ -169,6 +172,9 @@ async function pruneKeys(c) {
   // incident alert keys only matter while the incident is inside the alert window (INCIDENT_ALERT_DAYS)
   const incBefore = new Date(Date.now() - (INCIDENT_ALERT_DAYS + 30) * 86400000).toISOString();
   await rest(c, `email_keys?at=lt.${incBefore}&or=(key.like.*inc:*,key.like.*incn:*,key.like.*incat:*,key.like.*incatn:*)`, { method: "DELETE", prefer: "return=minimal" }).catch(() => {});
+  // contractor keys are for one day's sign-ins
+  const conBefore = new Date(Date.now() - 30 * 86400000).toISOString();
+  await rest(c, `email_keys?at=lt.${conBefore}&or=(key.like.*con:*,key.like.*onsite:*)`, { method: "DELETE", prefer: "return=minimal" }).catch(() => {});
 }
 const addLog = (c, rows) => rows.length ? rest(c, "email_log", { method: "POST", body: rows, prefer: "return=minimal" }) : null;
 
@@ -210,7 +216,8 @@ async function deliver(c, list, started, onBatch, budget = TIME_BUDGET_MS) {
   // Incident alerts go one at a time with a fixed Idempotency-Key per recipient and incident, so the
   // alert function and the 15-minute job running at the same moment can't both send one: Resend
   // keeps the first and answers 409 to the other, which counts as sent.
-  const singles = list.filter(e => e.kind === "incident" || e.kind === "lone");
+  const SINGLE = ["incident", "lone", "contractor"];
+  const singles = list.filter(e => SINGLE.includes(e.kind));
   if (singles.length) {
     const res = [];
     for (const e of singles) {
@@ -229,7 +236,7 @@ async function deliver(c, list, started, onBatch, budget = TIME_BUDGET_MS) {
     }
     out.push(...res);
     if (onBatch) await onBatch(res);
-    list = list.filter(e => e.kind !== "incident" && e.kind !== "lone");
+    list = list.filter(e => !SINGLE.includes(e.kind));
   }
   for (let i = 0; i < list.length; i += 100) {
     const batch = list.slice(i, i + 100);
@@ -290,6 +297,8 @@ export function setupProblems(c, { forSending = true } = {}) {
  *   mode "preview"    works out what "now" would send, sends nothing, records nothing
  *   mode "incident"   high-risk incident alerts only (zp-email-alert, after an incident is saved);
  *                     reads only the staff list and recent incidents, so it's quick
+ *   mode "contractor" contractor arrival emails only (zp-signin, after a sign-in with something
+ *                     to check); reads the staff list and today's contractor sign-ins
  * → { ok, mode, message, sent, failed, held, firstRun, baseline, emails?:[...] , noEmail }
  */
 export async function runEmailJob({ mode = "scheduled", now = new Date(), portalUrl, forceTest = false } = {}) {
@@ -302,14 +311,24 @@ export async function runEmailJob({ mode = "scheduled", now = new Date(), portal
   if (mode !== "preview" && !settings.enabled) return { ok: true, mode, message: "Email reminders are switched off (Site Settings → Email reminders).", sent: 0 };
 
   const clock = ukClock(now);
-  const incidentOnly = mode === "incident";
+  const incidentOnly = mode === "incident", contractorOnly = mode === "contractor";
   if (incidentOnly && !settings.incidentAlerts) return { ok: true, mode, message: "High-risk incident emails are switched off.", sent: 0 };
-  const names = incidentOnly ? ["users", "incidents"] : Object.keys(TABLES).filter(t => !REVIEW_TABLES.has(t));
+  const names = incidentOnly ? ["users", "incidents"] : contractorOnly ? ["users"] : Object.keys(TABLES).filter(t => !REVIEW_TABLES.has(t));
   if (mode === "scheduled") await pruneKeys(c);
   const since = plusDays(clock.today, -INCIDENT_ALERT_DAYS - 1);
   const skipped = [];
-  const [sent, ...tableRows] = await Promise.all([readKeys(c, incidentOnly ? "&key=like.*inc*" : ""), ...names.map(t => incidentOnly && t === "incidents" ? readAll(c, t, "*", TABLES[t], `&date=gte.${since}`) : readOptional(c, t, skipped))]);
+  const keyFilter = incidentOnly ? "&key=like.*inc*" : contractorOnly ? "&or=(key.like.*con:*,key.like.*baseline*)" : "";
+  const [sent, ...tableRows] = await Promise.all([readKeys(c, keyFilter), ...names.map(t => incidentOnly && t === "incidents" ? readAll(c, t, "*", TABLES[t], `&date=gte.${since}`) : readOptional(c, t, skipped))]);
   const rows = Object.fromEntries(names.map((t, i) => [t, tableRows[i]]));
+  // Contractor sign-ins today (contractor_signin.sql): only if there are any is the rest read.
+  if (!incidentOnly) {
+    rows.site_signins = await readOptional(c, "site_signins", [], `&data->>date=eq.${clock.today}`);
+    if (rows.site_signins.length) {
+      const [con, certs, permits, visits, ss] = await Promise.all(["contractors", "contractor_certs", "permits", "contractor_visits"].map(t => readOptional(c, t, skipped))
+        .concat(rest(c, `app_settings?select=data&id=eq.${SIGNIN_SETTINGS_ID}`).then(r => r.json).catch(() => [])));
+      Object.assign(rows, { contractors: con, contractor_certs: certs, permits, contractor_visits: visits, signinSettings: (ss && ss[0] && ss[0].data) || null });
+    }
+  }
   // The review registers are only read when an admin's weekly summary is due (or for Send now / Preview).
   if (!incidentOnly && reviewsNeeded({ mode, settings, clock, sent, users: rows.users })) {
     const extra = [...REVIEW_TABLES];
@@ -317,12 +336,13 @@ export async function runEmailJob({ mode = "scheduled", now = new Date(), portal
     extra.forEach((t, i) => { rows[t] = got[i]; });
   }
   const data = prepareData(rows); data.skipped = skipped;
-  const plan = planEmails({ data, settings, clock, sent, portalUrl: portalUrl || c.portalUrl, ignoreSchedule: mode !== "scheduled", only: incidentOnly ? "incident" : "" });
+  const plan = planEmails({ data, settings, clock, sent, portalUrl: portalUrl || c.portalUrl, ignoreSchedule: mode !== "scheduled", only: incidentOnly ? "incident" : contractorOnly ? "contractor" : "" });
 
   // High-risk incident emails never wait for the daily limit (they still count towards it).
   const limitLeft = mode === "preview" ? settings.dailyLimit : Math.max(0, settings.dailyLimit - await sentToday(c, clock.today));
-  const urgent = plan.emails.filter(e => e.kind === "incident"), rest = plan.emails.filter(e => e.kind !== "incident");
-  const toSend = [...urgent, ...rest.slice(0, Math.max(0, limitLeft - urgent.length))];
+  const URGENT = ["incident", "contractor", "onsite"];
+  const urgent = plan.emails.filter(e => URGENT.includes(e.kind)), others = plan.emails.filter(e => !URGENT.includes(e.kind));
+  const toSend = [...urgent, ...others.slice(0, Math.max(0, limitLeft - urgent.length))];
   const overLimit = plan.emails.length - toSend.length;
 
   if (mode === "preview") {
@@ -341,7 +361,7 @@ export async function runEmailJob({ mode = "scheduled", now = new Date(), portal
     await addKeys(c, batch.filter(r => r.rejected).flatMap(r => r.e.keys), "rejected");
     await addLog(c, batch.filter(r => !r.held && !r.dup).map(r => ({ day: clock.today, kind: r.e.kind, user_id: r.e.userId || null, to_addr: r.e.actualTo, intended_to: r.e.to,
       subject: r.e.subject.slice(0, 300), status: r.ok ? r.e.status : "failed", error: r.ok ? null : String(r.error || "").slice(0, 500), resend_id: r.id || null, mode })));
-  }, incidentOnly ? INCIDENT_BUDGET_MS : TIME_BUDGET_MS);
+  }, incidentOnly || contractorOnly ? INCIDENT_BUDGET_MS : TIME_BUDGET_MS);
 
   const sentN = results.filter(r => r.ok && !r.dup).length, failed = results.filter(r => !r.ok && !r.held), held = results.filter(r => r.held).length + overLimit;
   const msg = [sentN ? `${sentN} email${sentN === 1 ? "" : "s"} sent${c.live ? "" : ` (to ${c.testTo} — test mode)`}.` : "Nothing was due to send.",

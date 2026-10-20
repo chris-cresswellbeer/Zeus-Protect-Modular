@@ -6,18 +6,23 @@ import { WorkerDetailModal } from "./WorkerDetailModal";
 import { CompanyForm } from "./CompanyForm";
 import { useSiteSignins } from "../../lib/siteSignins";
 import { CompanySignins } from "./SigninPanel";
+import { CompanyDocuments } from "./CompanyDocuments";
+import { ApprovalChip } from "./OnSiteBoard";
 
 import { localISO, todayISO, ukDate } from "../../lib/dates";
 /**
  * ContractorDetail — one contractor company: tabs for visits (sign-in log and
- * scheduled visits), workers (with induction % and certificate status), and company
- * details. Clicking a worker opens WorkerDetailModal.
+ * scheduled visits), workers (first QR induction, last on site, certificate status) and
+ * documents (insurance, RAMS, policies → approval: CompanyDocuments.jsx). Clicking a worker
+ * opens WorkerDetailModal.
  * Every change updates App state AND calls the matching dbSave* helper directly
  * (contractors are not covered by an auto-sync effect).
  *
  * CONTRACTOR DATA MODEL (the app's shared state (app/useAppState.js) → Supabase table)
- *   contractors          [ { id:"con_<ts>", name, type, status, email, phone, notes,
- *                            workers:[{ id:"w_<ts>", name, role, email, phone }] } ]   → contractors
+ *   contractors          [ { id, name, type, status, email, phone, notes, documents:[…], createdFrom, checked,
+ *                            workers:[{ id:"w_<ts>", name, role, email, phone, firstInducted, lastSignin }] } ]
+ *                            → contractors (full shape: ContractorsTab.jsx). dbSaveContractor keeps what a
+ *                            QR sign-in added meanwhile; removing a worker says so ({ removedWorkers }).
  *   contractorVisits     { [companyId]: [ { id:"v_<ts>", date, timeIn, timeOut, purpose, areas,
  *                            signedInBy, workers:[workerId], permitRequired, notes, scheduled? } ] } → contractor_visits
  *   contractorInductions { ["<companyId>_<workerId>"]: { [inductionItemId]: {done,date,by} } } → contractor_inductions
@@ -25,7 +30,7 @@ import { localISO, todayISO, ukDate } from "../../lib/dates";
  *   NB: inductions and certs are keyed per WORKER using the composite "<companyId>_<workerId>"
  *   string (stored in the contractor_id column). Induction items / cert types: data/seedContractors.js.
  */
-function ContractorDetail({ selCon, contractorInductions, setContractorInductions, contractorCerts, setContractorCerts, contractorVisits, setContractorVisits, contractors, setContractors, dbSaveContractor, dbDeleteContractor, dbSaveContractorInductions, dbSaveContractorCerts, dbSaveContractorVisits, staff, isMobile, setView, T, font }) {
+function ContractorDetail({ selCon, settings, me, contractorInductions, setContractorInductions, contractorCerts, setContractorCerts, contractorVisits, setContractorVisits, contractors, setContractors, dbSaveContractor, dbDeleteContractor, dbSaveContractorInductions, dbSaveContractorCerts, dbSaveContractorVisits, staff, isMobile, setView, T, font }) {
   const today = todayISO();
   const qrSignins = useSiteSignins(true, { fresh: true }).filter(x => x.data && x.data.companyId === selCon.id);
   const [tab, setTab] = React.useState("visits");
@@ -45,7 +50,7 @@ function ContractorDetail({ selCon, contractorInductions, setContractorInduction
   const visits = allVisits.filter(v=>v.date<=today).sort((a,b)=>b.date.localeCompare(a.date));
   const upcoming = allVisits.filter(v=>v.date>today).sort((a,b)=>a.date.localeCompare(b.date));
   // last visit, logged by hand or signed in with the reception QR code
-  const lastAny = [...visits.map(v=>v.date), ...qrSignins.map(s=>s.data.date)].filter(Boolean).sort().pop();
+  const lastAny = [...visits.map(v=>v.date), ...qrSignins.map(s=>s.data.date), selCon.lastOnSite].filter(d=>d&&d<=today).sort().pop();
   const inp = {width:"100%",background:T.overlay,border:`1px solid ${T.borderMd}`,borderRadius:9,padding:"9px 13px",color:T.white,fontSize:13,outline:"none",fontFamily:font,boxSizing:"border-box"};
   const lbl = {fontSize:11,fontWeight:700,color:T.muted,letterSpacing:.5,textTransform:"uppercase",display:"block",marginBottom:5};
 
@@ -71,7 +76,11 @@ function ContractorDetail({ selCon, contractorInductions, setContractorInduction
   function removeWorker(wid) {
     const updated = {...selCon, workers:(selCon.workers||[]).filter(w=>w.id!==wid)};
     setContractors(p=>p.map(c=>c.id===selCon.id?updated:c));
-    dbSaveContractor(updated);
+    dbSaveContractor(updated, { removedWorkers:[wid] });
+  }
+  async function saveCompany(updated, opts) {
+    setContractors(p=>p.map(c=>c.id===updated.id?updated:c));
+    await dbSaveContractor(updated, opts);
   }
 
   return (
@@ -89,13 +98,13 @@ function ContractorDetail({ selCon, contractorInductions, setContractorInduction
             <p style={{margin:0,fontSize:13,color:T.muted}}>{selCon.type||"Contractor"}{selCon.email?` · ${selCon.email}`:""}{selCon.phone?` · ${selCon.phone}`:""}</p>
           </div>
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-            <span style={{fontSize:11,fontWeight:700,padding:"4px 12px",borderRadius:20,background:selCon.status==="active"?"rgba(16,185,129,0.12)":T.overlay,color:selCon.status==="active"?"#10b981":T.muted,border:`1px solid ${selCon.status==="active"?"rgba(16,185,129,0.3)":T.borderMd}`,textTransform:"capitalize"}}>{selCon.status||"active"}</span>
+            <button type="button" onClick={()=>setTab("documents")} style={{background:"none",border:"none",padding:0,cursor:"pointer"}} title="Documents"><ApprovalChip company={selCon} required={settings.requiredDocs} today={today}/></button>
             <button onClick={()=>setEditingCon(selCon)} style={{background:"rgba(37,99,235,0.1)",color:T.accentLt,border:"1px solid rgba(37,99,235,0.25)",borderRadius:9,padding:"5px 12px",cursor:"pointer",fontFamily:font,fontWeight:700,fontSize:12}}>✏ Edit</button>
             <button onClick={async()=>{if(await ask({ title: `Remove ${selCon.name}?`, message: "This removes the contractor, their workers and visit records.", ok: "Remove", danger: true })){setContractors(p=>p.filter(c=>c.id!==selCon.id));dbDeleteContractor(selCon.id);setView("list");}}} style={{background:"rgba(239,68,68,0.1)",color:"#f87171",border:"1px solid rgba(239,68,68,0.2)",borderRadius:9,padding:"5px 12px",cursor:"pointer",fontFamily:font,fontWeight:700,fontSize:12}}>🗑</button>
           </div>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:8}}>
-          {[{l:"Workers",v:workers.length},{l:"Total Visits",v:visits.length+qrSignins.length},{l:"Last Visit",v:lastAny?ukDate(lastAny):"Never"},{l:"On Site Today",v:visits.some(v=>v.date===today)||qrSignins.some(s=>s.data.date===today&&!s.data.timeOut)?"Yes":"No"}].map((r,i)=>(
+          {[{l:"Workers",v:workers.length},{l:"Total Visits",v:visits.length+Math.max(qrSignins.length,Number(selCon.signinCount)||0)},{l:"Last Visit",v:lastAny?ukDate(lastAny):"Never"},{l:"On Site Today",v:visits.some(v=>v.date===today)||qrSignins.some(s=>s.data.date===today&&!s.data.timeOut)?"Yes":"No"}].map((r,i)=>(
             <div key={i} style={{background:T.overlay,borderRadius:8,padding:"8px 12px"}}>
               <div style={{fontSize:10,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:.5,marginBottom:2}}>{r.l}</div>
               <div style={{fontSize:13,color:T.white,fontWeight:700}}>{r.v}</div>
@@ -112,8 +121,8 @@ function ContractorDetail({ selCon, contractorInductions, setContractorInduction
 
       {/* Tabs */}
       <div style={{display:"flex",borderBottom:`1px solid ${T.border}`,marginBottom:20}}>
-        {[["visits",`🗓 Visits (${visits.length+qrSignins.length})`],["workers",`👷 Workers (${workers.length})`]].map(([id,label])=>(
-          <button key={id} onClick={()=>setTab(id)} style={{padding:"11px 18px",background:"none",border:"none",borderBottom:`2px solid ${tab===id?T.gold:"transparent"}`,color:tab===id?T.white:T.muted,fontWeight:tab===id?700:400,cursor:"pointer",fontFamily:font,fontSize:13}}>{label}</button>
+        {[["visits",`🗓 Visits (${visits.length+qrSignins.length})`],["workers",`👷 Workers (${workers.length})`],["documents",`📄 Documents (${(selCon.documents||[]).length})`]].map(([id,label])=>(
+          <button key={id} data-testid={`con-tab-${id}`} onClick={()=>setTab(id)} style={{padding:"11px 18px",background:"none",border:"none",borderBottom:`2px solid ${tab===id?T.gold:"transparent"}`,color:tab===id?T.white:T.muted,fontWeight:tab===id?700:400,cursor:"pointer",fontFamily:font,fontSize:13}}>{label}</button>
         ))}
       </div>
 
@@ -369,6 +378,10 @@ function ContractorDetail({ selCon, contractorInductions, setContractorInduction
         </div>
       )}
 
+      {tab==="documents" && (
+        <CompanyDocuments company={selCon} required={settings.requiredDocs} today={today} me={me} onSave={saveCompany} T={T} font={font}/>
+      )}
+
       {/* Workers tab */}
       {tab==="workers" && (
         <div>
@@ -405,13 +418,19 @@ function ContractorDetail({ selCon, contractorInductions, setContractorInduction
                       <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                         <span style={{fontSize:13,fontWeight:700,color:T.white}}>{w.name}</span>
                         {w.role && <span style={{fontSize:11,color:T.muted}}>{w.role}</span>}
+                        {w.createdFrom==="qr" && !w.checked && <span style={{fontSize:9,fontWeight:700,color:"#fbbf24",background:"rgba(245,158,11,0.1)",padding:"1px 6px",borderRadius:20,border:"1px solid rgba(245,158,11,0.3)"}}>NEW · QR</span>}
                         {hasExpiredCert && <span style={{fontSize:9,fontWeight:700,color:"#f87171",background:"rgba(239,68,68,0.1)",padding:"1px 6px",borderRadius:20,border:"1px solid rgba(239,68,68,0.2)"}}>CERT EXPIRED</span>}
                       </div>
-                      <div style={{display:"flex",alignItems:"center",gap:10,marginTop:4}}>
-                        <div style={{fontSize:10,color:wIndPct===100?T.green:wIndPct>0?"#f59e0b":"#f87171",fontWeight:700}}>{wIndPct===100?"✓ Inducted":`Induction ${wIndPct}%`}</div>
-                        <div style={{height:3,background:T.border,borderRadius:99,overflow:"hidden",width:50}}>
-                          <div style={{height:"100%",width:`${wIndPct}%`,background:wIndPct===100?T.green:"#f59e0b",borderRadius:99}}/>
-                        </div>
+                      <div style={{display:"flex",alignItems:"center",gap:10,marginTop:4,flexWrap:"wrap"}} data-testid="worker-induction">
+                        {w.firstInducted
+                          ? <div style={{fontSize:10.5,color:T.green,fontWeight:700}} title="The QR sign-in checklist is the site induction, done on every visit">✓ Inducted {ukDate(w.firstInducted)} (QR checklist)</div>
+                          : <>
+                            <div style={{fontSize:10,color:wIndPct===100?T.green:wIndPct>0?"#f59e0b":"#f87171",fontWeight:700}}>{wIndPct===100?"✓ Inducted":`Induction ${wIndPct}%`}</div>
+                            <div style={{height:3,background:T.border,borderRadius:99,overflow:"hidden",width:50}}>
+                              <div style={{height:"100%",width:`${wIndPct}%`,background:wIndPct===100?T.green:"#f59e0b",borderRadius:99}}/>
+                            </div>
+                          </>}
+                        {w.lastSignin && <div style={{fontSize:10.5,color:T.muted}}>Last on site {ukDate(w.lastSignin)}{w.signinCount?` · ${w.signinCount} visit${w.signinCount===1?"":"s"}`:""}</div>}
                       </div>
                     </div>
                     <div style={{display:"flex",gap:6}}>

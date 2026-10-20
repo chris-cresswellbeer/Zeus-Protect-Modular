@@ -313,6 +313,7 @@ export default {
   "DSE": "Pracoviště",
   "Machinery": "Stroje",
   "Equipment": "Zařízení",
+  "Reception": "Recepce",
   "Actions": "Opatření",
   "Team": "Tým",
 

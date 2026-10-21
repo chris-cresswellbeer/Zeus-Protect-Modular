@@ -17,7 +17,7 @@ import { createChangeTracker } from "../lib/changes";
 const sharedTracker = createChangeTracker();
 const TRACKED = ["incidents", "investigations", "training_completions", "doc_acknowledgements", "training_assigns", "training_completion_history",
   "doc_assignments", "doc_bundles", "equipment", "custom_machine_types", "site_inspections", "custom_modules", "first_aid_register",
-  "fire_wardens", "fire_drills", "fire_alarm_tests", "fire_extinguishers", "fire_emerg_lighting", "fire_fra_reviews"];
+  "fire_wardens", "fire_drills", "fire_alarm_tests", "fire_extinguishers", "fire_emerg_lighting", "fire_fra_reviews", "contractors"];
 
 
 // One `incidents` table row → the incident record the app uses. Shared by loadAll()

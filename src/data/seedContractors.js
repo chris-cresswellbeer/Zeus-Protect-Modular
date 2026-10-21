@@ -1,5 +1,6 @@
 /**
- * data/seedContractors.js — contractor site-induction checklist and certificate types.
+ * data/seedContractors.js — contractor site-induction checklist, worker certificate types and
+ * company document types.
  * REFERENCE DATA — used by the live app on every load. Editing it changes the app for
  * everyone on the next deploy (it is code, not database data).
  * ⚠ Induction progress and certificates are stored against these `id` values —
@@ -24,6 +25,16 @@ const CONTRACTOR_CERT_TYPES = [
   {id:"asb",   label:"Asbestos Aware", icon:"⚠️"},
   {id:"other", label:"Other",          icon:"📋"},
 ];
+// Company documents (Contractor Register → company → Documents; lib/contractorApproval.js).
+// date: "expiry" = valid until; "review" = due for review by (RAMS, policies).
+const COMPANY_DOC_TYPES = [
+  {id:"pl",        label:"Public liability insurance",                  short:"Public liability",     date:"expiry"},
+  {id:"el",        label:"Employers' liability insurance",              short:"Employers' liability", date:"expiry"},
+  {id:"rams",      label:"RAMS (risk assessment and method statement)", short:"RAMS",                 date:"review"},
+  {id:"hs_policy", label:"Health and safety policy",                    short:"H&S policy",           date:"review"},
+  {id:"other",     label:"Other document",                              short:"Other",                date:"expiry"},
+];
+// Needed before a company counts as approved (Site Settings → Contractor sign-in can change it).
+const DEFAULT_REQUIRED_DOCS = ["pl", "el", "rams"];
 
-
-export { INDUCTION_ITEMS, CONTRACTOR_CERT_TYPES };
+export { INDUCTION_ITEMS, CONTRACTOR_CERT_TYPES, COMPANY_DOC_TYPES, DEFAULT_REQUIRED_DOCS };

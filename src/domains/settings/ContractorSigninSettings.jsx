@@ -2,8 +2,11 @@
  * ContractorSigninSettings — Site Settings → Contractor sign-in.
  * Switches the reception QR code on or off, sets the site name, the welcome text and the
  * checklist contractors tick, changes the code (old posters stop working) and prints the
- * A4 poster. Stored in app_settings row "contractor_signin" (lib/contractorSignin.js);
- * the phone page reads it through netlify/functions/zp-signin.mjs.
+ * A4 posters (sign in at reception, sign out at the exit). Also: the end-of-day check (who
+ * is still signed in, by bell and email), who gets the emails, and which company documents
+ * a contractor needs to be approved (lib/contractorApproval.js).
+ * Stored in app_settings row "contractor_signin" (lib/contractorSignin.js); the phone page
+ * reads only the site, welcome text and checklist, through netlify/functions/zp-signin.mjs.
  */
 import React, { useState, useEffect } from "react";
 import { sb } from "../../lib/supabase";
@@ -13,6 +16,8 @@ import { auditEvent } from "../../lib/audit";
 import { qrSvg } from "../../lib/certificate";
 import { SIGNIN_SETTINGS_ID, normaliseSigninSettings, defaultSigninSettings, newSigninCode, signinUrl, DEFAULT_SIGNIN_ITEMS } from "../../lib/contractorSignin";
 import { signinPosterHtml } from "../../lib/signinPoster";
+import { COMPANY_DOC_TYPES } from "../../data/seedContractors";
+import { refreshSigninSettings } from "../../lib/siteSignins";
 
 const uid = () => `i${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
 
@@ -53,22 +58,23 @@ export function ContractorSigninSettings({ Z, font, embedded = false, onStatus }
     setBusy(false);
     if (r && r.error) { notify(`The sign-in settings couldn't be saved. ${r.error.message || r.error}`, { kind: "error" }); return; }
     const diff = {};
-    ["enabled", "site", "intro"].forEach(k => { if (saved[k] !== next[k]) diff[k] = { from: saved[k], to: next[k] }; });
+    ["enabled", "site", "intro", "onsiteCheckTime", "alertOnArrival", "alertHost"].forEach(k => { if (saved[k] !== next[k]) diff[k] = { from: saved[k], to: next[k] }; });
+    ["receptionEmails", "requiredDocs"].forEach(k => { if (saved[k].join(", ") !== next[k].join(", ")) diff[k] = { from: saved[k].join(", "), to: next[k].join(", ") }; });
     if (JSON.stringify(saved.items) !== JSON.stringify(next.items)) diff.checklist = { from: `${saved.items.length} lines`, to: `${next.items.length} lines` };
     if (saved.code !== next.code) diff.code = { from: saved.code ? "old code" : "none", to: "new code" };
     auditEvent("settings", SIGNIN_SETTINGS_ID, "update", "Contractor sign-in settings saved", diff, "Contractor sign-in");
-    setF(next); setSaved(next); guard.saved();
+    setF(next); setSaved(next); guard.saved(); refreshSigninSettings();
     notify(next.enabled ? "Saved. Contractors can sign in with the reception QR code." : "Saved. The reception QR code is switched off.");
   }
   async function changeCode() {
     if (saved.code && !(await ask({ title: "Change the sign-in code?", message: "The QR code on the posters you've printed will stop working as soon as you save. Print the new poster and replace the old ones.", ok: "Change code", danger: true }))) return;
     set("code", newSigninCode());
   }
-  function printPoster() {
+  function printPoster(variant = "entry") {
     if (changed) { notify("Save your changes first, so the poster has the code that works.", { kind: "warn" }); return; }
     const win = window.open("", "_blank", "width=860,height=1100");
     if (!win) { notify("The poster window was blocked. Allow pop-ups for the portal and try again.", { kind: "error" }); return; }
-    win.document.write(signinPosterHtml({ code: saved.code, site: saved.site, origin }));
+    win.document.write(signinPosterHtml({ code: saved.code, site: saved.site, origin, variant }));
     win.document.close();
   }
 
@@ -131,16 +137,53 @@ export function ContractorSigninSettings({ Z, font, embedded = false, onStatus }
               <div style={{ flex: 1, minWidth: 180 }}>
                 <div style={{ fontSize: 12, color: Z.muted, wordBreak: "break-all" }} data-testid="signin-url">{url}</div>
                 <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-                  <button type="button" style={{ ...btn, background: `linear-gradient(135deg,${Z.accent},${Z.blue})`, border: "none" }} data-testid="signin-poster" onClick={printPoster}>🖨 Print poster</button>
+                  <button type="button" style={{ ...btn, background: `linear-gradient(135deg,${Z.accent},${Z.blue})`, border: "none" }} data-testid="signin-poster" onClick={() => printPoster()}>🖨 Print sign-in poster</button>
+                  <button type="button" style={btn} data-testid="signin-exit-poster" onClick={() => printPoster("exit")}>🖨 Print sign-out poster</button>
                   <a href={url} target="_blank" rel="noopener noreferrer" style={{ ...btn, textDecoration: "none", display: "inline-flex", alignItems: "center" }}>Open the sign-in page</a>
                 </div>
                 <button type="button" style={{ ...btn, marginTop: 10 }} data-testid="signin-change-code" onClick={changeCode}>Change code…</button>
-                <div style={hint}>Change the code if the poster's address gets passed around. Old posters stop working.</div>
+                <div style={hint}>The sign-out poster has the same code: put it by the way out. Change the code if the posters' address gets passed around. Old posters stop working.</div>
               </div>
             </div>
           ) : (
             <div style={{ ...hint, fontSize: 12.5 }} data-testid="signin-qr-pending">{f.enabled ? (f.code !== saved.code && saved.code ? "Save to switch to the new code, then print the new poster." : "Save to make the QR code, then print the poster for reception.") : "Switched off. Tick the box and save to make the QR code."}</div>
           )}
+        </div>
+      </div>
+      <div style={{ borderTop: `1px solid ${Z.border}`, marginTop: 22, paddingTop: 6, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))", gap: 22 }}>
+        <div>
+          <span style={lbl}>End-of-day check</span>
+          <label style={{ display: "flex", gap: 10, alignItems: "center", cursor: "pointer", fontSize: 13, color: Z.white }}>
+            <input type="checkbox" checked={!!f.onsiteCheckTime} onChange={e => set("onsiteCheckTime", e.target.checked ? "17:00" : "")} data-testid="signin-check-on" style={{ width: 18, height: 18, accentColor: Z.accent }}/>
+            Check who is still signed in at
+            <input type="time" aria-label="End-of-day check time" data-testid="signin-check-time" value={f.onsiteCheckTime || ""} disabled={!f.onsiteCheckTime} onChange={e => set("onsiteCheckTime", e.target.value)} style={{ ...inp, width: 120, padding: "6px 10px" }}/>
+          </label>
+          <div style={hint}>At this time anyone still signed in shows in the bell (H&S and Reception access), and reception is emailed the list, so nobody is left "on site" by mistake. Needs Email reminders switched on for the email.</div>
+          <label style={lbl} htmlFor="signin-reception-emails">Reception email addresses</label>
+          <textarea id="signin-reception-emails" data-testid="signin-reception-emails" rows={2} value={Array.isArray(f.receptionEmails) ? f.receptionEmails.join(", ") : f.receptionEmails}
+            onChange={e => set("receptionEmails", e.target.value)} onBlur={e => set("receptionEmails", normaliseSigninSettings({ receptionEmails: e.target.value }).receptionEmails)}
+            placeholder="e.g. reception@yourcompany.co.uk" style={{ ...inp, resize: "vertical" }}/>
+          <div style={hint}>Up to 10, separated by commas. Staff with Reception access (Edit Staff) get it as well. If there's nobody, it goes to the administrators.</div>
+        </div>
+        <div>
+          <span style={lbl}>Approved contractors</span>
+          <div style={{ fontSize: 12.5, color: Z.muted, lineHeight: 1.5, marginBottom: 6 }}>A company is <b>approved</b> when these are in its Documents (Contractors → company → Documents) and in date. Nothing stops an unapproved company signing in: H&S and reception are told.</div>
+          {COMPANY_DOC_TYPES.filter(t => t.id !== "other").map(t => (
+            <label key={t.id} style={{ display: "flex", gap: 10, alignItems: "center", cursor: "pointer", fontSize: 13, color: Z.white, marginBottom: 6 }}>
+              <input type="checkbox" data-testid={`signin-req-${t.id}`} checked={(f.requiredDocs || []).includes(t.id)} style={{ width: 18, height: 18, accentColor: Z.accent }}
+                onChange={e => set("requiredDocs", e.target.checked ? COMPANY_DOC_TYPES.map(x => x.id).filter(id => id === t.id || (f.requiredDocs || []).includes(id)) : (f.requiredDocs || []).filter(id => id !== t.id))}/>
+              {t.label}
+            </label>
+          ))}
+          <span style={lbl}>When a contractor signs in</span>
+          <label style={{ display: "flex", gap: 10, alignItems: "flex-start", cursor: "pointer", fontSize: 13, color: Z.white, marginBottom: 6 }}>
+            <input type="checkbox" data-testid="signin-alert-arrival" checked={f.alertOnArrival} onChange={e => set("alertOnArrival", e.target.checked)} style={{ width: 18, height: 18, accentColor: Z.accent, marginTop: 1 }}/>
+            <span>Email H&S (the administrators and the extra admin emails in Email reminders) if the company isn't approved or a permit to work is needed and not issued</span>
+          </label>
+          <label style={{ display: "flex", gap: 10, alignItems: "flex-start", cursor: "pointer", fontSize: 13, color: Z.white }}>
+            <input type="checkbox" data-testid="signin-alert-host" checked={f.alertHost} onChange={e => set("alertHost", e.target.checked)} style={{ width: 18, height: 18, accentColor: Z.accent, marginTop: 1 }}/>
+            <span>Email the person they're here to see as well, if the name they give matches a member of staff</span>
+          </label>
         </div>
       </div>
     </section>

@@ -7,6 +7,7 @@ import { Avatar } from "../../shared/primitives";
  * EditStaffModal — admin edit of one staff record: name, email (must be unique),
  * job title, manager, department, role (staff/manager/admin), warehouse-worker flag,
  * Machinery & Equipment access (machineryAccess: manage those two pages without being an admin),
+ * Reception access (reception: the Reception page, who is on site and signing contractors out),
  * status (active / inactive / leaver — leavers cannot log in), and an optional
  * temporary password.
  * onSaveProfile(updated) → app/actions/account.js saves to users + user_profiles.
@@ -25,6 +26,7 @@ function EditStaffModal({ staffUser, allUsers, setAllUsers, onSetTempPassword, o
   const [role,              setRole]             = useState(staffUser.role);
   const [isWarehouse,       setIsWarehouse]      = useState(staffUser.isWarehouseWorker||false);
   const [machineryAccess,   setMachineryAccess]  = useState(staffUser.machineryAccess===true);
+  const [reception,         setReception]        = useState(staffUser.reception===true);
   const [department,        setDepartment]       = useState(staffUser.department||"");
   const [status,            setStatus]           = useState(staffUser.status||"active");
   // Language: starts as the one they see now (their own choice wins over an earlier admin setting)
@@ -40,7 +42,7 @@ function EditStaffModal({ staffUser, allUsers, setAllUsers, onSetTempPassword, o
     if (!email.trim() || !email.includes("@")) { setErr("Valid email is required."); return; }
     if (email !== staffUser.email && allUsers.find(u=>u.email===email.trim())) { setErr("That email is already in use."); return; }
     if (resetPw && newPw.length < minPw) { setErr(`New password must be at least ${minPw} characters.`); return; }
-    const updated = {...staffUser, name:name.trim(), email:email.trim(), jobTitle:jobTitle.trim(), manager:manager.trim(), role, isWarehouseWorker:isWarehouse, machineryAccess, department:department.trim(), status, language};
+    const updated = {...staffUser, name:name.trim(), email:email.trim(), jobTitle:jobTitle.trim(), manager:manager.trim(), role, isWarehouseWorker:isWarehouse, machineryAccess, reception, department:department.trim(), status, language};
     setAllUsers(p=>p.map(u=>u.id===staffUser.id ? updated : u));
     if (onSaveProfile) onSaveProfile(updated);
     if (resetPw && newPw && onSetTempPassword) onSetTempPassword(updated, newPw);
@@ -148,6 +150,22 @@ function EditStaffModal({ staffUser, allUsers, setAllUsers, onSetTempPassword, o
           </div>
           <div style={{flexShrink:0,marginLeft:16,width:44,height:24,borderRadius:12,background:machineryAccess?Z.accent:Z.borderMd,position:"relative",transition:"background .2s"}}>
             <div style={{position:"absolute",top:3,left:machineryAccess?22:3,width:18,height:18,borderRadius:"50%",background:"#fff",transition:"left .2s",boxShadow:"0 1px 4px rgba(0,0,0,0.3)"}}/>
+          </div>
+        </div>
+        )}
+
+        {/* Reception access toggle (admins use Contractors) */}
+        {role==="admin" ? null : (
+        <div role="switch" aria-checked={reception} aria-label="Reception access" tabIndex={0} data-testid="reception-access"
+          onClick={()=>{setReception(s=>!s);setSaved(false);}}
+          onKeyDown={e=>{ if(e.key===" "||e.key==="Enter"){ e.preventDefault(); setReception(s=>!s); setSaved(false); } }}
+          style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 16px",borderRadius:12,marginBottom:14,cursor:"pointer",userSelect:"none",background:reception?"rgba(16,185,129,0.08)":Z.overlay,border:`2px solid ${reception?"rgba(16,185,129,0.4)":Z.overlay}`,transition:"all .2s"}}>
+          <div>
+            <div style={{fontWeight:700,fontSize:13,color:Z.white,marginBottom:3}}>🛎 Reception access</div>
+            <div style={{fontSize:11,color:Z.muted,lineHeight:1.4}}>For reception staff. Adds a <b>Reception</b> page (on a computer) showing the contractors on site now, with anything to check, Sign out and the fire roll call. They get the end-of-day "still signed in" reminder. They can't change the Contractor Register.</div>
+          </div>
+          <div style={{flexShrink:0,marginLeft:16,width:44,height:24,borderRadius:12,background:reception?"#10b981":Z.borderMd,position:"relative",transition:"background .2s"}}>
+            <div style={{position:"absolute",top:3,left:reception?22:3,width:18,height:18,borderRadius:"50%",background:"#fff",transition:"left .2s",boxShadow:"0 1px 4px rgba(0,0,0,0.3)"}}/>
           </div>
         </div>
         )}

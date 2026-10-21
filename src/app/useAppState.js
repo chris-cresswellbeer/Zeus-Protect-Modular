@@ -28,7 +28,8 @@ import { usePpeIssues, usePpeSettings } from "../lib/ppeClient";
 import { useRacking } from "../lib/rackClient";
 import { useRemembered } from "../lib/remembered";
 import { parseRoute } from "../lib/router";
-import { useSiteSignins } from "../lib/siteSignins";
+import { useSiteSignins, useSigninSettings } from "../lib/siteSignins";
+import { hasReceptionAccess } from "../lib/contractorSignin";
 import { confirmLeave, unsavedLabels } from "../lib/unsaved";
 import { useWindowWidth } from "../shared/hooks";
 import { useSort } from "../shared/Sortable";
@@ -59,6 +60,10 @@ export function useAppState() {
   const [step,    setStep]    = useState(0);
   const [qans,    setQans]    = useState({});
   const [qsub,    setQsub]    = useState(false);
+  // This attempt's questions (quizEngine.js drawQuiz: [{qi, order}], null until the quiz opens — a
+  // new draw every attempt) and the rest of the attempt: { checks:{[slide]:tries}, signoff }.
+  const [qdraw,   setQdraw]   = useState(null);
+  const [qextra,  setQextra]  = useState({ checks: {}, signoff: null });
   const [hotspotComplete, setHotspotComplete] = useState({}); // { [step]: boolean } — gates "Next Slide" for hotspot activity slides
   const [playEnglish, setPlayEnglish] = useState(false);       // "Show in English" in the module player (translated modules)
   // ── Languages (lib/i18n.js, lib/moduleTranslate.js) ──
@@ -128,8 +133,9 @@ export function useAppState() {
   const [contractorInductions, setContractorInductions] = useState({});
   const [contractorCerts, setContractorCerts] = useState({});
   const [contractorVisits, setContractorVisits] = useState({}); // risk assessments
-  // contractors who signed in with the reception QR code (admins only; lib/siteSignins.js)
-  const siteSignins = useSiteSignins(!!user && user.role === "admin");
+  // contractors who signed in with the reception QR code (admins and Reception access; lib/siteSignins.js)
+  const siteSignins = useSiteSignins(hasReceptionAccess(user));
+  const signinSettings = useSigninSettings(hasReceptionAccess(user));   // end-of-day check time, required documents
   // lone working (lib/loneClient.js): settings for everyone signed in; sessions for admins and
   // line managers, for the alert bar. ?lone=ID (the link in an alert email) opens that alert.
   const loneSettings = useLoneSettings(!!user);
@@ -328,7 +334,7 @@ export function useAppState() {
     const noFile = r => { const { _fileObj, ...rest } = r || {}; return rest; };
     const noFra  = r => { const { _fileObj, fileData, ...rest } = r || {}; return rest; };
     regRef.current = {
-      equipment: createKeyed(), inspections: createKeyed(), modules: createKeyed(), machineTypes: createKeyed(),
+      equipment: createKeyed(), inspections: createKeyed(), modules: createKeyed(), machineTypes: createKeyed(), contractors: createKeyed(),
       fire: { wardens: createKeyed(noFile), drills: createKeyed(noFile), alarmTests: createKeyed(noFile),
               extinguishers: createKeyed(noFile), emergLighting: createKeyed(noFile), fraReviews: createKeyed(noFra) },
     };
@@ -354,7 +360,7 @@ export function useAppState() {
   return {
     brand, theme, setTheme, T, darkMode, setDarkMode, user, setUser, signedIn, view, setViewRaw, allUsers,
     setAllUsers, assigns, setAssigns, comps, setComps, email, setEmail, pass, setPass, err, setErr, mod,
-    setMod, step, setStep, qans, setQans, qsub, setQsub, hotspotComplete, setHotspotComplete, playEnglish,
+    setMod, step, setStep, qans, setQans, qsub, setQsub, qdraw, setQdraw, qextra, setQextra, hotspotComplete, setHotspotComplete, playEnglish,
     setPlayEnglish, moduleTrans, setModuleTrans, userLang, setUserLang, profilesTick, setProfilesTick,
     showCelebration, setShowCelebration, lightboxSrc, setLightboxSrc, lightboxZoomed, setLightboxZoomed,
     atab, setAtabRaw, dashboardLayouts, setDashboardLayouts, adminReportView, setAdminReportView,
@@ -371,7 +377,7 @@ export function useAppState() {
     setEquipment, machineComps, setMachineComps, siteInspections, setSiteInspections, customModules,
     setCustomModules, customMachineTypes, setCustomMachineTypes, ras, setRas, permits, setPermits,
     contractors, setContractors, contractorInductions, setContractorInductions, contractorCerts,
-    setContractorCerts, contractorVisits, setContractorVisits, siteSignins, loneSettings, loneWatch,
+    setContractorCerts, contractorVisits, setContractorVisits, siteSignins, signinSettings, loneSettings, loneWatch,
     loneSessions, loneFocus, setLoneFocus, ppeSettings, ppeRows, showMyPpe, ppeFocus, setPpeFocus,
     rackInspector, rackFocus, setRackFocus, racking, quizFailures, setQuizFailures, extCerts, setExtCerts,
     msdsFiles, setMsdsFiles, customChemicals, setCustomChemicals, coshhAssessments, setCoshhAssessments,

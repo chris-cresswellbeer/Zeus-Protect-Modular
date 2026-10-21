@@ -28,8 +28,9 @@ export function createNavStyles(app) {
     fontWeight:active?700:500, cursor:"pointer", fontSize:navTiny?11:navCompact?11.5:12,
     textTransform:"uppercase", letterSpacing:navTiny?0:navCompact?.2:navTight?.4:.8,
     fontFamily:font, transition:"color .2s",
-    // long labels ("Risk Assessments") go onto two lines rather than widening the bar
-    maxWidth:navCompact?96:navTight?118:"none", lineHeight:1.25, textAlign:"center",
+    // long labels ("Risk Assessments") go onto two lines rather than widening the bar; a single
+    // long word ("Contractors") is never squeezed narrower than itself (it ran into the next item)
+    maxWidth:navCompact?96:navTight?118:"none", minWidth:"min-content", lineHeight:1.25, textAlign:"center",
   });
 
   return {

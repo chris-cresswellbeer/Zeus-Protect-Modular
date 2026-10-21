@@ -255,8 +255,9 @@ export function createTrainingActions(app) {
   }
 
   // Insert-only log of failed quiz attempts (shown to admins for follow-up).
+  // Resolves false when the database didn't take it (the phone's offline queue then keeps it).
   async function dbSaveQuizFailure(record) {
-    await dbWrite(sb.from("quiz_failures").insert({ data: record }), "quiz failure record");
+    return dbWrite(sb.from("quiz_failures").insert({ data: record }), "quiz failure record");
   }
 
   async function dbSaveCustomModule(mod) {

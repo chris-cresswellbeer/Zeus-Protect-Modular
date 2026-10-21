@@ -26,7 +26,7 @@ import { FIRE_TABLES, stableJSON } from "../records";
 
 export function useSyncEffects(app) {
   const {
-    _ready, adminResponses, atab, auditNameOf, coshhAssessments, customMachineTypes, customModules, dbReady,
+    _ready, adminResponses, atab, auditNameOf, contractors, coshhAssessments, customMachineTypes, customModules, dbReady,
     dbSaveDseAdminResponse, dbSaveDseReport, dbSaveFirstAidData, dbSaveIncident, dbSaveInvestigation,
     dseReports, dseRespSavedRef, dseSavedRef, equipment, fireSafety, firstAidData, firstAidSavedRef,
     firstAidWroteRef, incidents, incidentSavedRef, inTurn, investigationBaseRef, investigations,
@@ -49,6 +49,7 @@ export function useSyncEffects(app) {
     const R = regRef.current;
     primeKeyed(R.equipment, equipment); primeKeyed(R.inspections, siteInspections);
     primeKeyed(R.modules, customModules); primeKeyed(R.machineTypes, customMachineTypes);
+    primeKeyed(R.contractors, contractors);
     Object.keys(R.fire).forEach(k => primeKeyed(R.fire[k], (fireSafety || {})[k] || []));
     firstAidSavedRef.current = stableJSON(firstAidData);
     Object.entries(adminResponses).forEach(([uid, keys]) => Object.entries(keys || {}).forEach(([key, rec]) => dseRespSavedRef.current.set(`${uid}|${key}`, stableJSON(rec))));

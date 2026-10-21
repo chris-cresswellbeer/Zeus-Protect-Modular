@@ -3,7 +3,8 @@
  *
  * WHAT IS TRANSLATED
  *   The module title, each slide's heading, text and hotspot instructions/labels/
- *   feedback, and every quiz question and answer. Pictures, videos, the order of
+ *   feedback, every quiz question and answer and its "why" line, slide knowledge checks
+ *   and the sign-off declaration. Pictures, videos, the order of
  *   the answers and which one is right are never touched, so marking is identical
  *   in every language.
  *
@@ -29,9 +30,17 @@ export function moduleTexts(mod) {
       text: (s && s.text) || "",
       hotspotInstructions: (s && s.hotspotInstructions) || "",
       hotspots: ((s && s.hotspots) || []).map(h => ({ label: (h && h.label) || "", feedback: (h && h.feedback) || "" })),
+      // a knowledge check on the slide (quizEngine.js) — only when there is one, so older
+      // modules keep exactly the same fingerprint and their translations stay up to date
+      ...(s && s.check ? { check: questionTexts(s.check) } : {}),
     })),
-    quiz: (m.quiz || []).map(q => ({ q: (q && q.q) || "", options: ((q && q.options) || []).map(o => String(o ?? "")) })),
+    quiz: (m.quiz || []).map(questionTexts),
+    ...(m.signoff && m.signoff.text ? { signoff: String(m.signoff.text) } : {}),   // the sign-off declaration
   };
+}
+// A question's text: the question, the options and (only if it has one) the "why" line.
+function questionTexts(q) {
+  return { q: (q && q.q) || "", options: ((q && q.options) || []).map(o => String(o ?? "")), ...(q && q.why ? { why: String(q.why) } : {}) };
 }
 
 // FNV-1a, 32-bit, twice with different seeds → 16 hex characters. A fingerprint, not security.
@@ -62,11 +71,18 @@ export function flattenTexts(texts) {
     add(["content", i, "text"], s.text);
     add(["content", i, "hotspotInstructions"], s.hotspotInstructions);
     s.hotspots.forEach((h, j) => { add(["content", i, "hotspots", j, "label"], h.label); add(["content", i, "hotspots", j, "feedback"], h.feedback); });
+    if (s.check) {
+      add(["content", i, "check", "q"], s.check.q);
+      s.check.options.forEach((o, j) => add(["content", i, "check", "options", j], o));
+      add(["content", i, "check", "why"], s.check.why);
+    }
   });
   texts.quiz.forEach((q, i) => {
     add(["quiz", i, "q"], q.q);
     q.options.forEach((o, j) => add(["quiz", i, "options", j], o));
+    add(["quiz", i, "why"], q.why);
   });
+  add(["signoff"], texts.signoff);
   return out;
 }
 
@@ -117,18 +133,22 @@ export function localiseModule(mod, lang, row) {
         text: pick(ts.text, s.text),
         ...(s.hotspotInstructions || ts.hotspotInstructions ? { hotspotInstructions: pick(ts.hotspotInstructions, s.hotspotInstructions) } : {}),
         ...(s.hotspots ? { hotspots: s.hotspots.map((h, j) => { const th = (ts.hotspots || [])[j] || {}; return { ...h, label: pick(th.label, h.label), feedback: pick(th.feedback, h.feedback) }; }) } : {}),
+        ...(s.check ? { check: localQuestion(s.check, ts.check || {}, pick) } : {}),
       };
     }),
-    quiz: (mod.quiz || []).map((q, i) => {
-      const tq = (d.quiz || [])[i] || {};
-      return { ...q, q: pick(tq.q, q.q), options: (q.options || []).map((o, j) => pick((tq.options || [])[j], o)) };
-    }),
+    quiz: (mod.quiz || []).map((q, i) => localQuestion(q, (d.quiz || [])[i] || {}, pick)),
+    ...(mod.signoff ? { signoff: { ...mod.signoff, text: pick(d.signoff, mod.signoff.text) } } : {}),
     _lang: lang,
     _trans: { lang, hash: row.source_hash, status: row.status === "checked" ? "checked" : "machine" },
     _en: mod,
   };
   byRow.set(row, out);
   return out;
+}
+
+// A question in the person's language (answers, pictures and marking unchanged).
+function localQuestion(q, tq, pick) {
+  return { ...q, q: pick(tq.q, q.q), options: (q.options || []).map((o, j) => pick((tq.options || [])[j], o)), ...(q.why ? { why: pick(tq.why, q.why) } : {}) };
 }
 
 /** The English module behind a (possibly) translated one. */

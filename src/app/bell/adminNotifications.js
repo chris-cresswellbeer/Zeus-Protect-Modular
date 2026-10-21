@@ -21,9 +21,11 @@ import { LONE_ALARM } from "../../lib/loneWorking";
 import { ppeState } from "../../lib/ppe";
 import { signinsToReview } from "../../lib/siteSignins";
 import { rackingNotifications } from "./rackingNotifications";
+import { contractorNotifications } from "./contractorNotifications";
+import { ukNow } from "../../lib/contractorSignin";
 
 export function adminNotifications({
-  adminResponses, allMachineTypes, allModules, assigns, comps, contractorCerts, contractors,
+  adminResponses, allMachineTypes, allModules, assigns, comps, contractorCerts, contractors, contractorVisits, permits, signinSettings,
   docAcknowledgements, docAssignments, docs, dseReports, dueDates, extCerts, fireSafety, incidents,
   lastBackup, loneSessions, machineComps, ppeRows, ppeSettings, quizFailures, racking, rackInspector,
   ras, siteInspections, siteSignins, staff
@@ -109,8 +111,8 @@ export function adminNotifications({
 
   // Contractor alerts
   const today3=todayISO();
-  const expiredConCerts=(contractors||[]).filter(c=>Object.values(contractorCerts[c.id]||{}).some(cert=>cert.expiryDate&&cert.expiryDate<today3));
-  if(expiredConCerts.length) notifications.push({type:"document",urgent:true,title:`${expiredConCerts.length} contractor${expiredConCerts.length!==1?"s":""} with expired certificates`,detail:"Check Contractors tab",nav:{tab:"contractors"}});
+  // (approval, on site, the end-of-day check, new from QR, documents, worker certificates: bell/contractorNotifications.js)
+  notifications.push(...contractorNotifications({ contractors, contractorCerts: contractorCerts||{}, contractorVisits: contractorVisits||{}, siteSignins, permits: permits||[], settings: signinSettings, today: today3, now: ukNow().time }));
   const qrReview=signinsToReview(siteSignins);
   const loneAlarms=(loneSessions||[]).filter(r=>LONE_ALARM.includes(r.status));
   { const cur=(ppeRows||[]).filter(r=>r.status==="issued").map(r=>ppeState(r,undefined,ppeSettings.dueSoonDays));
@@ -120,7 +122,7 @@ export function adminNotifications({
     if(un) notifications.push({type:"report",urgent:false,title:`${un} PPE issue${un!==1?"s":""} waiting for a signature`,detail:"They can sign in the phone app (More → My PPE), or use Get signature",nav:{tab:"ppe"}}); }
   if(loneAlarms.length) notifications.push({type:"document",urgent:true,title:`Lone working: ${loneAlarms.length} alert${loneAlarms.length!==1?"s":""} need a response`,detail:loneAlarms.map(r=>(r.data||{}).name).join(", "),nav:{tab:"lone"}});
   notifications.push(...rackingNotifications(racking, rackInspector, {tab:"equipment",preset:{tab:"racking"}}));
-  if(qrReview.length) notifications.push({type:"document",urgent:true,title:`${qrReview.length} new contractor${qrReview.length!==1?"s":""} to review`,detail:"Signed in with the reception QR code but not in the Contractor Register",nav:{tab:"contractors"}});
+  if(qrReview.length) notifications.push({type:"document",urgent:false,title:`${qrReview.length} older contractor sign-in${qrReview.length!==1?"s":""} not in the register`,detail:"Contractors → link them to the register, or dismiss",nav:{tab:"contractors"}});
 
   // Fire safety alerts — same rules as the Fire Safety screen (domains/fireSafety/fireLogic.js)
   const fsum = fireSummary({ fireSafety: fireSafety||{}, extCerts: extCerts||{}, staff, inspections: siteInspections||[], today: fireToday() });

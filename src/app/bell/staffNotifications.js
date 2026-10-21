@@ -17,10 +17,14 @@ import { sameName } from "../../lib/openActions";
 import { ppeState } from "../../lib/ppe";
 import { rackingNotifications } from "./rackingNotifications";
 
+import { contractorNotifications } from "./contractorNotifications";
+import { hasReceptionAccess } from "../../lib/contractorApproval";
+import { ukNow } from "../../lib/contractorSignin";
 export function staffNotifications({
   adminResponses, allMachineTypes, allModules, allUsers, assigns, comps, docAcknowledgements,
   docAssignments, docs, dseDraft, dseReports, dueDates, incidents, investigations, machineComps,
-  ppeRows, ppeSettings, racking, rackInspector, showMyPpe, user
+  ppeRows, ppeSettings, racking, rackInspector, showMyPpe, user,
+  contractors, contractorVisits, siteSignins, signinSettings
 }) {
   const notifications = [];
   // Quick hazard reports awaiting the full form (urgent once overdue)
@@ -72,6 +76,8 @@ export function staffNotifications({
     if (dseOpen) notifications.push({type:"dse",urgent:false,title:`${dseOpen} team DSE issue${dseOpen!==1?"s":""} to sign off`,detail:"Open My Team to review and sign off",nav:{tab:"team"}});
     if (actsToSign) notifications.push({type:"report",urgent:false,title:`${actsToSign} completed team action${actsToSign!==1?"s":""} awaiting your sign-off`,detail:"Open My Team to sign them off",nav:{tab:"team"}});
   }
+  // Reception access: contractors still signed in after the end-of-day check (bell/contractorNotifications.js)
+  if (user.role!=="admin" && hasReceptionAccess(user)) notifications.push(...contractorNotifications({ contractors: contractors||[], contractorVisits: contractorVisits||{}, siteSignins: siteSignins||[], settings: signinSettings, today: todayISO(), now: ukNow().time, reception: true }));
   if (user.role!=="admin") notifications.push(...rackingNotifications(racking, rackInspector, {tab:"mequip",preset:{tab:"racking"}}));
   if (showMyPpe) { const mine=(ppeRows||[]).filter(r=>String(r.user_id)===String(user.id)&&r.status==="issued");
     const uns=mine.filter(r=>!(r.data||{}).signature), od=mine.filter(r=>ppeState(r,undefined,ppeSettings.dueSoonDays).overdue);

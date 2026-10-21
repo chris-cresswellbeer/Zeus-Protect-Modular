@@ -2,18 +2,21 @@
  * lib/signinPoster.js — the A4 reception poster with the contractor sign-in QR code
  * (Site Settings → Contractor sign-in → Print poster). One HTML page, printed from a
  * new window like the certificates.
+ * variant "exit": the sign-OUT poster for the way out (same QR code: the phone page offers
+ * Sign out, straight away on the phone that signed in).
  */
 import { qrSvg } from "./certificate";
 import { getBrand, brandCompany, escHtml } from "./brandCore";
 import { signinUrl } from "./contractorSignin";
 
-export function signinPosterHtml({ code, site, origin, brand = getBrand() }) {
+export function signinPosterHtml({ code, site, origin, brand = getBrand(), variant = "entry" }) {
+  const exit = variant === "exit";
   const url = signinUrl(origin, code);
   const logo = brand.logos && (brand.logos.light || brand.logos.dark);
   const company = brandCompany(brand);
   const qr = qrSvg(url, { size: 430, label: "QR code: contractor sign-in" });
   return `<!doctype html><html lang="en-GB"><head><meta charset="utf-8">
-<title>Contractor sign-in poster${site ? ` — ${escHtml(site)}` : ""}</title>
+<title>Contractor ${exit ? "sign-out" : "sign-in"} poster${site ? ` — ${escHtml(site)}` : ""}</title>
 <script>
   document.addEventListener("DOMContentLoaded", function () {
     var printed = false;
@@ -27,6 +30,7 @@ export function signinPosterHtml({ code, site, origin, brand = getBrand() }) {
   html, body { margin: 0; padding: 0; background: #fff; }
   * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
   .page { width: 210mm; height: 297mm; padding: 16mm 16mm 12mm; display: flex; flex-direction: column; align-items: center; font-family: Arial, Helvetica, sans-serif; color: #0d1f5c; border-top: 10mm solid #0d1f5c; }
+  .page.exit { border-top-color: #b45309; }
   .top { width: 100%; display: flex; justify-content: space-between; align-items: center; min-height: 14mm; }
   .top img { max-height: 14mm; max-width: 70mm; object-fit: contain; }
   .co { font-weight: 800; font-size: 18pt; }
@@ -39,9 +43,17 @@ export function signinPosterHtml({ code, site, origin, brand = getBrand() }) {
   ol li { margin-bottom: 2.5mm; }
   .foot { margin-top: auto; font-size: 10pt; color: #5b6478; text-align: center; line-height: 1.5; }
 </style></head>
-<body><div class="page">
+<body><div class="page${exit ? " exit" : ""}">
   <div class="top">${logo ? `<img src="${escHtml(logo)}" alt="${escHtml(company)}">` : `<span class="co">${escHtml(company)}</span>`}<span class="site">${escHtml(site || "")}</span></div>
-  <h1>Contractors:<br>sign in here</h1>
+  ${exit ? `<h1>Leaving site?<br>Sign out here</h1>
+  <p class="sub">Contractors: scan with your phone camera and tap <b>Sign out</b>.</p>
+  <div class="qr">${qr}</div>
+  <ol>
+    <li>Scan the code with the phone you signed in on, and tap <b>Sign out now</b>.</li>
+    <li>Different phone? Tap <b>Leaving site? Sign out here</b> and enter your company and name.</li>
+    <li>We need to know you've gone in case of a fire or an emergency.</li>
+  </ol>
+  <div class="foot">No smartphone? Please sign out at reception.<br>${escHtml(url)}</div>` : `<h1>Contractors:<br>sign in here</h1>
   <p class="sub">Scan with your phone camera. No app or account needed.</p>
   <div class="qr">${qr}</div>
   <ol>
@@ -49,6 +61,6 @@ export function signinPosterHtml({ code, site, origin, brand = getBrand() }) {
     <li>If your phone says so, see reception before you start work.</li>
     <li><b>When you leave, scan again and tap Sign out.</b></li>
   </ol>
-  <div class="foot">No smartphone? Please sign in at reception.<br>${escHtml(url)}</div>
+  <div class="foot">No smartphone? Please sign in at reception.<br>${escHtml(url)}</div>`}
 </div></body></html>`;
 }

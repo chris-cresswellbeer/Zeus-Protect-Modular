@@ -14,6 +14,7 @@
  * Props: m (module, as in allModules), allModules, translations (moduleTrans map),
  *   onSave(row), onDelete(moduleId, lang), user, T, font.
  */
+import { correctOf } from "./quizEngine";
 import React from "react";
 import { LANGUAGES } from "../../lib/i18n";
 import { translateCall } from "../../lib/auth";
@@ -251,20 +252,33 @@ function CompareView({ m, row, lang, onBack, onMarkChecked, T, font, btn }) {
             {s.hotspots.map((h, j) => { const th = (ts.hotspots || [])[j] || {}; return (
               <React.Fragment key={j}><Pair T={T} lang={lang} label={`Hazard ${j + 1}`} a={h.label} b={th.label} /><Pair T={T} lang={lang} label={`Hazard ${j + 1} feedback`} a={h.feedback} b={th.feedback} /></React.Fragment>
             ); })}
+            {s.check && (() => { const tc = ts.check || {}; const right = correctOf(m.content[i].check); return (
+              <>
+                <Pair T={T} lang={lang} label="Quick check" a={s.check.q} b={tc.q} />
+                {s.check.options.map((o, j) => o.trim() && <Pair key={j} T={T} lang={lang} label={`Check answer ${"ABCDEF"[j]}${right.includes(j) ? " ✓ correct" : ""}`} a={o} b={(tc.options || [])[j]} />)}
+                <Pair T={T} lang={lang} label="Check: why" a={s.check.why} b={tc.why} />
+              </>
+            ); })()}
           </div>
         );
       })}
       {en.quiz.map((q, i) => {
         const tq = (tr.quiz || [])[i] || {};
-        const right = (m.quiz[i] || {}).answer;
+        const right = correctOf(m.quiz[i] || {});
         return (
           <div key={"q" + i} style={{ borderTop: `1px solid ${T.border}`, paddingTop: 10, marginTop: 6 }}>
             <div style={{ fontSize: 12, fontWeight: 800, color: T.gold, marginBottom: 6 }}>Question {i + 1}</div>
             <Pair T={T} lang={lang} label="Question" a={q.q} b={tq.q} />
-            {q.options.map((o, j) => <Pair key={j} T={T} lang={lang} label={`Answer ${"ABCDEF"[j]}${j === right ? " ✓ correct" : ""}`} a={o} b={(tq.options || [])[j]} />)}
+            {q.options.map((o, j) => o.trim() && <Pair key={j} T={T} lang={lang} label={`Answer ${"ABCDEF"[j]}${right.includes(j) ? " ✓ correct" : ""}`} a={o} b={(tq.options || [])[j]} />)}
+            <Pair T={T} lang={lang} label="Why" a={q.why} b={tq.why} />
           </div>
         );
       })}
+      {en.signoff && (
+        <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 10, marginTop: 6 }}>
+          <Pair T={T} lang={lang} label="Sign-off declaration" a={en.signoff} b={tr.signoff} />
+        </div>
+      )}
     </div>
   );
 }

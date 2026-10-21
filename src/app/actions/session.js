@@ -22,7 +22,7 @@ export function createSessionActions(app) {
     dbRecordLogin, email, initialRouteRef, loadAllRef, LOCKOUT_MINUTES, loginAttempts, MAX_LOGIN_ATTEMPTS,
     pass, pendingModuleRef, setAtabRaw, setBuiltInModules, setDseDraft, setEmojiMode, setErr,
     setHotspotComplete, setLastLoginMap, setLoginAttempts, setMod, setMustChangePw, setPlayEnglish, setQans,
-    setQsub, setShowCelebration, setSigningIn, setStabRaw, setStep, setTheme, setUser, setViewRaw,
+    setQdraw, setQextra, setQsub, setShowCelebration, setSigningIn, setStabRaw, setStep, setTheme, setUser, setViewRaw,
     setWelcomePending, user
   } = app;
 
@@ -121,7 +121,7 @@ export function createSessionActions(app) {
   }
 
   // Opens a module in the player and resets all per-attempt state.
-  function startMod(m) { setPlayEnglish(false); setMod(m); setStep(0); setQans({}); setQsub(false); setShowCelebration(false); setHotspotComplete({}); }
+  function startMod(m) { setPlayEnglish(false); setMod(m); setStep(0); setQans({}); setQsub(false); setQdraw(null); setQextra({ checks: {}, signoff: null }); setShowCelebration(false); setHotspotComplete({}); }
 
   return {
     login, finishLogin, logout, startMod

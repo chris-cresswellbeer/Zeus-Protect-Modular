@@ -6,7 +6,14 @@
  * (netlify/functions/zp-signin.mjs) and the admin screens (Contractors, Site Settings).
  *
  * SETTINGS  app_settings row "contractor_signin"
- *   { enabled, code, site, intro, items:[{ id, text }], updatedAt }
+ *   { enabled, code, site, intro, items:[{ id, text }], updatedAt,
+ *     onsiteCheckTime "HH:MM" ("" = off): after this, anyone still signed in is listed in the
+ *       bell and emailed to reception ("still on site: please check they've gone"),
+ *     receptionEmails [address] (up to 10) for that email, besides staff with Reception access,
+ *     alertOnArrival: email H&S (admins + extra admin emails) when an unapproved company or
+ *       a missing permit signs in;  alertHost: also email the host, if they're a member of staff,
+ *     requiredDocs [COMPANY_DOC_TYPES id]: what a company needs on file to be approved }
+ *   The phone page is only ever sent site, intro and items.
  *   code = the secret in the reception QR code (<portal>/?signin=CODE); "Change code"
  *   in Site Settings makes a new one, and old posters stop working.
  *
@@ -15,11 +22,12 @@
  *          phone, host, purpose, areas, permit:"yes"|"no"|"unsure", answers:{ id:true },
  *          items:[text], signature, warnings:[text], newCompany, newWorker,
  *          reviewed, reviewedBy, reviewedAt, signedOutBy }
- *   companyId / workerId are filled in when the names match the Contractor Register
- *   (or later, when an admin links them). Nothing in the register is changed by a sign-in.
+ *   companyId / workerId: the register entries (a company or worker not in the register is
+ *   added by the sign-in: lib/contractorApproval.js recordSignin). issues: [{ text, level, kind }]
+ *   from signinIssues at the time; the portal works them out again from the register now.
  * ═══════════════════════════════════════════════════════════════════════════
  */
-import { INDUCTION_ITEMS, CONTRACTOR_CERT_TYPES } from "../data/seedContractors.js";
+import { DEFAULT_REQUIRED_DOCS, COMPANY_DOC_TYPES } from "../data/seedContractors.js";
 
 export const SIGNIN_SETTINGS_ID = "contractor_signin";
 export const CODE_RE = /^[A-Z0-9]{8,20}$/;
@@ -37,7 +45,8 @@ export const DEFAULT_SIGNIN_ITEMS = [
 export const DEFAULT_SIGNIN_INTRO = "Welcome. Please read this and tick each line before you start work. Ask reception if anything isn't clear.";
 
 export function defaultSigninSettings() {
-  return { enabled: false, code: "", site: "", intro: DEFAULT_SIGNIN_INTRO, items: DEFAULT_SIGNIN_ITEMS.map(i => ({ ...i })) };
+  return { enabled: false, code: "", site: "", intro: DEFAULT_SIGNIN_INTRO, items: DEFAULT_SIGNIN_ITEMS.map(i => ({ ...i })),
+    onsiteCheckTime: "17:00", receptionEmails: [], alertOnArrival: true, alertHost: true, requiredDocs: [...DEFAULT_REQUIRED_DOCS] };
 }
 
 /** A clean settings object from whatever is stored. */
@@ -52,6 +61,12 @@ export function normaliseSigninSettings(d) {
     site: String(s.site || "").trim().slice(0, 80),
     intro: String(s.intro == null ? DEFAULT_SIGNIN_INTRO : s.intro).slice(0, 1200),
     items,
+    onsiteCheckTime: s.onsiteCheckTime == null ? "17:00" : /^([01]\d|2[0-3]):[0-5]\d$/.test(String(s.onsiteCheckTime)) ? String(s.onsiteCheckTime) : "",
+    receptionEmails: [...new Set((Array.isArray(s.receptionEmails) ? s.receptionEmails : String(s.receptionEmails || "").split(/[\s,;]+/))
+      .map(e => String(e || "").trim().toLowerCase()).filter(e => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) && e.length <= 120))].slice(0, 10),
+    alertOnArrival: s.alertOnArrival !== false,
+    alertHost: s.alertHost !== false,
+    requiredDocs: Array.isArray(s.requiredDocs) ? [...new Set(s.requiredDocs.filter(id => COMPANY_DOC_TYPES.some(t => t.id === id && id !== "other")))] : [...DEFAULT_REQUIRED_DOCS],
   };
 }
 
@@ -95,30 +110,8 @@ export function similarCompanies(contractors, name, max = 3) {
   }).slice(0, max);
 }
 
-/**
- * What reception should check, from the register. today = "YYYY-MM-DD".
- * inductions / certs = the stored maps keyed "<companyId>_<workerId>".
- */
-export function signinWarnings({ company, worker, inductions, certs, today }) {
-  const w = [];
-  if (!company) { w.push("New company: not in the Contractor Register"); return w; }
-  if (company.status === "banned") w.push("Company is marked Banned in the Contractor Register");
-  else if (company.status === "inactive") w.push("Company is marked Inactive in the Contractor Register");
-  if (!worker) { w.push("New worker: no site induction or certificates on record"); return w; }
-  const key = `${company.id}_${worker.id}`;
-  const ind = (inductions && inductions[key]) || {};
-  const done = INDUCTION_ITEMS.filter(i => ind[i.id] && ind[i.id].done).length;
-  if (done < INDUCTION_ITEMS.length) w.push(`Site induction not complete (${done} of ${INDUCTION_ITEMS.length})`);
-  const c = (certs && certs[key]) || {};
-  Object.keys(c).forEach(k => {
-    const e = c[k] && c[k].expiryDate;
-    if (e && e < today) {
-      const t = CONTRACTOR_CERT_TYPES.find(x => x.id === k);
-      w.push(`${t ? t.label : "Certificate"} expired ${e.split("-").reverse().join("/")}`);
-    }
-  });
-  return w;
-}
+/** Reception access (Edit Staff → users.data.reception): the Reception page, sign people out. Admins always. */
+export const hasReceptionAccess = user => !!user && (user.role === "admin" || user.reception === true) && user.status !== "leaver";
 
 /** Is this sign-in still on site? (no time out, and today) */
 export const signinOnSite = (s, today) => !!(s && s.data && s.data.date === today && !s.data.timeOut);
